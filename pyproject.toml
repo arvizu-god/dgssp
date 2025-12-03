@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dgssp"
+version = "0.1.0"
+description = "Draper+Grover-based Subset Sum Problem solver with quantum and classical backends."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+authors = [
+  { name = "Arturo Alejandro Arvizu Velázquez" }
+]
+
+keywords = [
+  "quantum-computing",
+  "subset-sum",
+  "grover",
+  "qft",
+  "qiskit",
+  "optimization",
+]
+
+classifiers = [
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Physics",
+  "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+dependencies = [
+  "qiskit>=2.0.0",
+  "qiskit-aer>=0.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov",
+  "ruff",
+  "mypy",
+]
+docs = [
+  "mkdocs",
+  "mkdocs-material",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/dg-ssp"
+Repository = "https://github.com/your-username/dg-ssp"
+Issues = "https://github.com/your-username/dg-ssp/issues"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "LICENSE"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dgssp"]
