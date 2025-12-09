@@ -1,24 +1,52 @@
-"""
-dgssp: Draper+Grover-based Subset Sum Problem solvers.
-
-This package provides:
-- SubsetSumInstance & related data structures (dgssp.problems)
-- Quantum and classical solvers for SSP (dgssp.solvers)
-- Backend-agnostic execution, transpilation, and QEM utilities
-- A high-level `solve_ssp(...)` function for typical use cases
-"""
-
 from __future__ import annotations
 
-from .problems import SubsetSumInstance, SSPSolution
-from .api import solve_ssp
+from .instance import SubsetSumInstance, SSPSolution, DPResult
+from .api import (DGRunConfig,
+    run_dgssp,
+    run_dgssp_ideal,
+    run_dgssp_noisy,
+    run_dgssp_optimized,
+    )
 
-# Package semantic version (keep in sync with pyproject.toml)
+from .solvers import (
+    BaseSSPSolver,
+    BaseQuantumSSPSolver,
+    BaseClassicalSSPSolver,
+    DGSSPSolver,
+    DGConfig,
+    DPSSPSolver,
+    DPConfig,
+)
+
+from .mitigation import (
+    ZNESamplingConfig,
+    dgssp_zne_mitigated_distribution,
+)
+
+from .backends import BackendSelectionConfig, build_all_backends
+
 __version__ = "0.1.0"
 
 __all__ = [
+    "__version__",
     "SubsetSumInstance",
     "SSPSolution",
+    "DPResult",
     "solve_ssp",
-    "__version__",
+    "BaseSSPSolver",
+    "BaseQuantumSSPSolver",
+    "BaseClassicalSSPSolver",
+    "DGSSPSolver",
+    "DGConfig",
+    "DPSSPSolver",
+    "DPConfig",
+    "ZNESamplingConfig",
+    "dgssp_zne_mitigated_distribution",
+    "DGRunConfig",
+    "run_dgssp",
+    "run_dgssp_ideal",
+    "run_dgssp_noisy",
+    "run_dgssp_optimized",
+    "BackendSelectionConfig",
+    "build_all_backends",
 ]
