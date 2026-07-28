@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ssp"
+name = "dgssp"
 version = "0.1.0"
 description = "Draper+Grover-based Subset Sum Problem solver with quantum and classical backends."
 readme = "README.md"
@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 
 authors = [
-  { name = "Arturo Alejandro Arvizu Velázquez" }
+  { name = "Arturo Alejandro Arvizu Velázquez" },
 ]
 
 keywords = [
@@ -20,6 +20,7 @@ keywords = [
   "grover",
   "qft",
   "qiskit",
+  "error-mitigation",
   "optimization",
 ]
 
@@ -38,30 +39,67 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
 
+# Every import that runs at call time is declared here or in an extra.
 dependencies = [
-  "qiskit>=2.0.0",
-  "qiskit-aer>=0.15.0",
+  "qiskit>=2.0",
+  "qiskit-aer>=0.15",
+  "qiskit-ibm-runtime>=0.30",
+  "numpy>=1.24",
+  "scipy>=1.10",
 ]
 
 [project.optional-dependencies]
+mitiq = ["mitiq>=0.40"]
+viz = ["matplotlib>=3.7"]
+data = ["pandas>=2.0"]
 dev = [
-  "pytest>=7.0",
+  "pytest>=7",
   "pytest-cov",
   "ruff",
   "mypy",
 ]
-docs = [
-  "mkdocs",
-  "mkdocs-material",
-]
+docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
+
+[project.scripts]
+dgssp-run = "dgssp.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/your-username/dg-ssp"
-Repository = "https://github.com/your-username/dg-ssp"
-Issues = "https://github.com/your-username/dg-ssp/issues"
-
-[tool.hatch.build.targets.sdist]
-include = ["src", "README.md", "LICENSE"]
+Homepage = "https://github.com/arvizu-god/dgssp"
+Repository = "https://github.com/arvizu-god/dgssp"
+Issues = "https://github.com/arvizu-god/dgssp/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dgssp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+  "E501",   # long lines are handled by the formatter, not enforced
+  "B008",   # function calls in argument defaults (dataclass field factories)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["dgssp"]
+mypy_path = "src"
+ignore_missing_imports = true
+warn_unused_ignores = false
+disallow_untyped_defs = false
