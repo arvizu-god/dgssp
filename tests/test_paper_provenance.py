@@ -94,6 +94,29 @@ def test_git_state_flags_a_dirty_tree_honestly():
     assert len(state["commit"]) == 40
 
 
+def test_git_state_records_dirty_paths_verbatim():
+    """Every recorded path must exist on disk, character for character.
+
+    Regression: ``_git`` used to ``strip()`` the whole porcelain output, which
+    removed the leading space that ``git status --porcelain`` puts in front of
+    an unstaged-only change (``" M path"``).  The fixed-width ``line[3:]`` slice
+    then chopped the first character off the *first* dirty filename -- so every
+    results file in ``paper/data`` carried a path that pointed nowhere.
+    """
+    state = _common.git_state()
+    if state["commit"] is None:
+        pytest.skip("not a git checkout")
+
+    for relative in state["dirty_files"]:
+        # Deletions and renames are reported too; a rename reads "old -> new".
+        candidate = relative.split(" -> ")[-1].strip('"')
+        assert not candidate.startswith(("/", " ")), candidate
+        assert (_common.REPO_ROOT / candidate).parent.is_dir(), (
+            f"{candidate!r} does not resolve under the repo root; the porcelain "
+            "parse in git_state() has shifted again."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Saving
 # ---------------------------------------------------------------------------

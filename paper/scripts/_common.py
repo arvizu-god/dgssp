@@ -167,7 +167,14 @@ def utc_timestamp() -> str:
 
 
 def _git(*args: str) -> str | None:
-    """Run a git command in the repo root, or return ``None`` if it fails."""
+    """
+    Run a git command in the repo root, or return ``None`` if it fails.
+
+    Only *trailing* whitespace is stripped.  ``git status --porcelain`` encodes
+    the status in the first two columns and pads unstaged-only changes with a
+    leading space (``" M path"``), so an ``lstrip`` would silently shift the
+    first line's path by one character -- which is exactly what it used to do.
+    """
     try:
         out = subprocess.run(
             ["git", *args],
@@ -179,7 +186,7 @@ def _git(*args: str) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return out.stdout.strip()
+    return out.stdout.rstrip()
 
 
 def git_state() -> dict[str, Any]:
@@ -205,8 +212,9 @@ def git_state() -> dict[str, Any]:
             "dirty_files": [],
         }
 
+    # Porcelain v1: two status columns, a space, then the path.
     status = _git("status", "--porcelain") or ""
-    dirty_files = [line[3:] for line in status.splitlines() if line.strip()]
+    dirty_files = [line[3:] for line in status.splitlines() if line[3:].strip()]
 
     return {
         "commit": commit,
