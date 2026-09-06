@@ -22,6 +22,8 @@ The legacy `ibm_quantum` channel has been retired by IBM; this module uses
 | `DEFAULT_RUN_LOG` | constant |
 | `get_service` | function |
 | `save_account` | function |
+| `describe_account` | function |
+| `print_account_summary` | function |
 | `is_simulator` | function |
 | `backend_name` | function |
 | `execution_mode` | context manager |
@@ -55,6 +57,27 @@ The opt-in counterpart. Nothing in the library calls it implicitly.
 
 - **Inputs:** `token: str`; `instance: str | None` (CRN); `name: str | None`; `set_as_default: bool`; `overwrite: bool`.
 - **Output:** `None`. Credentials are persisted to the local qiskit configuration.
+
+---
+
+### `describe_account(service) -> dict`
+
+- **Inputs:** `service: QiskitRuntimeService`.
+- **Output:** `{"channel", "active_account", "active_instance", "instances", "usage", "backends"}`. Each `backends` row is `{"name", "num_qubits", "processor_type", "simulator", "operational", "pending_jobs", "calibration_date"}`.
+- Every field is probed defensively: anything the installed `qiskit-ibm-runtime` or the active plan does not expose comes back as `{"error": ...}` rather than raising, and one unreachable device does not hide the rest of the fleet.
+- The API token is stripped from `active_account`, so the payload is safe to save under `paper/hardware/`.
+- `usage()` reports the *active instance* only, and its payload shape is set by the Platform API, not by Qiskit — inspect it, do not assume a schema. Per-job QPU seconds come from `job.usage()` / `job.metrics()` instead.
+
+---
+
+### `print_account_summary(service) -> dict`
+
+Prints `describe_account` as readable text and returns the same payload. Run it
+once to fill `paper/hardware/account_facts.md`:
+
+```
+python paper/scripts/describe_account.py --json paper/hardware/account_snapshot.json
+```
 
 ---
 

@@ -50,9 +50,14 @@ from .backends import (
     BackendSelectionConfig,
     build_all_backends,
     build_ideal_aer_backend,
+    calibration_timestamp,
     compute_accumulated_errors,
     evaluate_backends_for_circuit,
+    is_heavy_hex,
+    list_fake_backends,
+    processor_family,
     select_best_backends,
+    smallest_heavy_hex_fake_backend,
 )
 from .decoding import (
     bit_is_solution,
@@ -89,9 +94,11 @@ from .mitigation import (
     zne_mitigated_distribution,
 )
 from .runtime import (
+    describe_account,
     execution_mode,
     fetch_result,
     get_service,
+    print_account_summary,
     read_job_log,
     sample_counts,
     save_account,
@@ -106,7 +113,7 @@ from .solvers import (
     DPSSPSolver,
     optimal_iterations,
 )
-from .transpilation import BestSeedResult, find_best_seed
+from .transpilation import BestSeedResult, find_best_seed, transpiled_metrics
 
 __all__ = [
     "__version__",
@@ -138,6 +145,8 @@ __all__ = [
     # runtime
     "get_service",
     "save_account",
+    "describe_account",
+    "print_account_summary",
     "execution_mode",
     "sample_counts",
     "fetch_result",
@@ -151,8 +160,14 @@ __all__ = [
     "compute_accumulated_errors",
     "evaluate_backends_for_circuit",
     "select_best_backends",
+    "processor_family",
+    "is_heavy_hex",
+    "calibration_timestamp",
+    "list_fake_backends",
+    "smallest_heavy_hex_fake_backend",
     "find_best_seed",
     "BestSeedResult",
+    "transpiled_metrics",
     # mitigation
     "ZNESamplingConfig",
     "fold_transpiled",

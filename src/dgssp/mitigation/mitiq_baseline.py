@@ -32,7 +32,7 @@ It is imported lazily inside the functions that need it.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any
+from typing import Any, TypeAlias
 
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2
@@ -40,7 +40,7 @@ from qiskit.providers import BackendV2
 from ..runtime import is_simulator, sample_counts
 from .zne import rebase_to_backend
 
-BackendLike = BackendV2
+BackendLike: TypeAlias = BackendV2
 
 _MITIQ_HINT = (
     "Mitiq is required for the ZNE comparison baseline. "

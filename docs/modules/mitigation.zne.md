@@ -76,6 +76,28 @@ Fits one scalar against noise scale and extrapolates it to zero.
 - **Raises:** `ValueError` for an unknown model, or when there are fewer data points than the model has parameters.
 - **Fallback:** if `curve_fit` fails to converge, the least-noisy observation is returned rather than aborting the run, so one pathological bitstring cannot kill a whole batch.
 
+**How each model is solved.** `linear` and `quadratic` are linear in their
+parameters, so they are solved in closed form by least squares
+(`np.linalg.lstsq` on a Vandermonde design). That is exact, deterministic, free
+of any initial-guess sensitivity, and about ten times faster — which matters
+because this runs once *per bitstring*, on probabilities spanning several orders
+of magnitude. Only `exponential` is genuinely nonlinear and still uses
+`scipy.optimize.curve_fit`. `popt` keeps the same ordering in both paths, so
+callers see no difference.
+
+**Degrees of freedom.** With as many noise scales as the model has parameters
+(two scales and `linear`, three and `quadratic`/`exponential`) the fit is
+*exactly determined*. The extrapolation is still a valid Richardson estimator —
+two scales and `linear` gives exactly `(3*y1 - y3)/2` — but there is no residual
+to test the model against, so the data say nothing about whether the model is
+right. Use **at least three scales** for any claim about the extrapolation
+itself; two is a smoke-test setting only.
+
+In that exactly determined case `curve_fit` cannot estimate a parameter
+covariance and emits `OptimizeWarning`. Since the covariance is discarded
+anyway, the warning is suppressed for that case *only* — a genuine fit failure
+at three or more scales still surfaces.
+
 ---
 
 ### `ZNESamplingConfig` — dataclass

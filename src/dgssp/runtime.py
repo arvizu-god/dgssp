@@ -130,6 +130,153 @@ def save_account(
     )
 
 
+def describe_account(service: Any) -> dict[str, Any]:
+    """
+    Summarise what an IBM Quantum account can actually reach.
+
+    Written to answer, in one call, the questions that determine what a paper's
+    hardware plan can contain: which plan is active, which instances the
+    account owns, which devices those instances expose (and how wide / which
+    processor family they are), and how much QPU time has been used.
+
+    Every field is optional: the helper probes the API defensively and reports
+    ``{"error": ...}`` for anything the installed ``qiskit-ibm-runtime`` or the
+    active plan does not expose, rather than raising.
+
+    Parameters
+    ----------
+    service:
+        A ``QiskitRuntimeService`` (see :func:`get_service`).
+
+    Returns
+    -------
+    dict
+        ``{"channel", "active_account", "active_instance", "instances",
+        "usage", "backends"}``.  ``backends`` is a list of
+        ``{"name", "num_qubits", "processor_type", "simulator", "operational",
+        "pending_jobs", "calibration_date"}`` dictionaries.
+
+    Notes
+    -----
+    ``usage()`` reports usage for the *active instance* only, and its payload
+    shape is defined by the IBM Quantum Platform API rather than by Qiskit, so
+    treat its keys as data to be inspected, not as a stable schema.  Per-job
+    QPU seconds come from ``job.usage()`` / ``job.metrics()`` instead; see
+    https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time
+    """
+
+    def _probe(label: str, fn: Any) -> Any:
+        try:
+            return fn()
+        except Exception as exc:  # pragma: no cover - network / plan dependent
+            logger.debug("describe_account: %s unavailable (%s)", label, exc)
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
+    account = _probe("active_account", lambda: service.active_account())
+    if isinstance(account, dict):
+        # Never let a token reach a results file or a printed summary.
+        account = {k: v for k, v in account.items() if k not in ("token", "proxies")}
+
+    summary: dict[str, Any] = {
+        "channel": getattr(service, "channel", None),
+        "active_account": account,
+        "active_instance": _probe(
+            "active_instance", lambda: getattr(service, "active_instance", None)
+        ),
+        "instances": _probe("instances", lambda: list(service.instances())),
+        "usage": _probe("usage", lambda: service.usage()),
+    }
+
+    backends = _probe("backends", lambda: list(service.backends()))
+    if isinstance(backends, list):
+        rows = []
+        for backend in backends:
+            status = None
+            try:
+                status = backend.status()
+            except Exception:  # pragma: no cover - transient provider errors
+                pass
+            rows.append(
+                {
+                    "name": backend_name(backend),
+                    "num_qubits": getattr(backend, "num_qubits", None),
+                    "processor_type": getattr(backend, "processor_type", None),
+                    "simulator": is_simulator(backend),
+                    "operational": getattr(status, "operational", None),
+                    "pending_jobs": getattr(status, "pending_jobs", None),
+                    "calibration_date": _calibration_date(backend),
+                }
+            )
+        summary["backends"] = rows
+    else:
+        summary["backends"] = backends
+
+    return summary
+
+
+def _calibration_date(backend: Any) -> str | None:
+    """Calibration timestamp of a backend, or ``None`` (see dgssp.backends)."""
+    props_fn = getattr(backend, "properties", None)
+    if not callable(props_fn):
+        return None
+    try:
+        stamp = getattr(props_fn(), "last_update_date", None)
+    except Exception:  # pragma: no cover - network errors
+        return None
+    if stamp is None:
+        return None
+    iso = getattr(stamp, "isoformat", None)
+    return iso() if callable(iso) else str(stamp)
+
+
+def print_account_summary(service: Any) -> dict[str, Any]:
+    """
+    Print :func:`describe_account` as readable text and return the raw dict.
+
+    Intended to be run once from a terminal to fill in
+    ``paper/hardware/account_facts.md``.
+
+    Parameters
+    ----------
+    service:
+        A ``QiskitRuntimeService``.
+
+    Returns
+    -------
+    dict
+        The same payload :func:`describe_account` returns.
+    """
+    info = describe_account(service)
+
+    print(f"channel         : {info['channel']}")
+    print(f"active instance : {info['active_instance']}")
+    print(f"account         : {info['active_account']}")
+    print(f"instances       : {info['instances']}")
+    print(f"usage           : {info['usage']}")
+
+    rows = info.get("backends")
+    if isinstance(rows, list):
+        print(f"\nbackends ({len(rows)}):")
+        for row in rows:
+            family = row.get("processor_type") or {}
+            family_str = (
+                f"{family.get('family')} r{family.get('revision')}"
+                if isinstance(family, dict) and family
+                else "-"
+            )
+            print(
+                f"  {row['name']:<24} {str(row['num_qubits']):>4}q  "
+                f"{family_str:<14} sim={row['simulator']!s:<5} "
+                f"operational={row['operational']!s:<5} "
+                f"pending={row['pending_jobs']} "
+                f"calibrated={row['calibration_date']}"
+            )
+    else:
+        print(f"\nbackends: {rows}")
+
+    return info
+
+
 # ---------------------------------------------------------------------------
 # Backend introspection
 # ---------------------------------------------------------------------------
@@ -390,6 +537,8 @@ def read_job_log(run_log: str = DEFAULT_RUN_LOG) -> list[dict[str, Any]]:
 __all__ = [
     "get_service",
     "save_account",
+    "describe_account",
+    "print_account_summary",
     "is_simulator",
     "backend_name",
     "execution_mode",

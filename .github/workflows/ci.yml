@@ -25,14 +25,15 @@ jobs:
       - name: Install package and dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,data]"
+          pip install -e ".[dev,data,viz]"
 
       - name: Lint
-        run: ruff check src tests
+        run: ruff check src tests paper/scripts
 
       - name: Type check
-        run: mypy src/dgssp
-        continue-on-error: true
+        # No longer advisory: the paper's results files are only as trustworthy
+        # as the code that writes them, so a type error is a build failure.
+        run: mypy src/dgssp paper/scripts
 
       - name: Test
         # Hardware tests are skipped automatically: no IBM credentials are

@@ -84,7 +84,9 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-src = ["src", "tests"]
+# paper/scripts is on the path when a script there runs, so `_common` and
+# `plotting` are first-party imports, not third-party ones.
+src = ["src", "tests", "paper/scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
@@ -99,7 +101,9 @@ ignore = [
 [tool.mypy]
 python_version = "3.10"
 packages = ["dgssp"]
-mypy_path = "src"
+# paper/scripts is on sys.path when a script there runs, so `_common` and
+# `plotting` resolve as top-level modules for mypy too.
+mypy_path = "src, paper/scripts"
 ignore_missing_imports = true
 warn_unused_ignores = false
 disallow_untyped_defs = false

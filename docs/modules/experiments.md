@@ -69,7 +69,14 @@ Everything measured for one instance.
 - `mitigated_distribution: dict[str, float] | None`, `mitigated_solution_probability: float | None` — the library's ZNE result.
 - `mitiq_solution_probability: float | None` — the Mitiq baseline.
 - `error_metrics: BackendErrorMetrics | None`, `backend_name: str | None`.
-- `depth: int | None`, `two_qubit_depth: int | None` — circuit depth overall and counting only two-qubit gates.
+- `depth: int | None`, `two_qubit_depth: int | None` — circuit depth overall and counting only two-qubit gates (barriers excluded).
+- `two_qubit_count: int | None` — two-qubit gate applications in the executed circuit; the resource number the scaling analysis is built on.
+- `physical_qubits: list[int] | None` — physical qubits the circuit landed on, in virtual-qubit order.
+- `counts_per_scale: dict[int, dict[str, int]] | None` — raw counts keyed by ZNE noise scale, when mitigation ran. Archived because they cannot be reconstructed from the mitigated distribution, and resampling them is what bootstrap CIs need.
+
+`InstanceResult.transpiled_summary()` returns the four size metrics in the same shape as `dgssp.transpilation.transpiled_metrics`.
+
+The `"optimized"` executor reuses the scale-1 counts as the unmitigated measurement when 1 is among the ZNE scales (folding at scale 1 is the identity), so an instance costs one job rather than two.
 - `elapsed_s: float | None` — wall-clock seconds.
 
 **Methods**

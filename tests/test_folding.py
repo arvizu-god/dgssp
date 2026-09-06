@@ -8,6 +8,9 @@ equals G.
 
 from __future__ import annotations
 
+import warnings
+
+import numpy as np
 import pytest
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
@@ -92,6 +95,64 @@ def test_linear_extrapolation_recovers_the_intercept():
     """A perfectly linear series extrapolates back to its intercept."""
     zero, _, _, _ = zne_fit_single_value("linear", [1, 3, 5], [0.8, 0.6, 0.4])
     assert zero == pytest.approx(0.9, abs=1e-6)
+
+
+def test_quadratic_extrapolation_recovers_the_intercept():
+    """A perfectly quadratic series extrapolates back to its intercept."""
+    scales = [1, 3, 5, 7]
+    values = [2.0 * s**2 - 3.0 * s + 0.5 for s in scales]
+    zero, _, _, _ = zne_fit_single_value("quadratic", scales, values)
+    assert zero == pytest.approx(0.5, abs=1e-6)
+
+
+def test_two_scale_linear_fit_is_exact_richardson():
+    """
+    With two scales the linear fit is the closed-form 2-point Richardson
+    estimator ``(3*y1 - y3)/2``, not an approximation of it.
+    """
+    zero, _, _, _ = zne_fit_single_value("linear", [1, 3], [0.20, 0.14])
+    assert zero == pytest.approx((3 * 0.20 - 0.14) / 2, abs=1e-12)
+
+
+def test_exactly_determined_fits_emit_no_warning():
+    """
+    A fit with as many scales as parameters has no residual degrees of freedom,
+    so ``curve_fit`` cannot estimate a covariance and warns about it. That
+    covariance is never used, so the warning was pure noise on every ZNE run.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        zne_fit_single_value("linear", [1, 3], [0.20, 0.14])
+        zne_fit_single_value("quadratic", [1, 3, 5], [0.20, 0.15, 0.10])
+        zne_fit_single_value("exponential", [1, 3, 5], [0.20, 0.15, 0.13])
+
+
+def test_polynomial_fits_match_nonlinear_least_squares():
+    """
+    The closed-form solution for the models that are linear in their parameters
+    agrees with the nonlinear optimiser it replaced, so no recorded number
+    moves because of the change.
+    """
+    from scipy.optimize import curve_fit
+
+    from dgssp.mitigation.zne import _linear_model, _quadratic_model
+
+    rng = np.random.default_rng(20260906)
+    for _ in range(50):
+        values = rng.random(5) * 0.5
+        scales = np.array([1.0, 3.0, 5.0, 7.0, 9.0])
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            linear_popt, _ = curve_fit(_linear_model, scales, values)
+            quadratic_popt, _ = curve_fit(_quadratic_model, scales, values)
+
+        assert zne_fit_single_value("linear", scales, values)[0] == pytest.approx(
+            float(_linear_model(0.0, *linear_popt)), abs=1e-7
+        )
+        assert zne_fit_single_value("quadratic", scales, values)[0] == pytest.approx(
+            float(_quadratic_model(0.0, *quadratic_popt)), abs=1e-7
+        )
 
 
 def test_unknown_fit_method_rejected():

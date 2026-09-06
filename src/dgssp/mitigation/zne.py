@@ -29,21 +29,23 @@ All scales are submitted as a single batched job via
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import TypeAlias
 
 import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
-from scipy.optimize import curve_fit
+from scipy.optimize import OptimizeWarning, curve_fit
 
 from ..instance import SubsetSumInstance
 from ..runtime import is_simulator, sample_counts
 from ..solvers import DGConfig, DGSSPSolver
 from ..transpilation import find_best_seed
 
-BackendLike = BackendV2
+BackendLike: TypeAlias = BackendV2
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +186,43 @@ _MODELS: dict[str, tuple[Callable[..., float], tuple | None]] = {
     "exponential": (_exponential_model, (1.0, 0.1, 0.0)),
 }
 
+#: Number of free parameters per model.
+_N_PARAMS: dict[str, int] = {"linear": 2, "quadratic": 3, "exponential": 3}
+
+#: Polynomial degree for the models that are *linear in their parameters* and
+#: therefore have a closed-form least-squares solution.
+_POLYNOMIAL_DEGREE: dict[str, int] = {"linear": 1, "quadratic": 2}
+
+
+def _fit_polynomial(degree: int, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """
+    Ordinary least squares for a model that is linear in its parameters.
+
+    ``np.vander(x, degree + 1)`` produces the columns ``[x**degree, ..., x, 1]``,
+    so the returned coefficients are in the same order as the corresponding
+    model function's arguments and ``popt`` keeps its meaning for callers.
+
+    Parameters
+    ----------
+    degree:
+        1 for the linear model, 2 for the quadratic one.
+    x, y:
+        Noise scales and observed values.
+
+    Returns
+    -------
+    numpy.ndarray
+        The fitted coefficients, highest power first.
+    """
+    design = np.vander(x, degree + 1)
+    coefficients, *_ = np.linalg.lstsq(design, y, rcond=None)
+    return np.asarray(coefficients, dtype=float)
+
 
 def zne_fit_single_value(
-    method: str, xdata: Sequence[float], ydata: Sequence[float]
+    method: str,
+    xdata: Sequence[float] | np.ndarray,
+    ydata: Sequence[float] | np.ndarray,
 ) -> tuple[float, np.ndarray, np.ndarray, Callable[..., float]]:
     """
     Fit one scalar against noise scale and extrapolate it to zero noise.
@@ -212,6 +248,22 @@ def zne_fit_single_value(
     ValueError
         If ``method`` is not a known model, or there are fewer data points
         than the model has parameters.
+
+    Notes
+    -----
+    The linear and quadratic models are linear in their parameters, so they are
+    solved in closed form by least squares rather than by a nonlinear
+    optimiser.  That is exact, deterministic and independent of an initial
+    guess -- which matters because this runs once *per bitstring*, on
+    probabilities spanning several orders of magnitude, for every instance.
+    Only the exponential model is genuinely nonlinear and still uses
+    ``curve_fit``.
+
+    With as many noise scales as the model has parameters the fit is exactly
+    determined: the extrapolation is a valid Richardson estimator, but it has
+    zero residual degrees of freedom, so the data say nothing about whether the
+    model is right.  Use at least three scales for any claim about the
+    extrapolation itself.
     """
     if method not in _MODELS:
         raise ValueError(
@@ -222,18 +274,33 @@ def zne_fit_single_value(
     x = np.asarray(xdata, dtype=float)
     y = np.asarray(ydata, dtype=float)
 
-    n_params = {"linear": 2, "quadratic": 3, "exponential": 3}[method]
+    n_params = _N_PARAMS[method]
     if x.size < n_params:
         raise ValueError(
             f"Method '{method}' needs at least {n_params} noise scales, got {x.size}."
         )
 
-    try:
-        popt, _ = curve_fit(model, x, y, p0=p0, maxfev=5000)
-    except RuntimeError:
-        # Fit did not converge; fall back to the least-noisy observation so a
-        # single pathological bitstring cannot abort a whole run.
-        popt = None
+    degree = _POLYNOMIAL_DEGREE.get(method)
+    if degree is not None:
+        popt: np.ndarray | None = _fit_polynomial(degree, x, y)
+    else:
+        with warnings.catch_warnings():
+            if x.size == n_params:
+                # curve_fit always computes a parameter covariance, and warns
+                # when it cannot.  With as many points as parameters it never
+                # can -- there are no residual degrees of freedom.  We discard
+                # the covariance anyway, so the warning reports on a quantity
+                # that was never requested.  Suppressed *only* in that exactly
+                # determined case, so a genuine fit failure at three or more
+                # scales still surfaces.
+                warnings.simplefilter("ignore", OptimizeWarning)
+            try:
+                popt, _ = curve_fit(model, x, y, p0=p0, maxfev=5000)
+            except RuntimeError:
+                # Fit did not converge; fall back to the least-noisy
+                # observation so a single pathological bitstring cannot abort a
+                # whole run.
+                popt = None
 
     if popt is None:
         return float(y[int(np.argmin(x))]), y, np.array([]), model

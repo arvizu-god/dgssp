@@ -25,6 +25,10 @@ wrapper.
 | `BackendLike` | type alias |
 | `TwoQubitErrorReport` | dataclass |
 | `two_qubit_gate_errors_per_circuit_layout` | function |
+| `two_qubit_count` | function |
+| `two_qubit_depth` | function |
+| `physical_qubits` | function |
+| `transpiled_metrics` | function |
 | `BestSeedResult` | dataclass |
 | `find_best_seed` | function |
 
@@ -55,6 +59,18 @@ Per-pair two-qubit error breakdown for one transpiled circuit.
 
 - **Inputs:** `circuit: QuantumCircuit` (already transpiled for the backend); `backend: BackendV2`.
 - **Output:** a `TwoQubitErrorReport`. If the backend has no target, an all-zero report is returned so seed sweeps degrade to "any layout" rather than crashing.
+
+---
+
+### Transpiled-circuit size metrics
+
+The four numbers the resource-scaling analysis reports, defined once here so a
+table and a plot cannot disagree.
+
+- `two_qubit_count(circuit) -> int` — two-qubit **gate** applications, excluding barriers and delays.
+- `two_qubit_depth(circuit) -> int` — depth counting only those gates. Barriers are excluded for the same reason: the preset pass managers insert several, and counting them inflates the depth of every transpiled circuit.
+- `physical_qubits(circuit) -> list[int] | None` — physical indices in virtual-qubit order, from the circuit's `TranspileLayout`; `None` for a circuit with no layout.
+- `transpiled_metrics(circuit) -> dict` — `{"two_q_count", "depth", "two_q_depth", "physical_qubits"}`. `dgssp.experiments` fills every `InstanceResult` from this, and `InstanceResult.transpiled_summary()` returns it back in the same shape.
 
 ---
 

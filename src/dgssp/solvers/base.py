@@ -56,10 +56,19 @@ class BaseQuantumSSPSolver(BaseSSPSolver, ABC):
 
     @abstractmethod
     def build_circuit(
-        self, instance: SubsetSumInstance, **kwargs: Any
+        self, instance: SubsetSumInstance, *, num_solutions: int | None = None
     ) -> QuantumCircuit:
         """
         Build the quantum circuit encoding the search for a given SSP instance.
+
+        Parameters
+        ----------
+        instance:
+            The Subset Sum instance to encode.
+        num_solutions:
+            ``M``, the number of correct outcomes, when the implementation
+            needs it to choose an iteration count.  ``None`` means "assume
+            one" or "the configuration already fixes the iterations".
 
         Returns
         -------

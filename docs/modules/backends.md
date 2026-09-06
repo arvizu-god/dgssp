@@ -30,6 +30,14 @@ service handed to it.
 | `build_ideal_aer_backend` | function |
 | `build_fake_backends_from_real` | function |
 | `build_all_backends` | function |
+| `HEAVY_HEX_FAMILIES` | constant |
+| `HEAVY_HEX_MIN_QUBITS` | constant |
+| `processor_family` | function |
+| `coupling_degrees` | function |
+| `is_heavy_hex` | function |
+| `calibration_timestamp` | function |
+| `list_fake_backends` | function |
+| `smallest_heavy_hex_fake_backend` | function |
 | `BackendErrorMetrics` | dataclass |
 | `compute_accumulated_errors` | function |
 | `BackendPerformance` | dataclass |
@@ -84,6 +92,24 @@ moved to `dgssp.runtime`.
 
 - **Inputs:** `config: BackendSelectionConfig`; `service` (an existing `QiskitRuntimeService`, or `None`).
 - **Output:** `{"service", "ideal", "real_backends", "fake_backends"}`. `real_backends` is empty unless `config.real` is `True`. When `service is None`, **no remote lookup is attempted** and only the ideal simulator is returned — which keeps the function usable and offline in tests and CI.
+
+---
+
+### Topology and calibration introspection
+
+The paper targets heavy-hex devices specifically, so "is this heavy-hex?" needs
+one definition rather than a per-script guess, and no device name is ever
+hard-coded — the set of bundled fake devices changes between
+`qiskit-ibm-runtime` releases.
+
+- `HEAVY_HEX_FAMILIES: frozenset[str]` — the IBM processor families on the heavy-hex lattice: Falcon, Hummingbird, Eagle, Egret, Heron, Condor.
+- `HEAVY_HEX_MIN_QUBITS: int` — 27, the narrowest device IBM shipped on that lattice.
+- `processor_family(backend) -> str | None` — lower-cased `processor_type["family"]`, or `None` for backends (Aer simulators) that advertise none.
+- `coupling_degrees(backend) -> dict[int, int]` — undirected degree per qubit; empty for an all-to-all simulator.
+- `is_heavy_hex(backend) -> bool` — true when the device is at least `HEAVY_HEX_MIN_QUBITS` wide, has maximum coupling degree three with at least one degree-three qubit, and (if it advertises a family at all) that family is in `HEAVY_HEX_FAMILIES`. The width bound is what stops a 7-qubit Falcon fragment from passing on its family label alone.
+- `calibration_timestamp(backend) -> str | None` — ISO timestamp of `properties().last_update_date`. Pass the *source* device, not the `AerSimulator` derived from it: the simulator carries the noise model but not the date.
+- `list_fake_backends(*, min_qubits=None, max_qubits=None, heavy_hex_only=False) -> list[BackendV2]` — the bundled fake devices matching the filters, sorted by `(num_qubits, name)` so the result is deterministic across machines.
+- `smallest_heavy_hex_fake_backend(*, min_qubits=None) -> BackendV2` — the narrowest match; raises `RuntimeError` rather than returning a device that is too small.
 
 ---
 

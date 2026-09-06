@@ -22,12 +22,13 @@ the private ``Qubit._index`` attribute are no longer used.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeAlias
 
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
-BackendLike = BackendV2
+BackendLike: TypeAlias = BackendV2
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +129,109 @@ def two_qubit_gate_errors_per_circuit_layout(
         accumulated_per_pair=accumulated_per_pair,
         missing_calibration=missing,
     )
+
+
+# ---------------------------------------------------------------------------
+# Transpiled-circuit size metrics
+# ---------------------------------------------------------------------------
+
+
+def two_qubit_count(circuit: QuantumCircuit) -> int:
+    """
+    Number of two-qubit gate applications, excluding barriers and delays.
+
+    Parameters
+    ----------
+    circuit:
+        Any circuit; usually an ISA-level one.
+
+    Returns
+    -------
+    int
+        The two-qubit operation count.
+    """
+    return sum(
+        1
+        for instruction in circuit.data
+        if instruction.operation.num_qubits == 2
+        and instruction.operation.name not in ("barrier", "delay")
+    )
+
+
+def two_qubit_depth(circuit: QuantumCircuit) -> int:
+    """
+    Circuit depth counting only two-qubit *gates*.
+
+    Barriers and delays are excluded.  A barrier spanning two qubits is a
+    two-qubit instruction but not a two-qubit gate, and the preset pass
+    managers insert several of them, so counting them inflates the reported
+    depth of every transpiled circuit.
+
+    Parameters
+    ----------
+    circuit:
+        Any circuit; usually an ISA-level one.
+
+    Returns
+    -------
+    int
+        The two-qubit depth.
+    """
+    return circuit.depth(
+        lambda instr: instr.operation.num_qubits == 2
+        and instr.operation.name not in ("barrier", "delay")
+    )
+
+
+def physical_qubits(circuit: QuantumCircuit) -> list[int] | None:
+    """
+    The physical qubits a transpiled circuit's virtual qubits landed on.
+
+    Parameters
+    ----------
+    circuit:
+        A circuit carrying a ``TranspileLayout`` (i.e. one that has been
+        transpiled for a backend).
+
+    Returns
+    -------
+    list[int] | None
+        Physical indices in virtual-qubit order, or ``None`` for a circuit
+        with no layout (an untranspiled or all-to-all-simulator circuit).
+    """
+    layout = getattr(circuit, "layout", None)
+    if layout is None:
+        return None
+    try:
+        return [int(q) for q in layout.final_index_layout()]
+    except Exception:  # pragma: no cover - layouts without routing information
+        return None
+
+
+def transpiled_metrics(circuit: QuantumCircuit) -> dict[str, object]:
+    """
+    The size metrics recorded for every executed circuit in the paper.
+
+    This is the single definition of those four numbers; result records and
+    the resource-scaling figures both read them from here so that a table and
+    a plot can never disagree.
+
+    Parameters
+    ----------
+    circuit:
+        The circuit that was actually submitted (ISA level).
+
+    Returns
+    -------
+    dict
+        ``{"two_q_count", "depth", "two_q_depth", "physical_qubits"}``.
+    """
+    return {
+        "two_q_count": two_qubit_count(circuit),
+        "depth": circuit.depth(),
+        "two_q_depth": two_qubit_depth(circuit),
+        "physical_qubits": physical_qubits(circuit),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -245,5 +349,9 @@ __all__ = [
     "TwoQubitErrorReport",
     "BestSeedResult",
     "two_qubit_gate_errors_per_circuit_layout",
+    "two_qubit_count",
+    "two_qubit_depth",
+    "physical_qubits",
+    "transpiled_metrics",
     "find_best_seed",
 ]

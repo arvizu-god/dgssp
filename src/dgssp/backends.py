@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeAlias
 
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2
@@ -43,7 +43,7 @@ from .solvers.base import BaseClassicalSSPSolver
 from .solvers.classical import DPConfig, DPSSPSolver
 
 #: Alias used throughout the library for "a modern Qiskit backend".
-BackendLike = BackendV2
+BackendLike: TypeAlias = BackendV2
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +234,237 @@ def build_all_backends(
         "real_backends": list(reals) if config.real else [],
         "fake_backends": fakes,
     }
+
+
+# ---------------------------------------------------------------------------
+# Topology / calibration introspection
+# ---------------------------------------------------------------------------
+
+#: IBM processor families laid out on the heavy-hexagonal lattice.  The older
+#: Canary / Penguin families (<= 20 qubits) are *not* heavy-hex even though
+#: they also cap out at degree three, which is why family metadata is preferred
+#: over the topology heuristic in :func:`is_heavy_hex`.
+HEAVY_HEX_FAMILIES = frozenset(
+    {"falcon", "hummingbird", "eagle", "egret", "heron", "condor"}
+)
+
+#: Smallest device width at which IBM shipped heavy-hex hardware (Falcon r4).
+#: Used as the cut-off for the topology fallback in :func:`is_heavy_hex`.
+HEAVY_HEX_MIN_QUBITS = 27
+
+
+def processor_family(backend: BackendLike) -> str | None:
+    """
+    Read a backend's processor family, if it advertises one.
+
+    Parameters
+    ----------
+    backend:
+        A Qiskit backend.  Real ``IBMBackend`` objects and the bundled fake
+        devices expose ``processor_type = {"family": ..., "revision": ...}``;
+        Aer simulators do not.
+
+    Returns
+    -------
+    str | None
+        The lower-cased family name (``"eagle"``, ``"heron"``, ...), or
+        ``None`` when the backend advertises no family.
+    """
+    try:
+        info = getattr(backend, "processor_type", None)
+    except Exception:  # pragma: no cover - defensive against provider errors
+        return None
+    if not isinstance(info, dict):
+        return None
+    family = info.get("family")
+    return str(family).lower() if family else None
+
+
+def coupling_degrees(backend: BackendLike) -> dict[int, int]:
+    """
+    Undirected degree of every qubit in a backend's coupling map.
+
+    Parameters
+    ----------
+    backend:
+        A Qiskit backend.
+
+    Returns
+    -------
+    dict[int, int]
+        Qubit index -> number of distinct neighbours.  Empty when the backend
+        exposes no coupling map (e.g. an all-to-all simulator).
+    """
+    cmap = getattr(backend, "coupling_map", None)
+    if cmap is None:
+        return {}
+    try:
+        edges = {tuple(sorted(edge)) for edge in cmap.get_edges()}
+    except Exception:  # pragma: no cover - defensive
+        return {}
+
+    degrees: dict[int, int] = {}
+    for a, b in edges:
+        degrees[a] = degrees.get(a, 0) + 1
+        degrees[b] = degrees.get(b, 0) + 1
+    return degrees
+
+
+def is_heavy_hex(backend: BackendLike) -> bool:
+    """
+    Whether a backend sits on IBM's heavy-hexagonal lattice.
+
+    Three conditions must all hold:
+
+    1. at least :data:`HEAVY_HEX_MIN_QUBITS` qubits -- the small Falcon and
+       Canary devices are sub-lattice fragments, not a heavy-hex lattice, and
+       the ``Falcon`` family label alone does not distinguish a 7-qubit "H"
+       from a 27-qubit heavy-hex unit cell;
+    2. maximum coupling degree three, with at least one degree-three qubit --
+       this rules out linear and ring topologies;
+    3. if the backend advertises a processor family at all, that family is in
+       :data:`HEAVY_HEX_FAMILIES` -- this rules out the 20-qubit Penguin-era
+       devices, which also cap out at degree three.
+
+    Conditions 2 and 3 are heuristics over the metadata Qiskit exposes, not a
+    graph-isomorphism proof.
+
+    Parameters
+    ----------
+    backend:
+        A Qiskit backend.
+
+    Returns
+    -------
+    bool
+        ``True`` if the device is heavy-hex.
+    """
+    n_qubits = int(getattr(backend, "num_qubits", 0) or 0)
+    if n_qubits < HEAVY_HEX_MIN_QUBITS:
+        return False
+
+    family = processor_family(backend)
+    if family is not None and family not in HEAVY_HEX_FAMILIES:
+        return False
+
+    degrees = coupling_degrees(backend)
+    if not degrees:
+        return False
+    return max(degrees.values()) <= 3 and any(d == 3 for d in degrees.values())
+
+
+def calibration_timestamp(backend: BackendLike) -> str | None:
+    """
+    ISO-8601 timestamp of the calibration snapshot a backend carries.
+
+    Recorded in every results file so a figure can be traced back to the
+    calibration data it was produced under.
+
+    Parameters
+    ----------
+    backend:
+        A Qiskit backend.  Real devices and the bundled fake devices expose
+        ``properties().last_update_date``; Aer simulators do not, so pass the
+        *source* fake/real backend rather than the simulator derived from it.
+
+    Returns
+    -------
+    str | None
+        The calibration date as an ISO string, or ``None`` when the backend
+        exposes no properties.
+    """
+    props_fn = getattr(backend, "properties", None)
+    if not callable(props_fn):
+        return None
+    try:
+        props = props_fn()
+    except Exception:  # pragma: no cover - network / provider errors
+        return None
+
+    stamp = getattr(props, "last_update_date", None)
+    if stamp is None:
+        return None
+    isoformat = getattr(stamp, "isoformat", None)
+    return isoformat() if callable(isoformat) else str(stamp)
+
+
+def list_fake_backends(
+    *,
+    min_qubits: int | None = None,
+    max_qubits: int | None = None,
+    heavy_hex_only: bool = False,
+) -> list[BackendLike]:
+    """
+    List the BackendV2 fake devices bundled with ``qiskit-ibm-runtime``.
+
+    Which fake devices ship changes between releases, so nothing in this
+    repository hard-codes a device name: callers discover what the installed
+    version actually provides.
+
+    Parameters
+    ----------
+    min_qubits, max_qubits:
+        Inclusive width bounds, or ``None`` for no bound.
+    heavy_hex_only:
+        Keep only devices for which :func:`is_heavy_hex` holds.
+
+    Returns
+    -------
+    list[BackendV2]
+        Matching fake backends, sorted by ``(num_qubits, name)`` so the choice
+        is deterministic across runs and machines.
+
+    Raises
+    ------
+    ImportError
+        If ``qiskit_ibm_runtime.fake_provider`` is unavailable.
+    """
+    from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
+
+    selected: list[BackendLike] = []
+    for backend in FakeProviderForBackendV2().backends():
+        n_qubits = int(getattr(backend, "num_qubits", 0) or 0)
+        if min_qubits is not None and n_qubits < min_qubits:
+            continue
+        if max_qubits is not None and n_qubits > max_qubits:
+            continue
+        if heavy_hex_only and not is_heavy_hex(backend):
+            continue
+        selected.append(backend)
+
+    return sorted(
+        selected,
+        key=lambda b: (int(getattr(b, "num_qubits", 0) or 0), backend_name(b)),
+    )
+
+
+def smallest_heavy_hex_fake_backend(*, min_qubits: int | None = None) -> BackendLike:
+    """
+    The narrowest bundled heavy-hex fake device, for local dry runs.
+
+    Parameters
+    ----------
+    min_qubits:
+        Require at least this many qubits (e.g. the width of the circuit under
+        test).
+
+    Returns
+    -------
+    BackendV2
+        The narrowest matching heavy-hex fake backend.
+
+    Raises
+    ------
+    RuntimeError
+        If the installed ``qiskit-ibm-runtime`` ships no matching device.
+    """
+    candidates = list_fake_backends(min_qubits=min_qubits, heavy_hex_only=True)
+    if not candidates:
+        raise RuntimeError(
+            f"No heavy-hex fake backend with >= {min_qubits} qubits in the "
+            "installed qiskit-ibm-runtime."
+        )
+    return candidates[0]
 
 
 # ---------------------------------------------------------------------------
@@ -576,6 +807,14 @@ __all__ = [
     "build_ideal_aer_backend",
     "build_fake_backends_from_real",
     "build_all_backends",
+    "HEAVY_HEX_FAMILIES",
+    "HEAVY_HEX_MIN_QUBITS",
+    "processor_family",
+    "coupling_degrees",
+    "is_heavy_hex",
+    "calibration_timestamp",
+    "list_fake_backends",
+    "smallest_heavy_hex_fake_backend",
     "BackendErrorMetrics",
     "BackendPerformance",
     "compute_accumulated_errors",

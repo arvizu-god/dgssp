@@ -55,12 +55,14 @@ from .execution import select_best_backend_by_error
 from .instance import SubsetSumInstance, random_instance
 from .mitigation import (
     ZNESamplingConfig,
+    extrapolate_distribution,
     mitiq_zne_solution_probability,
+    run_zne_scales,
     transpile_once,
-    zne_mitigated_distribution,
 )
 from .runtime import backend_name, execution_mode, sample_counts
 from .solvers import DGConfig, DGSSPSolver, DPConfig, DPSSPSolver, optimal_iterations
+from .transpilation import transpiled_metrics
 
 ExecutorName = Literal["ideal", "noisy", "optimized"]
 
@@ -153,6 +155,10 @@ class InstanceResult:
         ZNE-mitigated distribution, when mitigation ran.
     mitigated_solution_probability:
         ``P(solution)`` under the mitigated distribution.
+    counts_per_scale:
+        Raw counts keyed by ZNE noise scale, when mitigation ran.  These are
+        archived because they cannot be reconstructed from the mitigated
+        distribution -- resampling them is what the bootstrap CIs need.
     mitiq_solution_probability:
         ``P(solution)`` from Mitiq's ZNE, when the baseline ran.
     error_metrics:
@@ -162,6 +168,12 @@ class InstanceResult:
     depth, two_qubit_depth:
         Depth of the executed circuit, overall and counting only two-qubit
         gates.
+    two_qubit_count:
+        Two-qubit gate applications in the executed circuit -- the resource
+        number the scaling analysis is built on.
+    physical_qubits:
+        Physical qubits the executed circuit landed on, in virtual-qubit
+        order, or ``None`` when the backend imposed no layout.
     elapsed_s:
         Wall-clock seconds spent on this instance's post-processing.
     """
@@ -176,11 +188,14 @@ class InstanceResult:
     solution_probability: float
     mitigated_distribution: dict[str, float] | None = None
     mitigated_solution_probability: float | None = None
+    counts_per_scale: dict[int, dict[str, int]] | None = None
     mitiq_solution_probability: float | None = None
     error_metrics: BackendErrorMetrics | None = None
     backend_name: str | None = None
     depth: int | None = None
     two_qubit_depth: int | None = None
+    two_qubit_count: int | None = None
+    physical_qubits: list[int] | None = None
     elapsed_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -207,6 +222,11 @@ class InstanceResult:
             "solution_probability": self.solution_probability,
             "mitigated_distribution": self.mitigated_distribution,
             "mitigated_solution_probability": self.mitigated_solution_probability,
+            "counts_per_scale": (
+                {str(s): dict(c) for s, c in self.counts_per_scale.items()}
+                if self.counts_per_scale is not None
+                else None
+            ),
             "mitiq_solution_probability": self.mitiq_solution_probability,
             "error_metrics": (
                 self.error_metrics.to_dict() if self.error_metrics else None
@@ -214,7 +234,30 @@ class InstanceResult:
             "backend_name": self.backend_name,
             "depth": self.depth,
             "two_qubit_depth": self.two_qubit_depth,
+            "two_qubit_count": self.two_qubit_count,
+            "physical_qubits": (
+                list(self.physical_qubits) if self.physical_qubits is not None else None
+            ),
             "elapsed_s": self.elapsed_s,
+        }
+
+    def transpiled_summary(self) -> dict[str, Any]:
+        """
+        The executed circuit's size metrics, keyed as the paper records them.
+
+        Returns
+        -------
+        dict
+            ``{"two_q_count", "depth", "two_q_depth", "physical_qubits"}``,
+            matching :func:`dgssp.transpilation.transpiled_metrics`.
+        """
+        return {
+            "two_q_count": self.two_qubit_count,
+            "depth": self.depth,
+            "two_q_depth": self.two_qubit_depth,
+            "physical_qubits": (
+                list(self.physical_qubits) if self.physical_qubits is not None else None
+            ),
         }
 
 
@@ -298,9 +341,12 @@ class BatchResult:
             row.pop("counts", None)
             row.pop("distribution", None)
             row.pop("mitigated_distribution", None)
+            row.pop("counts_per_scale", None)
             metrics = row.pop("error_metrics", None) or {}
             row.update({f"err_{k}": v for k, v in metrics.items()})
             row["solution_bitstrings"] = ",".join(row["solution_bitstrings"])
+            qubits = row.get("physical_qubits")
+            row["physical_qubits"] = ",".join(str(q) for q in qubits) if qubits else None
             rows.append(row)
         return pd.DataFrame(rows)
 
@@ -453,11 +499,6 @@ def _resolve_backend(config: BatchConfig) -> BackendLike:
     return pool[0]
 
 
-def _two_qubit_depth(qc: QuantumCircuit) -> int:
-    """Depth counting only two-qubit operations."""
-    return qc.depth(lambda instr: instr.operation.num_qubits == 2)
-
-
 # ---------------------------------------------------------------------------
 # Runners
 # ---------------------------------------------------------------------------
@@ -538,6 +579,7 @@ def _run_batched(metas: list[_InstanceMeta], cfg: BatchConfig) -> BatchResult:
         except AttributeError:
             metrics = None
 
+        sizes = transpiled_metrics(tqc)
         results.append(
             InstanceResult(
                 instance=meta.instance,
@@ -552,8 +594,10 @@ def _run_batched(metas: list[_InstanceMeta], cfg: BatchConfig) -> BatchResult:
                 ),
                 error_metrics=metrics,
                 backend_name=backend_name(backend),
-                depth=tqc.depth(),
-                two_qubit_depth=_two_qubit_depth(tqc),
+                depth=sizes["depth"],  # type: ignore[arg-type]
+                two_qubit_depth=sizes["two_q_depth"],  # type: ignore[arg-type]
+                two_qubit_count=sizes["two_q_count"],  # type: ignore[arg-type]
+                physical_qubits=sizes["physical_qubits"],  # type: ignore[arg-type]
                 elapsed_s=elapsed,
             )
         )
@@ -593,18 +637,24 @@ def _run_optimized(metas: list[_InstanceMeta], cfg: BatchConfig) -> BatchResult:
 
         tqc = transpile_once(meta.circuit, backend, zne_cfg)
 
-        with execution_mode(backend, mode=cfg.mode) as exec_mode:  # type: ignore[arg-type]
-            counts = sample_counts(
-                exec_mode,
-                tqc,
-                shots=cfg.shots,
-                seed_simulator=zne_cfg.seed_simulator,
-                meta={"stage": "batch_optimized", "instance": meta.instance.name},
-            )[0]
+        # The scale-1 folding is the identity, so when the sweep includes
+        # scale 1 its counts *are* the unmitigated measurement.  Reusing them
+        # saves a whole job (and a whole shot budget) per instance, which
+        # matters on a metered device.
+        counts_per_scale = run_zne_scales(tqc, backend, zne_cfg)
+        mitigated = extrapolate_distribution(counts_per_scale, zne_cfg)
 
-        mitigated = zne_mitigated_distribution(
-            meta.circuit, backend, zne_cfg, transpiled=tqc
-        )
+        if 1 in counts_per_scale:
+            counts = counts_per_scale[1]
+        else:
+            with execution_mode(backend, mode=cfg.mode) as exec_mode:  # type: ignore[arg-type]
+                counts = sample_counts(
+                    exec_mode,
+                    tqc,
+                    shots=cfg.shots,
+                    seed_simulator=zne_cfg.seed_simulator,
+                    meta={"stage": "batch_optimized", "instance": meta.instance.name},
+                )[0]
 
         mitiq_prob: float | None = None
         if cfg.run_mitiq_baseline:
@@ -624,6 +674,7 @@ def _run_optimized(metas: list[_InstanceMeta], cfg: BatchConfig) -> BatchResult:
         except AttributeError:
             metrics = None
 
+        sizes = transpiled_metrics(tqc)
         results.append(
             InstanceResult(
                 instance=meta.instance,
@@ -640,11 +691,14 @@ def _run_optimized(metas: list[_InstanceMeta], cfg: BatchConfig) -> BatchResult:
                 mitigated_solution_probability=distribution_solution_probability(
                     mitigated, meta.solution_bitstrings
                 ),
+                counts_per_scale=counts_per_scale,
                 mitiq_solution_probability=mitiq_prob,
                 error_metrics=metrics,
                 backend_name=backend_name(backend),
-                depth=tqc.depth(),
-                two_qubit_depth=_two_qubit_depth(tqc),
+                depth=sizes["depth"],  # type: ignore[arg-type]
+                two_qubit_depth=sizes["two_q_depth"],  # type: ignore[arg-type]
+                two_qubit_count=sizes["two_q_count"],  # type: ignore[arg-type]
+                physical_qubits=sizes["physical_qubits"],  # type: ignore[arg-type]
                 elapsed_s=time.time() - started,
             )
         )
