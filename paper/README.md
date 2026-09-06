@@ -61,6 +61,22 @@ lock file with:
 python paper/scripts/freeze_versions.py
 ```
 
+## Scripts
+
+| Script | Produces | For |
+|---|---|---|
+| `freeze_versions.py` | `requirements-lock.txt` | environment of record |
+| `describe_account.py` | stdout, feeds `hardware/account_facts.md` | plan limits, devices |
+| `smoke_test.py` | `data/smoke.json` | WP1 wiring check |
+| `resource_scaling.py` | `data/resources.json`, `data/resources_fits.json`, `figures/fig_resources.pdf` | WP2 / C1 |
+
+`resource_scaling.py` is the C1 measurement: it checks every closed form in
+`notes/resource_model.md` against the circuit the solver builds (144 asserts),
+transpiles the grid on the heavy-hex fake twins of the Open-plan Heron devices,
+and writes the data, the fits and the figure. Roughly six minutes on a laptop.
+`--logical-only` skips transpilation; `--figure-only` replots from the JSON
+without touching a transpiler, which is rule 2 above in executable form.
+
 ## Quick check
 
 ```

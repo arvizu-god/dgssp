@@ -27,6 +27,7 @@ service that was handed to it.
 
 from __future__ import annotations
 
+import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, TypeAlias
@@ -619,6 +620,100 @@ def compute_accumulated_errors(
         missing_calibration=missing,
     )
 
+#: Target entries that are not gates and must not enter a gate-error median.
+_NON_GATE_INSTRUCTIONS: frozenset[str] = frozenset(
+    {"barrier", "delay", "reset", "measure", "id", "switch_case", "if_else", "for_loop"}
+)
+
+
+def median_gate_errors(backend: BackendLike) -> dict[str, Any]:
+    """
+    Median calibrated error of a device's one- and two-qubit gates.
+
+    This is the device-level figure a survival estimate needs: the accumulated
+    error of :func:`compute_accumulated_errors` is specific to one transpiled
+    circuit's layout, whereas ``(1 - eps)**gate_count`` asks for a single
+    representative ``eps``.  The *median* rather than the mean, because IBM
+    calibration snapshots routinely contain a handful of pairs an order of
+    magnitude worse than the bulk, and a mean is dragged around by them.
+
+    Only entries with a calibrated ``error`` are counted; pairs the target
+    lists without calibration are reported in ``num_*`` so a thin sample is
+    visible rather than silently averaged.  Zero-duration instructions are
+    excluded from the gate medians: on IBM devices ``rz`` is a frame change
+    with zero duration and zero error, and one such entry per qubit would drag
+    the single-qubit median down by roughly a third.
+
+    Parameters
+    ----------
+    backend:
+        A BackendV2 exposing a calibrated ``target``.
+
+    Returns
+    -------
+    dict
+        ``{"one_qubit", "two_qubit", "readout"}`` medians (``None`` when the
+        target carries no calibrated instance), ``{"num_one_qubit",
+        "num_two_qubit", "num_readout"}`` sample sizes, and
+        ``{"one_qubit_gates", "two_qubit_gates"}`` listing which instruction
+        names went into each median.
+
+    Raises
+    ------
+    AttributeError
+        If the backend exposes no ``target``.
+    """
+    target = getattr(backend, "target", None)
+    if target is None:
+        raise AttributeError(
+            f"Backend {backend_name(backend)!r} exposes no `target`; "
+            "calibration-based metrics require a BackendV2."
+        )
+
+    one: list[float] = []
+    two: list[float] = []
+    readout: list[float] = []
+    one_names: set[str] = set()
+    two_names: set[str] = set()
+
+    for name in target.operation_names:
+        try:
+            properties = target[name]
+        except Exception:  # pragma: no cover - defensive
+            continue
+        if properties is None:
+            continue
+        for qargs, props in properties.items():
+            error = getattr(props, "error", None)
+            if error is None or qargs is None:
+                continue
+            value = float(error)
+            if name == "measure":
+                readout.append(value)
+                continue
+            if name in _NON_GATE_INSTRUCTIONS:
+                continue
+            duration = getattr(props, "duration", None)
+            if duration is not None and duration == 0:
+                continue
+            if len(qargs) == 1:
+                one.append(value)
+                one_names.add(name)
+            elif len(qargs) == 2:
+                two.append(value)
+                two_names.add(name)
+
+    return {
+        "one_qubit": statistics.median(one) if one else None,
+        "two_qubit": statistics.median(two) if two else None,
+        "readout": statistics.median(readout) if readout else None,
+        "num_one_qubit": len(one),
+        "num_two_qubit": len(two),
+        "num_readout": len(readout),
+        "one_qubit_gates": sorted(one_names),
+        "two_qubit_gates": sorted(two_names),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Execution & ranking
@@ -818,6 +913,7 @@ __all__ = [
     "BackendErrorMetrics",
     "BackendPerformance",
     "compute_accumulated_errors",
+    "median_gate_errors",
     "run_circuit_on_backend",
     "evaluate_backends_for_circuit",
     "select_best_backends",

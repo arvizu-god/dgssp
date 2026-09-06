@@ -55,6 +55,7 @@ from .backends import (
     evaluate_backends_for_circuit,
     is_heavy_hex,
     list_fake_backends,
+    median_gate_errors,
     processor_family,
     select_best_backends,
     smallest_heavy_hex_fake_backend,
@@ -108,12 +109,24 @@ from .solvers import (
     BaseQuantumSSPSolver,
     BaseSSPSolver,
     DGConfig,
+    DGResourceModel,
     DGSSPSolver,
     DPConfig,
     DPSSPSolver,
+    encoding_without_guard_bit,
+    flatten_containers,
     optimal_iterations,
+    resource_model,
 )
-from .transpilation import BestSeedResult, find_best_seed, transpiled_metrics
+from .transpilation import (
+    BestSeedResult,
+    find_best_seed,
+    logical_counts,
+    mcz_noaux_1q_cost,
+    mcz_noaux_cx_cost,
+    to_logical_basis,
+    transpiled_metrics,
+)
 
 __all__ = [
     "__version__",
@@ -139,6 +152,10 @@ __all__ = [
     "BaseClassicalSSPSolver",
     "DGSSPSolver",
     "DGConfig",
+    "DGResourceModel",
+    "resource_model",
+    "flatten_containers",
+    "encoding_without_guard_bit",
     "optimal_iterations",
     "DPSSPSolver",
     "DPConfig",
@@ -158,6 +175,7 @@ __all__ = [
     "build_all_backends",
     "build_ideal_aer_backend",
     "compute_accumulated_errors",
+    "median_gate_errors",
     "evaluate_backends_for_circuit",
     "select_best_backends",
     "processor_family",
@@ -168,6 +186,10 @@ __all__ = [
     "find_best_seed",
     "BestSeedResult",
     "transpiled_metrics",
+    "to_logical_basis",
+    "logical_counts",
+    "mcz_noaux_cx_cost",
+    "mcz_noaux_1q_cost",
     # mitigation
     "ZNESamplingConfig",
     "fold_transpiled",

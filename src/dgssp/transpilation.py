@@ -22,7 +22,8 @@ the private ``Qubit._index`` attribute are no longer used.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypeAlias
+from functools import cache
+from typing import Any, TypeAlias
 
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2
@@ -344,14 +345,231 @@ def find_best_seed(
     )
 
 
+# ---------------------------------------------------------------------------
+# Synthesis-pinned "logical" accounting
+# ---------------------------------------------------------------------------
+
+#: Abstract basis the paper's *logical* gate counts are quoted in.  ``cx``
+#: stands in for whichever entangler the device exposes (``cz`` on Heron,
+#: ``ecr`` on Eagle) because all three are one two-qubit gate plus local
+#: rotations, so the count is device-independent while the ISA count is not.
+LOGICAL_BASIS: tuple[str, ...] = ("cx", "u")
+
+#: MCX synthesis pinned for that accounting.  Two things make Qiskit's default
+#: unusable as a *reference*: it picks the cheaper of ``noaux_v24`` and
+#: ``noaux_hp24`` by width, and -- inside a full circuit -- ``HighLevelSynthesis``
+#: opportunistically borrows idle register qubits as dirty ancillas, so the same
+#: multi-controlled gate costs a different amount depending on what else is in
+#: the circuit.  Pinning one ancilla-free plugin makes the logical count a
+#: function of ``(n, b)`` alone, which is what a closed form needs.
+MCX_NOAUX_PLUGIN: str = "noaux_v24"
+
+
+def _noaux_hls_config() -> Any:
+    """The :class:`HLSConfig` pinning :data:`MCX_NOAUX_PLUGIN`."""
+    from qiskit.transpiler.passes.synthesis import HLSConfig
+
+    return HLSConfig(mcx=[(MCX_NOAUX_PLUGIN, {})])
+
+
+def to_logical_basis(circuit: QuantumCircuit) -> QuantumCircuit:
+    """
+    Translate a circuit to :data:`LOGICAL_BASIS` without optimising it.
+
+    Optimization level 0 and no backend: no layout, no routing, no gate
+    cancellation -- only basis translation and the pinned MCX synthesis.  The
+    result is therefore a deterministic function of the input circuit, which is
+    what makes the counts in ``paper/notes/resource_model.md`` assertable.
+
+    Parameters
+    ----------
+    circuit:
+        Any circuit; usually one flattened by
+        :func:`dgssp.solvers.draper_grover.flatten_containers`.
+
+    Returns
+    -------
+    QuantumCircuit
+        The translated circuit.
+    """
+    from qiskit import transpile
+
+    return transpile(
+        circuit,
+        basis_gates=list(LOGICAL_BASIS),
+        optimization_level=0,
+        hls_config=_noaux_hls_config(),
+    )
+
+
+def mcx_noaux_cx_cost(num_controls: int) -> int:
+    """
+    CX cost of one ancilla-free multi-controlled X with ``num_controls`` controls.
+
+    Measured, not tabulated by hand: a bare ``(num_controls + 1)``-qubit circuit
+    holding a single ``mcx`` is translated through :func:`to_logical_basis`, so
+    the number always matches the installed Qiskit rather than a table that
+    silently goes stale.  The measurement is cached for the life of the process.
+
+    Parameters
+    ----------
+    num_controls:
+        Number of control qubits, ``>= 1``.
+
+    Returns
+    -------
+    int
+        The CX count.
+
+    Raises
+    ------
+    ValueError
+        If ``num_controls`` is below 1.
+    """
+    return _mcx_noaux_costs(num_controls)[0]
+
+
+def mcx_noaux_1q_cost(num_controls: int) -> int:
+    """
+    Single-qubit gate cost of the same ancilla-free multi-controlled X.
+
+    Parameters
+    ----------
+    num_controls:
+        Number of control qubits, ``>= 1``.
+
+    Returns
+    -------
+    int
+        The single-qubit gate count.
+
+    Raises
+    ------
+    ValueError
+        If ``num_controls`` is below 1.
+    """
+    return _mcx_noaux_costs(num_controls)[1]
+
+
+@cache
+def _mcx_noaux_costs(num_controls: int) -> tuple[int, int]:
+    """``(cx, 1q)`` cost of a bare ancilla-free ``mcx``; see the public wrappers."""
+    if num_controls < 1:
+        raise ValueError(f"num_controls must be >= 1, got {num_controls}.")
+
+    circuit = QuantumCircuit(num_controls + 1)
+    circuit.mcx(list(range(num_controls)), num_controls)
+    counts = to_logical_basis(circuit).count_ops()
+    return int(counts.get("cx", 0)), int(counts.get("u", 0))
+
+
+def mcz_noaux_cx_cost(width: int) -> int:
+    """
+    CX cost of the multi-controlled Z that :meth:`DGSSPSolver._multi_controlled_z` emits.
+
+    The solver special-cases the degenerate widths: one qubit is a ``Z`` (no
+    two-qubit gate), two qubits a ``CZ`` (one), and three or more become
+    ``H - MCX - H``.
+
+    Parameters
+    ----------
+    width:
+        Number of qubits the MCZ spans, ``>= 1``.
+
+    Returns
+    -------
+    int
+        The CX count.
+
+    Raises
+    ------
+    ValueError
+        If ``width`` is below 1.
+    """
+    if width < 1:
+        raise ValueError(f"width must be >= 1, got {width}.")
+    if width == 1:
+        return 0
+    if width == 2:
+        return 1
+    return mcx_noaux_cx_cost(width - 1)
+
+
+def mcz_noaux_1q_cost(width: int) -> int:
+    """
+    Single-qubit gate cost of that same multi-controlled Z.
+
+    Parameters
+    ----------
+    width:
+        Number of qubits the MCZ spans, ``>= 1``.
+
+    Returns
+    -------
+    int
+        The single-qubit gate count, including the two conjugating Hadamards
+        for ``width >= 3``.
+
+    Raises
+    ------
+    ValueError
+        If ``width`` is below 1.
+    """
+    if width < 1:
+        raise ValueError(f"width must be >= 1, got {width}.")
+    if width == 1:
+        return 1
+    if width == 2:
+        return 2
+    return mcx_noaux_1q_cost(width - 1) + 2
+
+
+def logical_counts(circuit: QuantumCircuit) -> dict[str, int]:
+    """
+    Two- and single-qubit counts of a circuit in :data:`LOGICAL_BASIS`.
+
+    Parameters
+    ----------
+    circuit:
+        Any circuit.
+
+    Returns
+    -------
+    dict[str, int]
+        ``{"two_q_count", "one_q_count", "depth", "two_q_depth"}`` of the
+        translated circuit.  Barriers and measurements are excluded from the
+        gate counts by :func:`two_qubit_count`.
+    """
+    translated = to_logical_basis(circuit)
+    return {
+        "two_q_count": two_qubit_count(translated),
+        "one_q_count": sum(
+            1
+            for instruction in translated.data
+            if instruction.operation.num_qubits == 1
+            and instruction.operation.name not in ("barrier", "delay", "measure")
+        ),
+        "depth": translated.depth(),
+        "two_q_depth": two_qubit_depth(translated),
+    }
+
+
 __all__ = [
     "BackendLike",
     "TwoQubitErrorReport",
     "BestSeedResult",
+    "LOGICAL_BASIS",
+    "MCX_NOAUX_PLUGIN",
     "two_qubit_gate_errors_per_circuit_layout",
     "two_qubit_count",
     "two_qubit_depth",
     "physical_qubits",
     "transpiled_metrics",
     "find_best_seed",
+    "to_logical_basis",
+    "mcx_noaux_cx_cost",
+    "mcx_noaux_1q_cost",
+    "mcz_noaux_cx_cost",
+    "mcz_noaux_1q_cost",
+    "logical_counts",
 ]

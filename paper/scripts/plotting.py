@@ -228,6 +228,129 @@ def style_for(key: str) -> SeriesStyle:
         )
     return EXECUTORS[key]
 
+# ---------------------------------------------------------------------------
+# Backends
+# ---------------------------------------------------------------------------
+
+#: Colormap for a scalar field on a 2-D grid (the survival heatmap in
+#: Figure "resources"). Perceptually uniform and greyscale-safe.
+SEQUENTIAL_CMAP = "viridis"
+
+
+def normalise_backend_key(name: str) -> str:
+    """
+    Strip the provider prefix so a device and its fake twin share one style.
+
+    ``"fake_marrakesh"``, ``"ibm_marrakesh"`` and ``"marrakesh"`` are the same
+    heavy-hex topology and the same series in a figure; only the calibration
+    snapshot differs, and that belongs in the caption, not the legend colour.
+
+    Parameters
+    ----------
+    name:
+        A backend name as it appears in ``Record.backend``.
+
+    Returns
+    -------
+    str
+        The lower-cased device name without a ``fake_`` or ``ibm_`` prefix.
+    """
+    key = str(name).strip().lower()
+    for prefix in ("fake_", "ibm_", "ibmq_"):
+        if key.startswith(prefix):
+            return key[len(prefix) :]
+    return key
+
+
+#: The fixed backend -> style map, keyed by :func:`normalise_backend_key`.
+#: This is a separate namespace from :data:`EXECUTORS`: a figure plots one line
+#: per *executor* or one line per *backend*, never both, so the two maps are
+#: allowed to reuse colours. ``"logical"`` is the synthesis-pinned,
+#: device-independent reference curve, drawn dashed and in black so it never
+#: reads as a device.
+BACKENDS: dict[str, SeriesStyle] = {
+    "logical": SeriesStyle(
+        key="logical",
+        label="Logical (ancilla-free)",
+        color=OKABE_ITO["black"],
+        marker="None",
+        linestyle="--",
+        zorder=6,
+    ),
+    "marrakesh": SeriesStyle(
+        key="marrakesh",
+        label="marrakesh",
+        color=OKABE_ITO["blue"],
+        marker="o",
+        linestyle="-",
+        zorder=4,
+    ),
+    "fez": SeriesStyle(
+        key="fez",
+        label="fez",
+        color=OKABE_ITO["vermillion"],
+        marker="s",
+        linestyle="-",
+        zorder=3,
+    ),
+    "torino": SeriesStyle(
+        key="torino",
+        label="torino",
+        color=OKABE_ITO["bluish_green"],
+        marker="^",
+        linestyle="-",
+        zorder=3,
+    ),
+}
+
+#: Colours and markers handed to devices with no registered style. The choice
+#: is a deterministic function of the name, so re-running a script cannot
+#: recolour a curve, but it is not guaranteed collision-free: a device that
+#: earns a place in the paper should be added to :data:`BACKENDS` by hand.
+_FALLBACK_COLORS: tuple[str, ...] = (
+    OKABE_ITO["orange"],
+    OKABE_ITO["sky_blue"],
+    OKABE_ITO["reddish_purple"],
+    OKABE_ITO["grey"],
+)
+_FALLBACK_MARKERS: tuple[str, ...] = ("v", "D", "P", "X")
+
+
+def backend_style(name: str) -> SeriesStyle:
+    """
+    Look up a backend's style, falling back to a deterministic assignment.
+
+    Unlike :func:`style_for`, an unregistered name is not an error: the set of
+    fake devices shipped by ``qiskit-ibm-runtime`` changes between releases and
+    a scaling sweep may legitimately touch a device that never appears in a
+    final figure.
+
+    Parameters
+    ----------
+    name:
+        A backend name; the provider prefix is stripped by
+        :func:`normalise_backend_key`.
+
+    Returns
+    -------
+    SeriesStyle
+        The registered style, or a deterministic fallback labelled with the
+        device name.
+    """
+    key = normalise_backend_key(name)
+    if key in BACKENDS:
+        return BACKENDS[key]
+
+    index = sum(ord(character) for character in key)
+    return SeriesStyle(
+        key=key,
+        label=key,
+        color=_FALLBACK_COLORS[index % len(_FALLBACK_COLORS)],
+        marker=_FALLBACK_MARKERS[index % len(_FALLBACK_MARKERS)],
+        linestyle="-",
+        zorder=2,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Style
@@ -423,6 +546,10 @@ __all__ = [
     "SeriesStyle",
     "EXECUTORS",
     "style_for",
+    "SEQUENTIAL_CMAP",
+    "BACKENDS",
+    "backend_style",
+    "normalise_backend_key",
     "PAPER_RCPARAMS",
     "apply_style",
     "figure",
