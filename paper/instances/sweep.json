@@ -1,0 +1,111 @@
+{
+  "schema": "dgssp/paper/sweep/1",
+  "source": "hardware_subset.json",
+  "family_payload_sha256": "b6a7b026beef0864e32e3ab0529d8a9ab4d04ddbc5f26f464d5debbc5aa2ffcf",
+  "backend": "fake_marrakesh",
+  "policy": {
+    "selected_from": "hardware_subset.json 'selected'",
+    "requires": "M == 1 and r_opt >= 2",
+    "prefers": "distinct n_items, shallowest two_q_depth within each",
+    "r_max": "r_opt + 1"
+  },
+  "instances": [
+    {
+      "name": "P-n3-M1-17",
+      "family": "P",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "n_items": 3,
+      "n_sum": 3,
+      "n_qubits": 6,
+      "r_opt": 2,
+      "r_max": 3,
+      "iterations": [
+        1,
+        2,
+        3
+      ],
+      "p_uniform": 0.125,
+      "p_ideal_at_r_opt": 0.94175,
+      "survival_at_r_opt": 0.4023738981034958,
+      "two_q_count_at_r_opt": 241,
+      "two_q_depth_at_r_opt": 208
+    },
+    {
+      "name": "P-n4-M1-10",
+      "family": "P",
+      "items": [
+        2,
+        2,
+        1,
+        2
+      ],
+      "target": 1,
+      "M": 1,
+      "solution_bitstrings": [
+        "0100"
+      ],
+      "n_items": 4,
+      "n_sum": 4,
+      "n_qubits": 8,
+      "r_opt": 3,
+      "r_max": 4,
+      "iterations": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "p_uniform": 0.0625,
+      "p_ideal_at_r_opt": 0.96215,
+      "survival_at_r_opt": 0.06851547653591683,
+      "two_q_count_at_r_opt": 708,
+      "two_q_depth_at_r_opt": 531
+    }
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-09-14T19:57:23Z",
+    "git": {
+      "commit": "185740485481f539e255d1576f6f5fb152530a45",
+      "short_commit": "1857404",
+      "branch": "main",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_outputs": [
+        "paper/data/resources.json",
+        "paper/data/resources_fits.json",
+        "paper/figures/fig_resources.pdf",
+        "paper/instances/family.json",
+        "paper/instances/hardware_subset.json",
+        "paper/instances/sweep.json",
+        "paper/tex/family_table.tex"
+      ]
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.16",
+      "implementation": "CPython",
+      "executable": "C:\\Users\\Arturo Arvizu\\.conda\\envs\\dgssp-paper\\python.exe"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "host": "DESKTOP-893P15V",
+    "user": "Arturo Arvizu",
+    "backend": null
+  }
+}
