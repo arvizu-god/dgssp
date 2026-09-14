@@ -290,6 +290,79 @@ def test_median_gate_errors_excludes_virtual_gates():
     assert errors["num_two_qubit"] > 0
 
 
+def test_median_gate_errors_lists_virtual_gates_separately():
+    """The zero-duration gates are named, and never overlap the physical ones."""
+    pytest.importorskip("qiskit_ibm_runtime")
+    from dgssp.backends import smallest_heavy_hex_fake_backend
+
+    errors = median_gate_errors(smallest_heavy_hex_fake_backend())
+    assert "rz" in errors["virtual_gates"]
+    physical = set(errors["one_qubit_gates"]) | set(errors["two_qubit_gates"])
+    assert not physical & set(errors["virtual_gates"])
+
+
+def _isa_circuit(errors):
+    """Two virtual rz, two physical 1Q gates, one physical 2Q gate, plus non-gates."""
+    from qiskit import QuantumCircuit
+    from qiskit.circuit.library import get_standard_gate_name_mapping
+
+    gates = get_standard_gate_name_mapping()
+    qc = QuantumCircuit(2)
+    qc.rz(0.1, 0)
+    qc.rz(0.2, 1)
+    qc.append(gates[errors["one_qubit_gates"][0]], [0])
+    qc.append(gates[errors["one_qubit_gates"][-1]], [1])
+    qc.append(gates[errors["two_qubit_gates"][0]], [0, 1])
+    qc.barrier()
+    qc.measure_all()
+    return qc
+
+
+def test_physical_gate_counts_charges_nothing_to_virtual_rz():
+    """
+    The survival count and the median describe the same gates.
+
+    This is the regression test for the WP2/WP3 survival bug: every ``rz`` used
+    to be charged the ``sx`` median, understating survival by up to 14x.
+    """
+    pytest.importorskip("qiskit_ibm_runtime")
+    from dgssp.backends import physical_gate_counts, smallest_heavy_hex_fake_backend
+
+    errors = median_gate_errors(smallest_heavy_hex_fake_backend())
+    counts = physical_gate_counts(_isa_circuit(errors), errors)
+    assert counts == {"one_q_physical": 2, "two_q_physical": 1, "virtual": 2}
+
+
+def test_rz_only_circuit_has_unit_single_qubit_survival():
+    """A circuit of frame changes alone cannot fail."""
+    pytest.importorskip("qiskit_ibm_runtime")
+    from qiskit import QuantumCircuit
+
+    from dgssp.backends import physical_gate_counts, smallest_heavy_hex_fake_backend
+
+    errors = median_gate_errors(smallest_heavy_hex_fake_backend())
+    qc = QuantumCircuit(3)
+    for q in range(3):
+        qc.rz(0.3 * (q + 1), q)
+    counts = physical_gate_counts(qc, errors)
+    assert counts["one_q_physical"] == 0 and counts["virtual"] == 3
+    assert (1.0 - errors["one_qubit"]) ** counts["one_q_physical"] == 1.0
+
+
+def test_physical_gate_counts_rejects_non_isa_circuits():
+    """A gate the backend does not know is an error, not a free gate."""
+    pytest.importorskip("qiskit_ibm_runtime")
+    from qiskit import QuantumCircuit
+
+    from dgssp.backends import physical_gate_counts, smallest_heavy_hex_fake_backend
+
+    errors = median_gate_errors(smallest_heavy_hex_fake_backend())
+    qc = QuantumCircuit(1)
+    qc.h(0)
+    with pytest.raises(ValueError, match="transpiled"):
+        physical_gate_counts(qc, errors)
+
+
 def test_median_gate_errors_needs_a_target():
     """A backend with no calibration store fails loudly rather than silently."""
 

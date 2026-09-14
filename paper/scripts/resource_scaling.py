@@ -91,6 +91,7 @@ from dgssp import (
     flatten_containers,
     median_gate_errors,
     optimal_iterations,
+    physical_gate_counts,
     resource_model,
 )
 from dgssp.backends import list_fake_backends
@@ -536,9 +537,18 @@ def measure_transpiled(
         }
     )
 
+    # Survival is charged to *physical* gates only: the median excludes virtual
+    # `rz`, so the count it multiplies must exclude them too.  `one_q_count`
+    # above stays the full single-qubit inventory, which is a resource figure.
     errors = median_gate_errors(backend)
+    physical = physical_gate_counts(best.circuit, errors)
     metrics["median_errors"] = errors
-    metrics.update(survival_estimate(int(metrics["two_q_count"]), one_q, errors))
+    metrics["one_q_physical"] = physical["one_q_physical"]
+    metrics["two_q_physical"] = physical["two_q_physical"]
+    metrics["virtual_gate_count"] = physical["virtual"]
+    metrics.update(
+        survival_estimate(physical["two_q_physical"], physical["one_q_physical"], errors)
+    )
     return metrics
 
 
@@ -557,7 +567,11 @@ def survival_estimate(two_q: int, one_q: int, errors: dict[str, Any]) -> dict[st
     Parameters
     ----------
     two_q, one_q:
-        Gate counts of the transpiled circuit.
+        *Physical* gate counts of the transpiled circuit, from
+        :func:`dgssp.backends.physical_gate_counts` -- virtual ``rz`` frame
+        changes excluded, exactly as they are excluded from the medians.
+        Passing the raw single-qubit inventory instead charges the ``sx``
+        error to every ``rz`` and understates survival.
     errors:
         Output of :func:`dgssp.backends.median_gate_errors`.
 

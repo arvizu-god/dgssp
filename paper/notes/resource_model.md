@@ -61,13 +61,17 @@ QFT_b · SubGate · QFT_b†      (uncompute)
 ```
 
 So **one iteration contains exactly four QFT-type blocks on `b` qubits**: two
-forward `QFT` and two inverse `QFT†`. This is the `FullQFT` assembly. It is
-*not* the optimal arrangement — the inverse QFT closing the add block and the
-forward QFT opening the uncompute block are adjacent and cancel *if the oracle
-between them is diagonal in the computational basis*, which it is
-(`OracleGate` is X-conjugated multi-controlled Z, i.e. diagonal). The
-implementation keeps all four; §8 sizes what dropping two would save. The
-counts below describe the code as written.
+forward `QFT` and two inverse `QFT†`. This is the `FullQFT` assembly.
+
+All four are **necessary**, and an earlier draft of this note was wrong to say
+otherwise. The tempting saving is to cancel the `QFT†` that closes the add block
+against the `QFT` that opens the uncompute block — but they are not adjacent:
+`OracleGate` sits between them, and it needs the sum register in the
+*computational* basis to recognise `|encoded_target⟩`. Being diagonal in that
+basis does not let it commute past a QFT, so the pair cannot be removed.
+Folding the target into the adder's constant (marking `|0…0⟩` instead of
+`|t⟩`) does not help either: it moves X gates around and leaves all four QFT
+blocks in place. The four blocks stand.
 
 ## 2. Controlled phases from the QFT blocks
 
@@ -322,22 +326,28 @@ that carries no problem structure at all. Two consequences for the paper:
    top of this grid, where at `n = b = 8` the arithmetic is 480 CX against 220
    for each MCZ. So the measured table is still adder-dominated everywhere, and
    the asymptotic statement must be phrased as a limit, not read off the plot.
-2. The obvious fix is the one Qiskit's `HighLevelSynthesis` already applies
-   opportunistically — synthesise both MCZs with borrowed dirty ancillas, which
-   are free here (the *other* register is idle during each MCZ), taking
-   `Θ(n²) → Θ(n)`. The measured `two_q_logical_hls` column shows the size of
-   that gap. It is a WP-level decision whether the paper reports the ancilla-free
-   reference as *the* resource model (defensible, standard, pessimistic) or
-   switches the construction to an explicit v-chain; this note reports both and
-   does not change the solver.
+2. Rewriting the MCZs with an explicit dirty-ancilla v-chain (`Θ(n²) → Θ(n)`)
+   would **buy nothing on hardware, because the transpiler already does it**.
+   `HighLevelSynthesis` borrows the idle register as ancillas during synthesis,
+   which is the 0.78x median in `two_q_logical_hls`; the transpiled counts then
+   sit at 1.64x the *ancilla-free* reference, and 0.78 x 2.1 (routing) = 1.64
+   exactly. The ancilla saving is therefore already inside every measured
+   number in §10. The ancilla-free reference is kept as *the* closed form
+   because it is the only synthesis that is a function of `(n, b)` alone
+   (§5.1) — not because the paper believes the hardware pays it.
 
-A third, smaller lever, already noted: the two adjacent `QFT†·QFT` pairs around
-the diagonal oracle cancel. Removing them drops `#CP_QFT` from `2b(b-1)` to
-`b(b-1)` per iteration and `#H_QFT` from `4b` to `2b` — a `Θ(log² n)` saving,
-worth roughly `2b(b-1)` CX per iteration (e.g. 112 CX at `b = 8`), and cheap to
-implement. It is not applied here because WP2 measures the code as frozen for
-C1; it belongs in a "possible improvements" paragraph, not in the measured
-model.
+### 8.1 Not pursued in this paper
+
+A third lever exists -- truncating the small rotations of the QFT blocks and the
+controlled additions (the approximate-QFT / approximate-Draper-adder
+construction). It is real, it is the only one a transpiler cannot take for you,
+and it was measured: see `paper/notes/future_work.md`.
+
+It is **deliberately out of scope**. C1 is a resource model of the algorithm as
+designed, and changing the circuit partway through the paper would leave the
+model describing something with no hardware data behind it. The construction in
+this repository is frozen. Nothing in §§1-8 or §10 depends on that decision:
+every number here describes the circuit `DGSSPSolver` builds today.
 
 ## 9. What is measured, and where
 
@@ -406,17 +416,25 @@ all-positive, one iteration and extrapolated to `r_opt`:
 
 | `n` | `b` | 2Q (r=1) | `r_opt` | S(r=1) | S(r_opt) |
 |---|---|---|---|---|---|
-| 2 | 3 | 83 | 1 | 0.71 | 0.71 |
-| 2 | 8 | 839 | 1 | 0.034 | 0.034 |
-| 5 | 5 | 493 | 1 | 0.14 | 0.14 |
-| 5 | 8 | 1083 | 4 | 0.012 | 2.2e-8 |
-| 8 | 5 | 618 | 1 | 0.077 | 0.077 |
-| 8 | 8 | 1382 | 4 | 0.0037 | 1.9e-10 |
+| 2 | 3 | 83 | 1 | 0.73 | 0.73 |
+| 2 | 8 | 839 | 1 | 0.042 | 0.042 |
+| 5 | 5 | 493 | 1 | 0.16 | 0.16 |
+| 5 | 8 | 1083 | 4 | 0.016 | 7.0e-8 |
+| 8 | 5 | 618 | 1 | 0.094 | 0.094 |
+| 8 | 8 | 1382 | 4 | 0.0053 | 7.6e-10 |
+
+`S = (1 - ε₂)^{#2Q} · (1 - ε₁)^{#1Q_phys}`, where `#1Q_phys` counts only the
+physical single-qubit gates (`sx`, `x`) — the virtual `rz` frame changes are
+error-free and are excluded from the count exactly as they are excluded from the
+median `ε₁` (`dgssp.backends.physical_gate_counts`). An earlier version of this
+table charged `ε₁` to every `rz` as well, about a third of all single-qubit
+operations, and understated `S` by a factor of 1.03–1.5 across the grid
+(0.0037 → 0.0053 at `n = b = 8`); the conclusions below were unaffected.
 
 Read this as an upper bound (SS `survival_estimate` docstring): it ignores
 idling, crosstalk and readout, and it assumes every gate error is fatal. Even
 so, **a single Grover iteration is already below 1% survival at `n = b = 8`, and
-the optimal iteration count puts the full search ten orders of magnitude below
+the optimal iteration count puts the full search nine orders of magnitude below
 useful.** The hardware experiments in WP4 must therefore sit at the bottom-left
 of this grid, and the Grover-iteration sweep of C3 is a sweep into a wall, not
 around one.

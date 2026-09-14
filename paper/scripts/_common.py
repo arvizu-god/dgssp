@@ -62,6 +62,15 @@ TEX_DIR = PAPER_ROOT / "tex"
 #: Where :func:`write_requirements_lock` writes the pinned versions.
 LOCK_FILE = PAPER_ROOT / "requirements-lock.txt"
 
+#: Directories that hold pipeline *outputs*.  An untracked file here is a
+#: result, not code, and does not make the tree dirty (see :func:`git_state`).
+OUTPUT_DIRS: tuple[Path, ...] = (DATA_DIR, FIGURES_DIR, INSTANCES_DIR, HARDWARE_DIR, TEX_DIR)
+
+#: :data:`OUTPUT_DIRS` as repo-relative POSIX prefixes, the form git prints.
+_OUTPUT_PREFIXES: tuple[str, ...] = tuple(
+    d.relative_to(REPO_ROOT).as_posix() + "/" for d in OUTPUT_DIRS
+)
+
 
 # ---------------------------------------------------------------------------
 # Pinned dependency set
@@ -196,11 +205,22 @@ def git_state() -> dict[str, Any]:
     Returns
     -------
     dict
-        ``{"commit", "short_commit", "branch", "dirty", "dirty_files"}``.
-        ``commit`` is ``None`` outside a git checkout.  ``dirty`` is ``True``
-        when tracked files differ from ``HEAD`` -- a dirty result is not
-        reproducible from the commit alone, so this flag is what tells you a
-        number needs re-running before it goes in the paper.
+        ``{"commit", "short_commit", "branch", "dirty", "dirty_files",
+        "untracked_outputs"}``.  ``commit`` is ``None`` outside a git checkout.
+        ``dirty`` is ``True`` when the code that ran is not exactly the code in
+        ``HEAD`` -- a dirty result is not reproducible from the commit alone,
+        so this flag is what tells you a number needs re-running before it goes
+        in the paper.
+
+        That means: any modified tracked file, and any untracked file *outside*
+        the paper's output directories (:data:`OUTPUT_DIRS`) -- an uncommitted
+        new script or module is code the commit does not contain.  Untracked
+        files *inside* the output directories do not count.  They are results,
+        not code, and counting them made clean results impossible: a stage that
+        writes ``resources.json`` and then stamps ``resources_fits.json`` would
+        always see its own first output as a dirty file.  Untracked *inputs*
+        stay traceable through the hashes downstream files carry
+        (``family_payload_sha256``), and are listed in ``untracked_outputs``.
     """
     commit = _git("rev-parse", "HEAD")
     if commit is None:
@@ -210,11 +230,19 @@ def git_state() -> dict[str, Any]:
             "branch": None,
             "dirty": None,
             "dirty_files": [],
+            "untracked_outputs": [],
         }
 
-    # Porcelain v1: two status columns, a space, then the path.
-    status = _git("status", "--porcelain") or ""
+    # Porcelain v1: two status columns, a space, then the path.  Tracked files
+    # only; untracked files are classified separately below.
+    status = _git("status", "--porcelain", "--untracked-files=no") or ""
     dirty_files = [line[3:] for line in status.splitlines() if line[3:].strip()]
+
+    # `ls-files` prints repo-relative POSIX paths, one per line, unquoted.
+    untracked = _git("ls-files", "--others", "--exclude-standard") or ""
+    untracked_paths = [line for line in untracked.splitlines() if line.strip()]
+    outputs = [p for p in untracked_paths if p.startswith(_OUTPUT_PREFIXES)]
+    dirty_files += [p for p in untracked_paths if not p.startswith(_OUTPUT_PREFIXES)]
 
     return {
         "commit": commit,
@@ -222,6 +250,7 @@ def git_state() -> dict[str, Any]:
         "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "dirty": bool(dirty_files),
         "dirty_files": dirty_files,
+        "untracked_outputs": outputs,
     }
 
 
@@ -583,6 +612,7 @@ __all__ = [
     "NOTES_DIR",
     "TEX_DIR",
     "LOCK_FILE",
+    "OUTPUT_DIRS",
     "PINNED_PACKAGES",
     "package_versions",
     "write_requirements_lock",

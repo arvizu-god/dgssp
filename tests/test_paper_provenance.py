@@ -117,6 +117,91 @@ def test_git_state_records_dirty_paths_verbatim():
         )
 
 
+def _fake_git(monkeypatch, *, status: str, untracked: str) -> None:
+    """
+    Replace ``_git`` with a table lookup.
+
+    A call ``git_state`` is not expected to make raises ``KeyError`` -- in
+    particular a plain ``status --porcelain`` without ``--untracked-files=no``,
+    which is the regression these tests guard.
+    """
+    responses = {
+        ("rev-parse", "HEAD"): "a" * 40,
+        ("rev-parse", "--abbrev-ref", "HEAD"): "main",
+        ("status", "--porcelain", "--untracked-files=no"): status,
+        ("ls-files", "--others", "--exclude-standard"): untracked,
+    }
+    monkeypatch.setattr(_common, "_git", lambda *args: responses[args])
+
+
+def test_untracked_files_do_not_make_the_tree_dirty(monkeypatch):
+    """
+    A pipeline's own untracked outputs must not taint the next file it stamps.
+
+    Regression: ``git_state`` counted untracked files as dirty, contradicting
+    its own docstring, so ``resources_fits.json`` -- stamped right after
+    ``resources.json`` is written -- could never be clean.
+    """
+    _fake_git(
+        monkeypatch,
+        status="",
+        untracked="paper/data/resources.json\npaper/instances/family.json\n",
+    )
+    state = _common.git_state()
+    assert state["dirty"] is False
+    assert state["dirty_files"] == []
+    assert state["untracked_outputs"] == [
+        "paper/data/resources.json",
+        "paper/instances/family.json",
+    ]
+
+
+def test_untracked_code_still_makes_the_tree_dirty(monkeypatch):
+    """
+    An uncommitted new script is code the commit lacks: that *is* dirty.
+
+    Only the output directories are exempt; a results file produced by a
+    script that exists nowhere in git must never be stamped clean.
+    """
+    _fake_git(
+        monkeypatch,
+        status="",
+        untracked="paper/scripts/new_analysis.py\nsrc/dgssp/new.py\npaper/data/out.json\n",
+    )
+    state = _common.git_state()
+    assert state["dirty"] is True
+    assert state["dirty_files"] == ["paper/scripts/new_analysis.py", "src/dgssp/new.py"]
+    assert state["untracked_outputs"] == ["paper/data/out.json"]
+
+
+def test_a_modified_tracked_file_still_makes_the_tree_dirty(monkeypatch):
+    """The fix narrows the untracked rule; tracked modifications still count."""
+    _fake_git(monkeypatch, status=" M src/dgssp/encoding.py", untracked="")
+    state = _common.git_state()
+    assert state["dirty"] is True
+    assert state["dirty_files"] == ["src/dgssp/encoding.py"]
+    assert state["untracked_outputs"] == []
+
+
+def test_output_prefixes_are_the_paper_output_directories():
+    """The exemption is exactly the five output directories, nothing broader."""
+    assert set(_common._OUTPUT_PREFIXES) == {
+        "paper/data/",
+        "paper/figures/",
+        "paper/instances/",
+        "paper/hardware/",
+        "paper/tex/",
+    }
+
+
+def test_live_output_and_dirty_lists_are_disjoint():
+    """In the real checkout, no path is reported as both an output and dirty."""
+    state = _common.git_state()
+    if state["commit"] is None:
+        pytest.skip("not a git checkout")
+    assert not set(state["dirty_files"]) & set(state["untracked_outputs"])
+
+
 # ---------------------------------------------------------------------------
 # Saving
 # ---------------------------------------------------------------------------

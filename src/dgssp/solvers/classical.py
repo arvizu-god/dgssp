@@ -11,6 +11,7 @@ Draper-Grover solver.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..instance import DPResult, SSPSolution, SubsetSumInstance
@@ -175,7 +176,80 @@ class DPSSPSolver(BaseClassicalSSPSolver):
         return sums_to_subsets.get(target, [])
 
 
+# ---------------------------------------------------------------------------
+# Sum spectrum
+# ---------------------------------------------------------------------------
+
+
+def subset_sum_multiplicities(items: Sequence[int]) -> dict[int, int]:
+    """
+    Multiplicity of every reachable subset sum.
+
+    Same recurrence as :meth:`DPSSPSolver._dp_all_index_subsets`, but counting
+    subsets instead of listing them, so the whole spectrum costs
+    ``O(n * |reachable sums|)`` instead of ``O(2**n)`` subset lists.  This is
+    what the paper's instance generator needs: it must know ``M(t)`` for
+    *every* candidate target ``t`` before it picks one, and enumerating index
+    lists for each candidate separately would be quadratic in the search it is
+    already doing.
+
+    ``M(t)`` returned here is by construction identical to
+    ``len(DPSSPSolver().solve(SubsetSumInstance(items, t)).all_solutions)``;
+    ``tests/test_paper_instances.py`` pins that against brute force.
+
+    Parameters
+    ----------
+    items:
+        Instance items.  May be negative, zero or repeated; each *position* is
+        a distinct element, so ``[2, 2]`` reaches sum ``2`` twice.
+
+    Returns
+    -------
+    dict[int, int]
+        Mapping reachable sum -> number of index subsets achieving it.  Always
+        contains ``0`` (the empty subset), whose count is at least 1.
+    """
+    counts: dict[int, int] = {0: 1}
+    for a in items:
+        shifted: dict[int, int] = {}
+        for s, c in counts.items():
+            shifted[s + a] = shifted.get(s + a, 0) + c
+        for s, c in shifted.items():
+            counts[s] = counts.get(s, 0) + c
+    return counts
+
+
+def multiplicity_class(multiplicity: int, *, cap: int = 3) -> str:
+    """
+    Bucket a solution count into the paper's M-classes.
+
+    Parameters
+    ----------
+    multiplicity:
+        Number ``M`` of subsets summing to the target.
+    cap:
+        First multiplicity that is bucketed as ``"<cap>+"``.
+
+    Returns
+    -------
+    str
+        ``"0"``, ``"1"``, ``"2"`` or ``"3+"`` at the default cap.
+
+    Raises
+    ------
+    ValueError
+        If ``multiplicity`` is negative or ``cap`` is below 1.
+    """
+    if multiplicity < 0:
+        raise ValueError("multiplicity must be >= 0.")
+    if cap < 1:
+        raise ValueError("cap must be >= 1.")
+    return f"{cap}+" if multiplicity >= cap else str(multiplicity)
+
+
 __all__ = [
     "DPConfig",
     "DPSSPSolver",
+    "subset_sum_multiplicities",
+    "multiplicity_class",
 ]

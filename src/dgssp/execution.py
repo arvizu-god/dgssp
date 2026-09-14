@@ -84,6 +84,7 @@ def execute_ideal(
     *,
     shots: int = 10_000,
     seed_simulator: int | None = None,
+    seed_transpiler: int | None = None,
     optimization_level: int = 1,
 ) -> ExecutionResult:
     """
@@ -97,6 +98,11 @@ def execute_ideal(
         Number of shots.
     seed_simulator:
         Seed for reproducible sampling.
+    seed_transpiler:
+        Seed for the local transpilation.  The ideal simulator has no coupling
+        map, so nothing should need routing -- but a *sampled* probability is
+        only reproducible if the circuit that was sampled is, and pinning the
+        seed costs nothing.  The paper's ``P_ideal`` figures pass one.
     optimization_level:
         Preset optimization level for the local transpilation.
 
@@ -107,7 +113,9 @@ def execute_ideal(
     """
     backend = build_ideal_aer_backend(seed_simulator=seed_simulator)
     pm = generate_preset_pass_manager(
-        backend=backend, optimization_level=optimization_level
+        backend=backend,
+        optimization_level=optimization_level,
+        seed_transpiler=seed_transpiler,
     )
     tqc = pm.run(qc)
 

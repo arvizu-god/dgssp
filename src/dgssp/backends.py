@@ -675,6 +675,7 @@ def median_gate_errors(backend: BackendLike) -> dict[str, Any]:
     readout: list[float] = []
     one_names: set[str] = set()
     two_names: set[str] = set()
+    virtual_names: set[str] = set()
 
     for name in target.operation_names:
         try:
@@ -695,6 +696,7 @@ def median_gate_errors(backend: BackendLike) -> dict[str, Any]:
                 continue
             duration = getattr(props, "duration", None)
             if duration is not None and duration == 0:
+                virtual_names.add(name)
                 continue
             if len(qargs) == 1:
                 one.append(value)
@@ -712,7 +714,75 @@ def median_gate_errors(backend: BackendLike) -> dict[str, Any]:
         "num_readout": len(readout),
         "one_qubit_gates": sorted(one_names),
         "two_qubit_gates": sorted(two_names),
+        # A name is virtual only if no calibrated instance of it has a duration;
+        # one physical instance anywhere makes the whole name physical.
+        "virtual_gates": sorted(virtual_names - one_names - two_names),
     }
+
+
+def physical_gate_counts(circuit: Any, errors: dict[str, Any]) -> dict[str, int]:
+    """
+    Count the gates of an ISA circuit that the median errors actually describe.
+
+    A survival estimate ``(1 - eps)**count`` is only meaningful when ``count``
+    and ``eps`` refer to the same gates.  :func:`median_gate_errors` excludes
+    zero-duration instructions from its medians -- on IBM devices ``rz`` is a
+    virtual frame change, error-free -- so the count it is paired with must
+    exclude them too.  Counting every single-qubit instruction instead charges
+    the ``sx``/``x`` median to each ``rz``, which is roughly a third of all
+    single-qubit operations in a transpiled D-G circuit and understated the
+    survival of WP2/WP3 circuits by up to an order of magnitude.
+
+    This function takes its gate classification from ``errors`` rather than
+    from a hard-coded name list, so the gates that set the median and the gates
+    that are counted cannot drift apart.
+
+    Parameters
+    ----------
+    circuit:
+        A circuit already in the backend's ISA (transpiled for it).
+    errors:
+        Output of :func:`median_gate_errors` for the *same* backend.
+
+    Returns
+    -------
+    dict[str, int]
+        ``{"one_q_physical", "two_q_physical", "virtual"}``.  Barriers,
+        delays and measurements are not gates and are in none of them.
+
+    Raises
+    ------
+    ValueError
+        If the circuit contains an instruction the backend neither calibrates
+        nor marks as virtual -- counting it as free would silently inflate the
+        survival, and it means the circuit was not transpiled for this backend.
+    """
+    one_names = set(errors.get("one_qubit_gates") or ())
+    two_names = set(errors.get("two_qubit_gates") or ())
+    virtual_names = set(errors.get("virtual_gates") or ())
+
+    counts = {"one_q_physical": 0, "two_q_physical": 0, "virtual": 0}
+    unknown: set[str] = set()
+    for instruction in circuit.data:
+        op = instruction.operation
+        if op.name in _NON_GATE_INSTRUCTIONS:
+            continue
+        if op.name in one_names and op.num_qubits == 1:
+            counts["one_q_physical"] += 1
+        elif op.name in two_names and op.num_qubits == 2:
+            counts["two_q_physical"] += 1
+        elif op.name in virtual_names:
+            counts["virtual"] += 1
+        else:
+            unknown.add(op.name)
+
+    if unknown:
+        raise ValueError(
+            f"Instructions {sorted(unknown)} are neither calibrated gates "
+            f"({sorted(one_names | two_names)}) nor virtual ({sorted(virtual_names)}) "
+            "on this backend; was the circuit transpiled for it?"
+        )
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -914,6 +984,7 @@ __all__ = [
     "BackendPerformance",
     "compute_accumulated_errors",
     "median_gate_errors",
+    "physical_gate_counts",
     "run_circuit_on_backend",
     "evaluate_backends_for_circuit",
     "select_best_backends",
