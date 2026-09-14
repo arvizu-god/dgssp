@@ -401,13 +401,24 @@ all-positive variants):
 
 | slice | dense | sparse |
 |---|---|---|
-| `~ b^α` at fixed `n` | α = 2.36 (n=2) down to 1.42-1.74 (n=7,8) | 2.19 down to 1.17-1.45 |
+| `~ b^α` at fixed `n` | α = 2.36-2.42 (n=2) down to 1.42-1.90 (n=7,8) | 2.15-2.19 down to 1.17-1.45 |
 | `~ n^β` at fixed `b` | β = 0.80-0.87 (b=4) down to 0.35-0.38 (b=8) | 0.91-1.01 down to 0.40-0.50 |
 
-Standard errors are 0.03-0.26, `R² >= 0.88`. Neither trend is a power law
-(SS8), and both effective exponents *fall* as the other parameter grows, because
-the terms that do not depend on the swept variable — `2b(b-1)` and `g(b)` when
-sweeping `n`, `g(n)` when sweeping `b` — become the constant part of the sum.
+Ranges are across the three device twins. Standard errors are 0.03-0.26,
+`R² >= 0.90`. Neither trend is a power law (SS8), and both effective exponents
+*fall* as the other parameter grows, because the terms that do not depend on
+the swept variable — `2b(b-1)` and `g(b)` when sweeping `n`, `g(n)` when
+sweeping `b` — become the constant part of the sum.
+
+The one exception is the `n = 8` row of the `b^α` fits, which rises above
+`n = 7` on every device and in both families (e.g. `fake_fez` dense 1.47 → 1.90).
+That is a fit-window artefact, not a reversal of the trend: `n` positive items
+force `b >= ceil(log2(n+1)) + 1`, so the `b`-window each row is fitted over
+shrinks from the bottom as `n` grows — `b ∈ {3,…,8}` (6 points) for
+`n ∈ {2,3}`, `{4,…,8}` (5 points) for `n ∈ {4,…,7}`, and `{5,…,8}` (4 points)
+for `n = 8`. Exponents from different windows are not comparable, and the
+`n = 8` row should not be read as steepening.
+
 Quote these as descriptive fits over `2 <= n <= 8`, `3 <= b <= 8`, never as
 asymptotics.
 
