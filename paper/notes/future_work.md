@@ -46,5 +46,7 @@ Caveat on the FOM: it multiplies a coherent approximation error by a stochastic
 gate-error model, which is not rigorous. The 22% two-qubit reduction is
 unambiguous; the survival factor is the order-of-magnitude claim of §10, not a
 predicted success probability. Whether the gain survives on real hardware is
-exactly what a paired exact-vs-truncated hardware run would settle, and that is
-the WP4 experiment this note recommends.
+exactly what a paired exact-vs-truncated hardware run would settle. That
+experiment belongs to a follow-up paper, not to this one: the algorithm is
+frozen for Paper A (see the header), so no work package of this paper builds or
+runs a truncated circuit.
