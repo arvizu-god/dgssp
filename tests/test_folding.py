@@ -72,12 +72,19 @@ def test_scale_one_is_identity(transpiled):
     assert fold_transpiled(tqc, 1).size() == tqc.size()
 
 
-@pytest.mark.parametrize("bad", [0, 2, 4, -1, -3])
-def test_even_and_nonpositive_scales_rejected(transpiled, bad):
-    """Only odd positive scale factors are meaningful for G G-dagger folding."""
+@pytest.mark.parametrize("bad", [0, 0.5, 0.999, -1, -3, float("nan"), float("inf")])
+def test_scales_below_one_rejected(transpiled, bad):
+    """Folding can only add noise: scales below 1 (and non-finite ones) are errors."""
     tqc, _ = transpiled
     with pytest.raises(ValueError):
         fold_transpiled(tqc, bad)
+
+
+@pytest.mark.parametrize("scale", [2, 4, 1.5])
+def test_even_and_fractional_scales_are_now_valid(transpiled, scale):
+    """Partial folding (WP4) makes every real scale >= 1 realisable."""
+    tqc, _ = transpiled
+    assert fold_transpiled(tqc, scale).size() > tqc.size()
 
 
 def test_measurements_are_not_folded(transpiled):

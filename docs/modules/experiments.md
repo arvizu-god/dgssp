@@ -17,9 +17,15 @@ measured `solution_probability`. Success is quantified automatically across the
 whole sweep, which is what makes "P(solution) vs `n_items`", "vs backend" or
 "vs ZNE on/off" a one-liner.
 
-The `"optimized"` executor cannot batch across instances — each gets its own
-best backend and its own layout — so it loops, but it still batches the ZNE
-noise scales within each instance.
+The `"optimized"` executor transpiles every instance once, then folds all of
+them at all their scales — plus Mitiq's folds when the baseline is requested —
+and submits everything through `mitigation.zne.run_zne_batch`: **one job per
+backend**, so one job whenever `BatchConfig.backend` is given (the paper's
+path). With a candidate pool, each instance picks its lowest-error backend and
+there is one job per distinct backend chosen.
+
+`run_iteration_sweep` puts every `r`-variant of one instance (and, for ZNE,
+every fold of every variant) into one job.
 
 ## Contents
 
@@ -35,6 +41,7 @@ noise scales within each instance.
 | `_run_batched` | internal function |
 | `_run_optimized` | internal function |
 | `run_random_batch` | function |
+| `run_iteration_sweep` | function |
 
 ---
 
@@ -48,11 +55,13 @@ noise scales within each instance.
 - `backend: Any | None` — an explicit backend for the `"noisy"` executor.
 - `backend_config: BackendSelectionConfig | None` — used to build a bundle when no backend is given.
 - `service: Any | None` — an existing `QiskitRuntimeService`, required to reach real hardware.
-- `zne_config: ZNESamplingConfig | None` — settings for `"optimized"`; defaults are supplied if omitted.
-- `run_mitiq_baseline: bool = False` — also compute Mitiq's ZNE of `P(solution)`. Requires the `dgssp[mitiq]` extra.
+- `zne_config: ZNESamplingConfig | None` — settings for `"optimized"`; defaults are supplied if omitted. Scale 1 is always measured (it is the unmitigated result) and is prepended when missing.
+- `run_mitiq_baseline: bool = False` — also fold with Mitiq inside the same job and extrapolate offline with its factories. Requires the `dgssp[mitiq]` extra.
 - `seed_simulator`, `seed_transpiler: int | None` — reproducibility seeds.
 - `optimization_level: int = 1` — for the ideal/noisy paths.
 - `mode: str = "auto"` — forwarded to `runtime.execution_mode`.
+- `bootstrap_samples: int = 1000`, `bootstrap_seed: int = 0` — intervals on the unmitigated metrics.
+- `compute_reference: bool = True` — compute each instance's exact noiseless distribution (`execution.exact_index_distribution`) so results carry distances to it.
 
 ---
 
@@ -72,16 +81,17 @@ Everything measured for one instance.
 - `depth: int | None`, `two_qubit_depth: int | None` — circuit depth overall and counting only two-qubit gates (barriers excluded).
 - `two_qubit_count: int | None` — two-qubit gate applications in the executed circuit; the resource number the scaling analysis is built on.
 - `physical_qubits: list[int] | None` — physical qubits the circuit landed on, in virtual-qubit order.
-- `counts_per_scale: dict[int, dict[str, int]] | None` — raw counts keyed by ZNE noise scale, when mitigation ran. Archived because they cannot be reconstructed from the mitigated distribution, and resampling them is what bootstrap CIs need.
-
-`InstanceResult.transpiled_summary()` returns the four size metrics in the same shape as `dgssp.transpilation.transpiled_metrics`.
-
-The `"optimized"` executor reuses the scale-1 counts as the unmitigated measurement when 1 is among the ZNE scales (folding at scale 1 is the identity), so an instance costs one job rather than two.
+- `counts_per_scale: dict[float, dict[str, int]] | None` — raw counts keyed by **realised** ZNE noise scale, when mitigation ran. Archived because they cannot be reconstructed from the mitigated distribution, and resampling them is what bootstrap CIs need.
 - `elapsed_s: float | None` — wall-clock seconds.
+- WP4 additions (all defaulted): `best_seed`, `one_q_physical`, `two_q_physical`, `virtual_gate_count`, `survival` (from `backends.physical_gate_counts` and `metrics.survival_estimate`), `calibration_timestamp`, `job_id`, `p_uniform`, `reference_distribution`, `metrics_ci` (bootstrap intervals and distances to the reference), `zne_fit`, `pointwise`, `pathology`, `mitiq` (the blocks of `zne.analyse_zne_item`), `mitigation_mode`, `renorm`, `fold_seed`.
+
+The `"optimized"` executor always measures scale 1 and uses those counts as the unmitigated result, so the unmitigated and mitigated numbers come from the same job.
 
 **Methods**
 
 - `to_dict() -> dict` — **Output:** a flat JSON-serialisable dictionary; nested dataclasses are expanded and the instance appears as its items, target and name.
+- `transpiled_summary() -> dict` — the size metrics of `transpilation.transpiled_metrics` plus `one_q_physical`, `two_q_physical`, `virtual_gate_count`, `survival`, `best_seed`.
+- `to_record(*, executor, shots, mitigation_mode=None, job_id=None, extra_metrics=None) -> ResultRecord` — the frozen archive schema (`dgssp.records`), `schema_version = 2`, no provenance (the paper scripts stamp it).
 
 ---
 
@@ -129,3 +139,14 @@ Generates random feasible instances and runs them as one batch.
 
 - **Inputs:** how many instances; items per instance; `max_value`; a base `seed` — instance *k* uses `seed + k`, so batches are reproducible and non-overlapping; an optional `BatchConfig`.
 - **Output:** a `BatchResult`, as from `run_batch`.
+
+---
+
+### `run_iteration_sweep(instance, r_values, backend=None, *, executor="ideal", zne_config=None, shots=10000, best_seeds=None, seed_min=0, seed_max=32, optimization_level=3, scales_per_r=None, include_mitiq=False, seed_simulator=None, bootstrap_samples=1000, bootstrap_seed=0, mode="auto") -> dict`
+
+`P(solution)` against the Grover iteration count, in **one** job.
+
+- Every `r`-variant is built and transpiled once at `optimization_level`: with its recorded seed when `best_seeds` has one (the WP3 `best_seed` of the `r_opt` variant), otherwise by the `[seed_min, seed_max)` SABRE sweep (on a backend without a coupling map only `seed_min` is used).
+- `executor`: `"ideal"` (noiseless Aer when `backend` is `None`), `"noisy"`, or `"zne"` (each variant folded at `scales_per_r.get(r, zne_config.scales)`, scale 1 always included, optionally with Mitiq's folds).
+- **Output:** `{"instance", "M", "p_uniform", "solution_bitstrings", "executor", "backend", "job_id", "rows"}`; each row has `iterations`, `best_seed`, the transpiled sizes, `survival` (calibrated backends), `p_sol` and `p_sol_ci`, the analytic `sin²((2r+1)θ)` (`solvers.grover_success_probability`), the raw counts and, for ZNE, the scalar fit (`zne`), `pathology` and `mitiq`.
+- Tested: on the ideal simulator every `r` matches the analytic curve within 4σ, in one `sample_counts` call.

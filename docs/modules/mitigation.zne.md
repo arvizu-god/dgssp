@@ -2,167 +2,257 @@
 
 ## What the module does
 
-Zero-noise extrapolation for a *sampling* algorithm.
+Zero-noise extrapolation for a *sampling* algorithm, with two estimators and
+the choice explicit:
 
-Standard ZNE mitigates an expectation value. The D-G algorithm produces a
-distribution over bitstrings, so this module extrapolates **each bitstring's
-probability independently** to zero noise, then clips and renormalizes the
-result into a valid distribution. Every fitting model is available and the
-choice is explicit, which makes the extrapolation auditable.
+- **scalar** (the default) — extrapolate one proportion, `P(solution)`, by
+  weighted least squares with binomial weights: `linear`, `quadratic`,
+  `richardson` or `exponential` (`a + b·exp(−c·λ)`, `a` fixed at `P_uniform`
+  in the paper). Every fit returns its covariance, residuals, degrees of
+  freedom, `chi2_red`, a bootstrap interval and a **resolvability flag**.
+- **pointwise** — extrapolate every bitstring's probability independently, then
+  map back to a distribution by clip-and-renormalise or by Euclidean
+  projection onto the simplex. This is the estimator whose failure on
+  infeasible instances C3 characterises (`pathology_diagnostic`).
 
-Two ordering bugs from the previous implementation are fixed here, and the fix
-is the whole point of the module:
+Two ordering bugs from the thesis stay fixed: **transpile first, then fold**
+(folds land on ISA gates; folded circuits are submitted at optimization level
+0) and **search the layout once** (every scale folds the same physical
+circuit). To reproduce a WP3-ranked circuit use `seed_min=best_seed,
+seed_max=best_seed+1`; the config's default range is 0..63, WP3 ranked on
+0..31.
 
-- **Transpile first, then fold.** Folding a *logical* circuit and then transpiling at optimization level 3 lets the gate-cancellation passes undo the folds — the noise never actually gets scaled. Here the circuit is transpiled once to ISA level, the *physical* gates are folded, and the folded circuits are submitted at optimization level 0 so nothing is re-optimized or re-routed.
-- **Search the layout once.** Re-running a seed sweep per scale changes the physical circuit between scales, which silently invalidates the extrapolation: the fitted points no longer lie on one noise curve.
+**Scales are real numbers ≥ 1.** Odd integers fold every gate uniformly;
+other scales fold a seeded subset once more. Fits use the **realised** scale —
+the exact rational ratio of two-qubit gate counts — never the nominal one.
 
-All scales are submitted as a single batched job.
+**One job.** `run_zne_batch` folds many instances at all their scales (plus
+Mitiq's folds of the same circuits) and submits everything through one
+`runtime.sample_counts` call. Analysis (`analyse_zne_item`) is offline.
 
 ## Contents
 
 | Name | Kind |
 |---|---|
-| `fold_transpiled` | function |
+| `fold_plan`, `realised_scale` | functions |
+| `FoldResult` | dataclass |
+| `fold_isa`, `fold_transpiled` | functions |
 | `rebase_to_backend` | function |
-| `zne_fit_single_value` | function |
 | `ZNESamplingConfig` | dataclass |
-| `transpile_once` | function |
-| `run_zne_scales` | function |
-| `extrapolate_distribution` | function |
-| `zne_mitigated_distribution` | function |
-| `dgssp_zne_mitigated_distribution` | function |
+| `resolve_asymptote` | function |
+| `richardson_weights`, `zne_fit_single_value` | functions |
+| `fit_scalar_series`, `extrapolate_scalar`, `is_resolved` | functions |
+| `project_to_simplex`, `clip_renormalise`, `simplex_renormalise` | functions |
+| `pointwise_raw`, `extrapolate_distribution` | functions |
+| `zne_bootstrap` | function |
+| `plan_scales` | function |
+| `pathology_diagnostic` | function |
+| `transpile_once`, `transpile_once_seeded`, `run_zne_scales` | functions |
+| `ZNEItem`, `ZNEItemRun`, `ZNEBatchRun` | dataclasses |
+| `run_zne_batch`, `analyse_zne_item` | functions |
+| `zne_mitigated_distribution`, `dgssp_zne_mitigated_distribution` | functions |
+| `depolarised_probability`, `synthetic_depolarising_counts`, `expected_extrapolation` | functions |
 | `fold_local_circuit` | deprecated function |
 
 ---
 
-### `fold_transpiled(tqc, scale_factor) -> QuantumCircuit`
+### Partial folding
 
-Folds an already-transpiled circuit's gates as `G (G† G)^n`. Because the input
-is ISA-level, the folds land on the physical gates that actually carry the
-noise, and the fixed layout is preserved.
+#### `fold_plan(scale_factor, n_gates) -> (k, m)` and `realised_scale(scale_factor, n_gates) -> Fraction`
 
-- **Inputs:** `tqc: QuantumCircuit` (transpiled); `scale_factor: int`, an odd positive integer — `1` returns the circuit unchanged, `3` triples each gate, and so on.
-- **Output:** the folded circuit. Measurements, barriers, delays and resets are copied through once and never folded.
-- **Raises:** `ValueError` if the scale factor is even or non-positive.
+Every gate is folded `k = floor((λ−1)/2)` times (`G (G†G)^k`, scale `2k+1`),
+then `m = round(n·(λ−2k−1)/2)` gates once more. Realised scale
+`2k+1 + 2m/n`, within `1/n` of `λ`.
 
----
+#### `fold_isa(tqc, scale_factor, *, seed=0, virtual_gates=("rz",)) -> FoldResult`
 
-### `rebase_to_backend(circuit, backend) -> QuantumCircuit`
+The scale is measured on the **two-qubit** count (ε₂ dominates survival). A
+seeded subset of `m₂` two-qubit gates gets the extra fold; an independently
+seeded subset with the same *fraction* of physical single-qubit gates gets one
+too, so single-qubit noise scales alongside (`realised_scale_1q`). Virtual
+gates are never in the partial layer. Subsets are prefixes of one permutation,
+so for a fixed seed they are nested across scales. Odd integers reproduce the
+integer-only implementation gate for gate (tested). Deterministic in
+`(circuit, scale, seed)`. Measurements, barriers, delays and resets are never
+folded; the layout is preserved.
 
-Rewrites a folded circuit back into the backend's native gate set.
+`FoldResult` fields: `circuit`, `nominal_scale`, `realised_scale`
+(`Fraction`), `realised_scale_1q`, `uniform_folds`, `n_two_q`,
+`n_two_q_extra`, `n_one_q_physical`, `n_one_q_extra`, `seed`.
 
-Folding inserts `op.inverse()` gates, and the inverse of a native gate is not
-necessarily native itself: on IBM devices `sx` inverts to `sxdg`, which the
-device — and the Aer noise model derived from it — cannot execute. Without this
-step a folded circuit fails at submission with an *"unknown instruction"* error.
+> **Correction to the WP4 brief.** The brief said the partial layer folds
+> two-qubit gates "with their 1Q neighbours as `fold_transpiled` already
+> groups them". `fold_transpiled` never grouped gates — it folds every
+> instruction independently. The partial layer therefore selects physical
+> single-qubit gates independently, at the same fraction.
 
-Only gate **definitions** are translated. Layout and routing are untouched,
-which is the entire point: re-routing between noise scales is exactly the bug
-the transpile-once design exists to avoid.
+#### `fold_transpiled(tqc, scale_factor, *, seed=0, virtual_gates=("rz",)) -> QuantumCircuit`
 
-- **Inputs:** `circuit: QuantumCircuit` (a folded ISA-level circuit); `backend: BackendV2` (whose `target` defines the native basis).
-- **Output:** the circuit expressed in that basis. If the backend has no target, or translation fails, the input is returned unchanged so permissive simulators keep working.
+`fold_isa(...).circuit`. Raises `ValueError` for scales below 1 or non-finite.
 
-Applied automatically inside `run_zne_scales` and inside the Mitiq executor.
+#### `rebase_to_backend(circuit, backend) -> QuantumCircuit`
 
----
-
-### `zne_fit_single_value(method, xdata, ydata) -> tuple[float, ndarray, ndarray, Callable]`
-
-Fits one scalar against noise scale and extrapolates it to zero.
-
-- **Inputs:** `method: str` — `"linear"`, `"quadratic"` or `"exponential"`; `xdata: Sequence[float]` — the noise scales; `ydata: Sequence[float]` — the observed value at each scale (here, one bitstring's probability).
-- **Output:** `(zero_value, ydata_array, popt, model_fn)` — the extrapolated value at zero noise plus the inputs, fitted parameters and model function, the latter three for diagnostics and plots.
-- **Raises:** `ValueError` for an unknown model, or when there are fewer data points than the model has parameters.
-- **Fallback:** if `curve_fit` fails to converge, the least-noisy observation is returned rather than aborting the run, so one pathological bitstring cannot kill a whole batch.
-
-**How each model is solved.** `linear` and `quadratic` are linear in their
-parameters, so they are solved in closed form by least squares
-(`np.linalg.lstsq` on a Vandermonde design). That is exact, deterministic, free
-of any initial-guess sensitivity, and about ten times faster — which matters
-because this runs once *per bitstring*, on probabilities spanning several orders
-of magnitude. Only `exponential` is genuinely nonlinear and still uses
-`scipy.optimize.curve_fit`. `popt` keeps the same ordering in both paths, so
-callers see no difference.
-
-**Degrees of freedom.** With as many noise scales as the model has parameters
-(two scales and `linear`, three and `quadratic`/`exponential`) the fit is
-*exactly determined*. The extrapolation is still a valid Richardson estimator —
-two scales and `linear` gives exactly `(3*y1 - y3)/2` — but there is no residual
-to test the model against, so the data say nothing about whether the model is
-right. Use **at least three scales** for any claim about the extrapolation
-itself; two is a smoke-test setting only.
-
-In that exactly determined case `curve_fit` cannot estimate a parameter
-covariance and emits `OptimizeWarning`. Since the covariance is discarded
-anyway, the warning is suppressed for that case *only* — a genuine fit failure
-at three or more scales still surfaces.
+Translates inverse gates (`sx → sxdg`) back to the native basis with
+`BasisTranslator` only — no layout, no routing — and re-attaches the input's
+layout. After it, a folded circuit is ISA-valid for the backend
+(`target.instruction_supported` on every instruction, tested).
 
 ---
 
 ### `ZNESamplingConfig` — dataclass
 
-**Fields**
+- `scales: Sequence[float] = [1, 3, 5]` — nominal scales ≥ 1.
+- `shots_per_scale: int = 10_000`.
+- `method: "linear" | "quadratic" | "richardson" | "exponential" = "linear"`.
+- `clip`, `renormalize: bool = True` — legacy flags of `renorm="clip"`.
+- `seed_min = 0`, `seed_max = 64`, `optimization_level = 3`,
+  `layout_method = "sabre"`, `seed_simulator = None`.
+- `mode: "scalar" | "pointwise" = "scalar"` — which estimate a batch reports
+  as the mitigated value (both are always computed).
+- `renorm: "clip" | "simplex" = "clip"` — pointwise only.
+- `asymptote: float | "p_uniform" | None = None` — exponential only. A float
+  fixes `a`; `"p_uniform"` fixes it per instance to that instance's `M/2ⁿ`
+  (what a multi-instance batch needs); `None` fits it freely (≥ 3 scales). In
+  pointwise mode any non-`None` value fixes each bitstring's asymptote at
+  `2⁻ⁿ`.
+- `fold_seed: int = 0` — partial-folding and Mitiq-folding seed.
+- `n_bootstrap: int = 500`, `bootstrap_seed: int = 0`.
 
-- `scales: Sequence[int] = [1, 3, 5]` — odd positive noise-scale factors.
-- `shots_per_scale: int = 10_000` — shots collected at each scale.
-- `method: str = "linear"` — extrapolation model.
-- `clip: bool = True` — clip negative extrapolated probabilities to zero.
-- `renormalize: bool = True` — rescale the distribution to sum to one.
-- `seed_min: int = 0`, `seed_max: int = 64` — seed range for the *single* layout search; set `seed_max = seed_min + 1` to skip it.
-- `optimization_level: int = 3` — level for that one transpilation. Folded circuits are always submitted at level 0.
-- `layout_method: str = "sabre"`.
-- `seed_simulator: int | None = None` — applied only on simulators.
-
----
-
-### `transpile_once(circuit, backend, zne_cfg) -> QuantumCircuit`
-
-Produces the single ISA-level circuit that every scale will fold.
-
-- **Inputs:** the logical circuit; the backend; the config.
-- **Output:** the transpiled circuit — from `find_best_seed` when the seed range has length > 1, otherwise a single-seed transpilation.
+Unknown `method`/`mode`/`renorm`/`asymptote` values raise at construction.
 
 ---
 
-### `run_zne_scales(tqc, backend, zne_cfg) -> dict[int, dict[str, int]]`
+### Scalar estimator
 
-Folds at every scale and samples all of them in **one** job.
+#### `fit_scalar_series(scales, values, shots, cfg, *, p_uniform=None) -> dict`
 
-- **Inputs:** `tqc` (ISA level); the backend; the config.
-- **Output:** counts keyed by noise scale.
-- **Raises:** `ValueError` if `scales` is empty or contains a non-odd / non-positive value.
+Weighted fit (`w = 1/σ²`, `σ = metrics.proportion_sigma`):
+
+- `linear`/`quadratic` — closed-form WLS, `cov = (XᵀWX)⁻¹`.
+- `richardson` — Lagrange interpolation of degree `len(scales)−1`, evaluated at
+  0 (`richardson_weights`); exact, `dof = 0`, `chi2_red = None`,
+  `value_se = sqrt(Σ Lᵢ² σᵢ²)`.
+- `exponential` with a fixed asymptote — variable projection: for fixed rate
+  `c` the amplitude is linear, so `χ²(c)` is minimised by a grid plus
+  golden-section search over `c ∈ [0, EXP_RATE_MAX = 10]`; no initial guess.
+  Covariance from the Jacobian. A fit at the bound is flagged
+  `rate_at_bound`.
+- `exponential` with a free asymptote — `curve_fit`, bounded rate.
+
+Returns `value`, `value_se`, `params`, `param_names`, `cov`, `fitted`,
+`residuals`, `n_params`, `dof`, `chi2`, `chi2_red`, `fit_ok`,
+`rate_at_bound`, `scales`, `observed`, `sigma`, `shots`, `asymptote`,
+`null_value`, `resolved`, `resolvability_k`, `value_at_min_scale`,
+`reported_value`, `reported_source`.
+
+#### Resolvability: `is_resolved(values, shots, null_value, *, k=2)`
+
+`resolved = True` only if **every** scale has `|obs(λ) − P_uniform| ≥ 2·SE`.
+SE is the closed-form binomial SE, which is the exact multinomial-bootstrap SE
+of a proportion, so the flag is deterministic. An unresolved fit still returns
+its numbers, but `reported_value` is the lowest-scale observation
+(`reported_source = "min_scale"`): the paper reports `λ = 1` for it.
+
+#### `extrapolate_scalar(counts_per_scale, observable_fn, cfg, *, p_uniform=None) -> dict`
+
+Counts-level entry point (keys = realised scales). Raises on a zero-shot scale.
 
 ---
 
-### `extrapolate_distribution(counts_per_scale, zne_cfg) -> dict[str, float]`
+### Pointwise estimator
 
-- **Inputs:** counts keyed by scale; the config.
-- **Output:** the mitigated distribution over every bitstring seen at any scale. Bitstrings that were zero at all scales stay zero without a fit. Clipping and renormalization are applied per the config.
-- **Raises:** `ValueError` if any scale collected zero shots.
+#### `project_to_simplex(v) -> ndarray`
+
+Euclidean projection onto the probability simplex, sorting-based
+O(K log K) — Duchi, Shalev-Shwartz, Singer & Chandra, *Efficient projections
+onto the ℓ1-ball for learning in high dimensions*, ICML 2008. Row-wise on 2-D
+input. Never farther from `v` in L2 than clip-and-renormalise (provable,
+tested); **not** guaranteed closer in D_TV to any reference (recorded in
+`paper/data/zne_synthetic.json`, not asserted).
+
+#### `clip_renormalise(raw)`, `simplex_renormalise(raw)`, `pointwise_raw(counts_per_scale, cfg)`
+
+The unconstrained per-bitstring extrapolation (bitstrings zero at every scale
+stay zero) and its two renormalisations.
+
+#### `extrapolate_distribution(counts_per_scale, zne_cfg) -> dict`
+
+`pointwise_raw` followed by `cfg.renorm`.
+
+---
+
+### `zne_bootstrap(counts_per_scale, cfg, *, observable_fn=None, reference=None, solution_bitstrings=None, p_uniform=None, B=None, seed=None, alpha=0.05) -> dict`
+
+Resamples the counts at every scale multinomially, re-runs the whole estimator
+(weights included), and takes percentile intervals.
+
+- scalar mode: `{"point", "lo", "hi", "se", "n_failed", "B", "seed", "alpha",
+  "obs_se", "fit"}`.
+- pointwise mode: `{"distribution", "intervals" (per bitstring), "tv" (to
+  `reference`), "solution_probability", "renorm", "B", "seed", "alpha"}`.
 
 ---
 
-### `zne_mitigated_distribution(circuit, backend, zne_cfg, *, transpiled=None) -> dict[str, float]`
+### `plan_scales(survival, signal, shots, candidates, k=3, *, p_uniform=None, n_points=None) -> list[float]`
 
-The full pipeline: transpile once, fold, batch-sample, extrapolate.
+Pre-registers the scale grid: the prefix of `candidates` (from 1) whose
+*predicted* signal `S^λ·(P_ideal − P_uniform)` stays ≥ `k·σ`, with σ evaluated
+at the predicted `P(λ)`. `[1.0]` alone means nothing is resolvable. `survival`
+is an upper bound, so the plan is optimistic; `resolved` checks it after the
+fact. Pathology instances (no signal) need their grid planned separately.
 
-- **Inputs:** the logical circuit; a noisy backend; the config; `transpiled: QuantumCircuit | None` — an ISA-level circuit to reuse instead of transpiling again. Pass this when the caller has already searched a layout, so the unmitigated and mitigated numbers describe exactly the same physical circuit.
-- **Output:** the zero-noise-extrapolated distribution.
+### `pathology_diagnostic(counts_per_scale, cfg, reference) -> dict`
+
+Run on **every** instance. Returns `fraction_positive_slope` (least-squares
+linear slope per bitstring, model-free), `raw_total_mass`,
+`clip_mass_removed`, `clip_mass_moved`, `simplex_mass_moved` (L1),
+`tv_raw_min_scale`, `tv_pointwise_clip`, `tv_pointwise_simplex`,
+`clip_worse_than_raw`, `simplex_worse_than_raw`, `reference_is_uniform`,
+`raw_distribution`. The reference is `execution.exact_index_distribution`:
+exactly uniform for M = 0 and P-n2-M2-03, the noiseless distribution otherwise.
 
 ---
 
-### `dgssp_zne_mitigated_distribution(instance, dg_config, backend, zne_cfg, *, num_solutions=None) -> dict[str, float]`
+### Pipeline
 
-Convenience wrapper that builds the D-G circuit and then mitigates it.
+- `transpile_once_seeded(circuit, backend, cfg) -> (tqc, seed)`;
+  `transpile_once(...)` returns only the circuit.
+- `run_zne_scales(tqc, backend, cfg) -> dict[float, counts]` — one instance,
+  one job, keys = realised scales.
+- `zne_mitigated_distribution`, `dgssp_zne_mitigated_distribution` — the
+  pointwise pipeline end to end.
 
-- **Inputs:** the instance; a `DGConfig`; a noisy backend; the ZNE config; `num_solutions: int | None`, used when `iterations == "auto"`.
-- **Output:** the mitigated distribution over index-register bitstrings.
+### One job for many instances
 
----
+#### `ZNEItem(name, circuit, scales=None, solution_bitstrings=())`
+
+#### `run_zne_batch(items, backend, cfg, *, include_mitiq=False, mode="auto") -> ZNEBatchRun`
+
+Folds every item at every scale (`fold_isa`, seed `cfg.fold_seed`), rebases,
+optionally adds Mitiq's `fold_gates_at_random` folds of the same ISA circuit
+at the item's **realised** scales (Mitiq's scale-1 circuit is the unfolded one,
+so the item's own λ = 1 counts are reused), and submits the list in **one**
+`sample_counts` call. `ZNEItemRun` holds `nominal_scales`, `realised_scales`
+(+ `_exact`, `_1q`), `counts_per_scale`, `mitiq_scales`,
+`mitiq_realised_scales` (Mitiq measures its scale on a fidelity-weighted count
+of all gates, so its two-qubit ratio differs; recorded), `mitiq_counts_per_scale`,
+`pub_indices`. `ZNEBatchRun` adds `job_id`, `backend_name`, `n_circuits`,
+`shots`. Raises if two nominal scales realise to the same scale.
+
+#### `analyse_zne_item(run, cfg, *, solution_bitstrings, p_uniform, reference=None) -> dict`
+
+Every estimator offline: `{"scalar", "pointwise", "pathology", "mitiq"}`.
+A hardware job fetched later with `runtime.fetch_result` is analysed by exactly
+this code.
+
+### Synthetic depolarising model
+
+`depolarised_probability(S, λ, P_ideal, P_uniform)`,
+`synthetic_depolarising_counts(S, scales, P_ideal, P_uniform, shots, rng)`,
+`expected_extrapolation(cfg, scales, S, P_ideal, P_uniform, shots)` (the
+estimator on the exact curve: its analytic bias). Used by
+`tests/test_zne_synthetic.py` and `paper/scripts/zne_synthetic.py`.
 
 ### `fold_local_circuit(circuit, scale_factor)` — deprecated
 
-Alias for `fold_transpiled`, kept so existing notebooks keep running. Emits a
-`DeprecationWarning`. Note the semantic difference: folding is only meaningful
-on an ISA-level circuit.
+Alias for `fold_transpiled`; emits a `DeprecationWarning`.

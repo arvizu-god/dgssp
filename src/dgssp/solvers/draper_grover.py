@@ -107,6 +107,38 @@ def optimal_iterations(n_ind: int, num_solutions: int) -> int:
     return max(1, math.floor(math.pi / (4 * theta)))
 
 
+def grover_success_probability(n_ind: int, num_solutions: int, iterations: int) -> float:
+    """
+    Noiseless success probability after ``r`` Grover iterations.
+
+    ``P(r) = sin^2((2r + 1) theta)`` with ``theta = arcsin(sqrt(M / N))`` and
+    ``N = 2**n_ind``.  This is the analytic curve the iteration sweep is
+    compared against.
+
+    Parameters
+    ----------
+    n_ind:
+        Number of index qubits.
+    num_solutions:
+        Number ``M`` of marked states.  ``M = 0`` returns exactly ``0.0``
+        (no marked state, no amplitude to amplify); unlike
+        :func:`optimal_iterations` there is no clamping.
+    iterations:
+        Number ``r >= 0`` of Grover iterations.
+
+    Returns
+    -------
+    float
+        The probability of measuring a marked state.
+    """
+    n_total = 2**int(n_ind)
+    n_marked = int(num_solutions)
+    if n_marked <= 0:
+        return 0.0
+    theta = math.asin(math.sqrt(min(1.0, n_marked / n_total)))
+    return math.sin((2 * int(iterations) + 1) * theta) ** 2
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -971,6 +1003,7 @@ __all__ = [
     "encoding_without_guard_bit",
     "flatten_containers",
     "optimal_iterations",
+    "grover_success_probability",
     "qft_no_swaps",
     "resource_model",
     "two_adic_valuation",

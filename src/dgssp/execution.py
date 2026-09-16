@@ -33,8 +33,10 @@ from .backends import (
     build_ideal_aer_backend,
     compute_accumulated_errors,
 )
+from .instance import SubsetSumInstance
 from .mitigation import ZNESamplingConfig, transpile_once, zne_mitigated_distribution
 from .runtime import backend_name, execution_mode, sample_counts
+from .solvers import DGConfig, DGSSPSolver
 
 # ---------------------------------------------------------------------------
 # Result container
@@ -133,6 +135,40 @@ def execute_ideal(
         counts=counts,
         transpiled_circuit=tqc,
     )
+
+
+def exact_index_distribution(
+    instance: SubsetSumInstance, iterations: int
+) -> dict[str, float]:
+    """
+    The exact noiseless distribution of the measured index register.
+
+    The D-G circuit is built without measurement, simulated as a statevector,
+    and marginalised onto the index register.  This is the reference of the
+    pathology diagnostic: exact (no shot noise), and for every M = 0 instance
+    -- and for M/N = 1/2 at one iteration -- equal to the analytic uniform
+    distribution to floating-point precision.
+
+    Parameters
+    ----------
+    instance:
+        The instance.
+    iterations:
+        Grover iterations.
+
+    Returns
+    -------
+    dict[str, float]
+        All ``2**n_items`` outcomes, keyed exactly as sampled counts are (the
+        index register is measured qubit ``k`` -> clbit ``k``, so Qiskit's
+        marginal ordering and the counts' ordering coincide).
+    """
+    from qiskit.quantum_info import Statevector
+
+    qc = DGSSPSolver(DGConfig(iterations=int(iterations), measure=False)).build_circuit(instance)
+    n = instance.n_items
+    probs = Statevector.from_instruction(qc).probabilities(qargs=list(range(n)))
+    return {format(i, f"0{n}b"): float(p) for i, p in enumerate(probs)}
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +391,7 @@ def execute_optimized_mitigated(
 __all__ = [
     "ExecutionResult",
     "execute_ideal",
+    "exact_index_distribution",
     "execute_noisy",
     "select_best_backend_by_error",
     "execute_optimized_mitigated",

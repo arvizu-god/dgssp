@@ -20,7 +20,7 @@ What it does
    one ZNE would later fold, so its metrics are the ones that matter.
 3. Estimates survival from the device's median calibrated gate errors, reusing
    :func:`dgssp.backends.median_gate_errors` and
-   :func:`resource_scaling.survival_estimate` -- neither is reimplemented.
+   :func:`dgssp.metrics.survival_estimate` -- neither is reimplemented.
 4. Measures ``P_ideal``, the noiseless success probability at ``r_opt``, on a
    seeded ``AerSimulator`` through :func:`dgssp.execution.execute_ideal` (and so
    through :func:`dgssp.runtime.sample_counts`, the only sampler entry point).
@@ -96,13 +96,13 @@ if str(SCRIPTS_DIR) not in sys.path:  # pragma: no cover - script bootstrap
 
 from _common import INSTANCES_DIR, record_provenance, save_record  # noqa: E402
 from dgssp.backends import median_gate_errors, physical_gate_counts  # noqa: E402
-from dgssp.decoding import solution_probability  # noqa: E402
 from dgssp.execution import execute_ideal  # noqa: E402
 from dgssp.instance import SubsetSumInstance  # noqa: E402
+from dgssp.metrics import solution_probability, survival_estimate  # noqa: E402
 from dgssp.runtime import backend_name  # noqa: E402
 from dgssp.solvers.draper_grover import DGConfig, DGSSPSolver  # noqa: E402
 from dgssp.transpilation import find_best_seed, transpiled_metrics  # noqa: E402
-from resource_scaling import resolve_backends, survival_estimate  # noqa: E402
+from resource_scaling import resolve_backends  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Frozen selection parameters

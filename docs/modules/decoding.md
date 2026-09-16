@@ -16,6 +16,15 @@ evaluators, the mitigation code and the batch runner cannot disagree about
 which bitstring corresponds to which subset. The module is Qiskit-free and
 depends only on `dgssp.instance`.
 
+> **Deprecated (WP4).** `counts_to_probs`, `solution_probability` and
+> `distribution_solution_probability` are metrics, not bit translation, and
+> moved to [`dgssp.metrics`](metrics.md) so there is one implementation.
+> `from dgssp.decoding import solution_probability` (or attribute access)
+> still works, emits a `DeprecationWarning`, and returns the `dgssp.metrics`
+> function itself — identical values by construction. They are no longer in
+> `decoding.__all__`; `dgssp.solution_probability` and `dgssp.counts_to_probs`
+> come from `metrics` and do not warn.
+
 ## Contents
 
 | Name | Kind |
@@ -25,9 +34,9 @@ depends only on `dgssp.instance`.
 | `bitstring_to_subset` | function |
 | `bitstring_to_solution` | function |
 | `bit_is_solution` | function |
-| `counts_to_probs` | function |
-| `solution_probability` | function |
-| `distribution_solution_probability` | function |
+| `counts_to_probs` | deprecated → `metrics` |
+| `solution_probability` | deprecated → `metrics` |
+| `distribution_solution_probability` | deprecated → `metrics` |
 | `exact_solution_bitstrings` | function |
 
 ---
@@ -72,27 +81,10 @@ The inverse translation.
 
 ---
 
-### `counts_to_probs(counts) -> dict[str, float]`
+### `counts_to_probs`, `solution_probability`, `distribution_solution_probability` — deprecated
 
-- **Input:** `counts: Mapping[str, int]`, bitstring → shots.
-- **Output:** bitstring → empirical probability. Returns all zeros if the total shot count is zero, rather than dividing by zero.
-
----
-
-### `solution_probability(counts, solution_states) -> float`
-
-- **Inputs:** `counts: Mapping[str, int]`; `solution_states: Iterable[str]` (the outcomes considered correct).
-- **Output:** the fraction of shots landing on a solution, or `0.0` if no shots were collected. This is the library's headline success metric.
-
----
-
-### `distribution_solution_probability(distribution, solution_states) -> float`
-
-The same quantity for an already-normalised distribution — notably a
-ZNE-mitigated one, whose "counts" are not integers.
-
-- **Inputs:** `distribution: Mapping[str, float]`; `solution_states: Iterable[str]`.
-- **Output:** the summed probability mass on the solution bitstrings.
+Moved to [`dgssp.metrics`](metrics.md); see the note above. Signatures and
+values are unchanged.
 
 ---
 

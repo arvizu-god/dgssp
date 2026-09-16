@@ -67,8 +67,14 @@ python paper/scripts/freeze_versions.py
 |---|---|---|
 | `freeze_versions.py` | `requirements-lock.txt` | environment of record |
 | `describe_account.py` | stdout, feeds `hardware/account_facts.md` | plan limits, devices |
-| `smoke_test.py` | `data/smoke.json` | WP1 wiring check |
+| `smoke_test.py` | `data/smoke.json` (next free suffix) | wiring check; since WP4 the ZNE leg is the one-job path with schema-2 records |
 | `resource_scaling.py` | `data/resources.json`, `data/resources_fits.json`, `figures/fig_resources.pdf` | WP2 / C1 |
+| `build_family.py` | `instances/family.json` (`--check` re-derives it) | WP3 frozen instance family |
+| `select_hardware_subset.py` | `instances/hardware_subset.json` | WP3 hardware subset + edge instance |
+| `build_sweep.py` | `instances/sweep.json` | WP3 iteration-sweep instances |
+| `family_table.py` | `tex/family_table.tex` | WP3 appendix table |
+| `zne_synthetic.py` | `data/zne_synthetic.json` | WP4 / C3: bias, coverage, resolvability of the ZNE estimators; clip vs simplex (no circuits) |
+| `iteration_sweep.py` | `data/sweep_<executor>.json` | WP4 / C3: P_sol vs Grover iterations, one job per instance |
 
 `resource_scaling.py` is the C1 measurement: it checks every closed form in
 `notes/resource_model.md` against the circuit the solver builds (144 asserts),
@@ -84,6 +90,8 @@ python paper/scripts/smoke_test.py
 ```
 
 Builds the `[1, 2, 3] / target 5` instance, runs it ideally, on a noisy model of
-a bundled heavy-hex fake device, and through ZNE at scales `[1, 3]`, then writes
-`data/smoke.json`. It should finish in well under two minutes on a laptop and is
-the fastest way to confirm that a fresh environment is wired up correctly.
+a bundled heavy-hex fake device, and through the single-job ZNE path at scales
+`[1, 1.5, 2, 3]` (partial folding, scalar exponential estimator, pointwise
+diagnostics, Mitiq folds when installed), then writes the next free
+`data/smoke*.json`. It should finish in about a minute on a laptop and is the
+fastest way to confirm that a fresh environment is wired up correctly.

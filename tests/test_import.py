@@ -51,6 +51,8 @@ def test_removed_symbols_are_gone():
         "dgssp.instance",
         "dgssp.encoding",
         "dgssp.decoding",
+        "dgssp.metrics",
+        "dgssp.records",
         "dgssp.runtime",
         "dgssp.backends",
         "dgssp.transpilation",

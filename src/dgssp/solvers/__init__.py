@@ -18,6 +18,7 @@ from .draper_grover import (
     DGSSPSolver,
     encoding_without_guard_bit,
     flatten_containers,
+    grover_success_probability,
     optimal_iterations,
     resource_model,
     two_adic_valuation,
@@ -36,6 +37,7 @@ __all__ = [
     "two_adic_valuation",
     "encoding_without_guard_bit",
     "optimal_iterations",
+    "grover_success_probability",
     "DPSSPSolver",
     "DPConfig",
 ]

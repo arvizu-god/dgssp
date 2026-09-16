@@ -389,6 +389,18 @@ def execution_mode(
 # ---------------------------------------------------------------------------
 
 
+class CountsList(list):  # type: ignore[type-arg]
+    """
+    The list of counts dictionaries :func:`sample_counts` returns.
+
+    A plain ``list`` in every respect, plus the ``job_id`` of the job that
+    produced it, so a results record can name its job without a second
+    channel.  ``job_id`` is ``None`` when the primitive exposed none.
+    """
+
+    job_id: str | None = None
+
+
 def sample_counts(
     mode_or_backend: Any,
     circuits: QuantumCircuit | Sequence[QuantumCircuit],
@@ -425,8 +437,9 @@ def sample_counts(
 
     Returns
     -------
-    list[dict[str, int]]
-        One counts dictionary per input circuit, in input order.
+    CountsList
+        One counts dictionary per input circuit, in input order.  It is a
+        ``list``; its ``job_id`` attribute carries the job id.
     """
     from qiskit_ibm_runtime import SamplerV2
 
@@ -440,10 +453,14 @@ def sample_counts(
     pubs = list(circuits) if isinstance(circuits, (list, tuple)) else [circuits]
     job = sampler.run(pubs, shots=shots)
 
-    log_job(job, {"n_pubs": len(pubs), "shots": shots, **(meta or {})}, run_log=run_log)
+    job_id = log_job(
+        job, {"n_pubs": len(pubs), "shots": shots, **(meta or {})}, run_log=run_log
+    )
 
     result = job.result()
-    return [pub.join_data().get_counts() for pub in result]
+    out = CountsList(pub.join_data().get_counts() for pub in result)
+    out.job_id = job_id
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +559,7 @@ __all__ = [
     "is_simulator",
     "backend_name",
     "execution_mode",
+    "CountsList",
     "sample_counts",
     "log_job",
     "fetch_result",

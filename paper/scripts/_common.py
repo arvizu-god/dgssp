@@ -34,10 +34,12 @@ import platform
 import socket
 import subprocess
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from dgssp.records import ResultRecord
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -322,94 +324,19 @@ def _current_user() -> str | None:
 
 
 @dataclass
-class Record:
+class Record(ResultRecord):
     """
-    One executed configuration: an instance run one way, on one backend.
+    :class:`dgssp.records.ResultRecord` plus provenance stamping.
 
-    A batch of instances becomes a *list* of records, not one record with
-    lists inside it, so that a single row can always be traced to a single
-    circuit execution.
-
-    Attributes
-    ----------
-    instance:
-        ``{"items", "target", "name"}`` -- the problem, verbatim.
-    n_items:
-        Index-register width (one qubit per item).
-    n_sum:
-        Sum-register width, from :func:`dgssp.encoding.build_encoding`
-        (offset encoding plus the guard bit).
-    iterations:
-        Grover iterations actually applied.
-    executor:
-        Which path produced the counts: ``"ideal"``, ``"noisy"``,
-        ``"optimized"`` or ``"hardware"``.
-    mitigation_mode:
-        ``"none"``, ``"zne_scalar"``, ``"zne_pointwise"`` or ``"mitiq"``.
-    backend:
-        Backend name the circuit ran on.
-    shots:
-        Shots per circuit, per noise scale.
-    counts:
-        Raw counts keyed by noise scale as a *string* (``"1"``, ``"3"``,
-        ``"5"``).  An unmitigated run has the single key ``"1"``.  These are
-        the only irrecoverable numbers in the file: everything else can be
-        recomputed from them.
-    metrics:
-        Derived scalars (solution probability, mitigated probability, error
-        accumulation, ...).  Free-form on purpose -- WP4 extends it.
-    transpiled:
-        ``{"two_q_count", "depth", "two_q_depth", "physical_qubits"}``, as
-        produced by :func:`dgssp.transpilation.transpiled_metrics`.
-    job_id:
-        Runtime job id for a hardware run, else ``None``.
-    provenance:
-        Output of :func:`record_provenance`.
+    The schema itself -- every field, the compatibility rules, the strict-JSON
+    serialisation -- lives in the library (:mod:`dgssp.records`), because the
+    library produces records (:meth:`dgssp.experiments.InstanceResult.
+    to_record`) and cannot import this module.  This subclass adds nothing but
+    the provenance block, which needs the git and environment probes that only
+    the paper workspace has.  Old files (``smoke*.json``) load through
+    :meth:`from_dict` unchanged: unknown keys are ignored and new keys take
+    their defaults.
     """
-
-    instance: dict[str, Any]
-    n_items: int
-    n_sum: int
-    iterations: int
-    executor: str
-    mitigation_mode: str
-    backend: str | None
-    shots: int
-    counts: dict[str, dict[str, int]]
-    metrics: dict[str, Any] = field(default_factory=dict)
-    transpiled: dict[str, Any] = field(default_factory=dict)
-    job_id: str | None = None
-    provenance: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """
-        JSON-serialisable view of the record.
-
-        Returns
-        -------
-        dict
-            All fields, with nothing dropped.
-        """
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> Record:
-        """
-        Rebuild a record from a loaded JSON object.
-
-        Parameters
-        ----------
-        payload:
-            A dictionary as written by :func:`save_record`.
-
-        Returns
-        -------
-        Record
-            Unknown keys are ignored, so a file written by a later version of
-            the schema still loads.
-        """
-        known = {f for f in cls.__dataclass_fields__}
-        return cls(**{k: v for k, v in payload.items() if k in known})
 
     @classmethod
     def from_instance_result(
@@ -417,18 +344,14 @@ class Record:
         result: Any,
         *,
         executor: str,
-        mitigation_mode: str = "none",
+        mitigation_mode: str | None = None,
         shots: int,
         job_id: str | None = None,
         backend: Any | None = None,
         extra_metrics: dict[str, Any] | None = None,
     ) -> Record:
         """
-        Convert a :class:`dgssp.experiments.InstanceResult` into a record.
-
-        This is the only place the paper scripts translate library output into
-        the archive schema, so a change to :class:`Record` never has to be
-        chased through every script.
+        Convert a :class:`dgssp.experiments.InstanceResult` into a stamped record.
 
         Parameters
         ----------
@@ -438,67 +361,37 @@ class Record:
             Label for the execution path (``"ideal"``, ``"noisy"``,
             ``"optimized"``, ``"hardware"``).
         mitigation_mode:
-            Label for the mitigation applied.
+            Label for the mitigation applied; defaults to the result's own.
         shots:
             Shots per circuit, per noise scale.
         job_id:
-            Runtime job id, for hardware runs.
+            Runtime job id; defaults to the one the result carries.
         backend:
-            Calibrated backend object to stamp into the provenance block.
-            Defaults to no backend information beyond ``result.backend_name``.
+            Calibrated backend object to stamp into the provenance block (pass
+            the fake/real device, not the Aer simulator derived from it).
+            Its calibration timestamp also fills ``calibration_timestamp``
+            when the result carries none.
         extra_metrics:
-            Additional scalars merged into ``metrics``.
+            Additional entries merged into ``metrics``.
 
         Returns
         -------
         Record
             Fully populated, with provenance already filled in.
         """
-        from dgssp.encoding import build_encoding
-
-        instance = result.instance
-        encoding = build_encoding(list(instance.items), instance.target)
-
-        if result.counts_per_scale:
-            counts = {str(s): dict(c) for s, c in result.counts_per_scale.items()}
-        else:
-            counts = {"1": dict(result.counts)}
-
-        metrics: dict[str, Any] = {
-            "solution_bitstrings": list(result.solution_bitstrings),
-            "num_solutions": result.num_solutions,
-            "solution_probability": result.solution_probability,
-            "mitigated_solution_probability": result.mitigated_solution_probability,
-            "mitiq_solution_probability": result.mitiq_solution_probability,
-            "n_qubits": result.n_qubits,
-            "elapsed_s": result.elapsed_s,
-        }
-        if result.error_metrics is not None:
-            metrics["error_metrics"] = result.error_metrics.to_dict()
-        if result.mitigated_distribution is not None:
-            metrics["mitigated_distribution"] = dict(result.mitigated_distribution)
-        if extra_metrics:
-            metrics.update(extra_metrics)
-
-        return cls(
-            instance={
-                "items": list(instance.items),
-                "target": instance.target,
-                "name": instance.name,
-            },
-            n_items=instance.n_items,
-            n_sum=encoding.n_sum,
-            iterations=result.iterations,
+        base = result.to_record(
             executor=executor,
-            mitigation_mode=mitigation_mode,
-            backend=result.backend_name,
             shots=shots,
-            counts=counts,
-            metrics=metrics,
-            transpiled=result.transpiled_summary(),
+            mitigation_mode=mitigation_mode,
             job_id=job_id,
-            provenance=record_provenance(backend),
+            extra_metrics=extra_metrics,
         )
+        record = cls(**{f.name: getattr(base, f.name) for f in fields(ResultRecord)})
+        record.provenance = record_provenance(backend)
+        stamped = record.provenance.get("backend") or {}
+        if record.calibration_timestamp is None:
+            record.calibration_timestamp = stamped.get("calibration_timestamp")
+        return record
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +443,7 @@ def save_record(path: Path | str, payload: Any) -> Path:
 
 def _serialisable(payload: Any) -> Any:
     """Normalise a payload to plain JSON types, filling missing provenance."""
-    if isinstance(payload, Record):
+    if isinstance(payload, ResultRecord):
         if not payload.provenance:
             payload.provenance = record_provenance()
         return payload.to_dict()
@@ -619,6 +512,7 @@ __all__ = [
     "utc_timestamp",
     "git_state",
     "record_provenance",
+    "ResultRecord",
     "Record",
     "save_record",
     "load_records",

@@ -9,12 +9,14 @@ Layout
 ------
 ``instance``      Problem data structures and random-instance generation.
 ``encoding``      Offset + guard-bit arithmetic for the sum register.
-``decoding``      Bitstring <-> subset translation and distribution helpers.
+``decoding``      Bitstring <-> subset translation.
+``metrics``       P(solution), distances, survival, bootstrap intervals.
+``records``       The frozen results schema.
 ``solvers``       The D-G circuit builder and the classical DP baseline.
 ``runtime``       IBM service, execution modes, batched sampling, job logging.
 ``backends``      Backend discovery, noise models, calibration-based scoring.
 ``transpilation`` SABRE layout search minimising two-qubit calibration error.
-``mitigation``    Per-bitstring ZNE plus a Mitiq comparison baseline.
+``mitigation``    Scalar and pointwise ZNE, one-job batches, Mitiq baseline.
 ``execution``     Single-circuit executors: ideal, noisy, optimized+mitigated.
 ``experiments``   Multi-instance batch runner with built-in ground truth.
 ``api``           Single-instance convenience entry point.
@@ -66,14 +68,13 @@ from .decoding import (
     bitstring_to_indices,
     bitstring_to_solution,
     bitstring_to_subset,
-    counts_to_probs,
     exact_solution_bitstrings,
     indices_to_bitstring,
-    solution_probability,
 )
 from .encoding import SumRegisterEncoding, build_encoding
 from .execution import (
     ExecutionResult,
+    exact_index_distribution,
     execute_ideal,
     execute_noisy,
     execute_optimized_mitigated,
@@ -83,18 +84,40 @@ from .experiments import (
     BatchResult,
     InstanceResult,
     run_batch,
+    run_iteration_sweep,
     run_random_batch,
 )
 from .instance import DPResult, SSPSolution, SubsetSumInstance, random_instance
+from .metrics import (
+    bootstrap_metric,
+    classical_fidelity,
+    counts_to_probs,
+    distribution_solution_probability,
+    hellinger,
+    solution_probability,
+    survival_estimate,
+    total_variation,
+    uniform_distribution,
+)
 from .mitigation import (
+    ZNEItem,
     ZNESamplingConfig,
+    analyse_zne_item,
     dgssp_zne_mitigated_distribution,
+    extrapolate_scalar,
+    fold_isa,
     fold_transpiled,
     mitiq_is_available,
     mitiq_zne_solution_probability,
+    pathology_diagnostic,
+    plan_scales,
+    project_to_simplex,
     rebase_to_backend,
+    run_zne_batch,
+    zne_bootstrap,
     zne_mitigated_distribution,
 )
+from .records import SCHEMA_VERSION, ResultRecord, scale_key
 from .runtime import (
     describe_account,
     execution_mode,
@@ -144,9 +167,21 @@ __all__ = [
     "bitstring_to_subset",
     "bitstring_to_solution",
     "bit_is_solution",
+    "exact_solution_bitstrings",
+    # metrics
     "counts_to_probs",
     "solution_probability",
-    "exact_solution_bitstrings",
+    "distribution_solution_probability",
+    "total_variation",
+    "classical_fidelity",
+    "hellinger",
+    "uniform_distribution",
+    "survival_estimate",
+    "bootstrap_metric",
+    # records
+    "ResultRecord",
+    "SCHEMA_VERSION",
+    "scale_key",
     # solvers
     "BaseSSPSolver",
     "BaseQuantumSSPSolver",
@@ -194,8 +229,17 @@ __all__ = [
     "mcz_noaux_1q_cost",
     # mitigation
     "ZNESamplingConfig",
+    "fold_isa",
     "fold_transpiled",
     "rebase_to_backend",
+    "extrapolate_scalar",
+    "zne_bootstrap",
+    "plan_scales",
+    "pathology_diagnostic",
+    "project_to_simplex",
+    "ZNEItem",
+    "run_zne_batch",
+    "analyse_zne_item",
     "zne_mitigated_distribution",
     "dgssp_zne_mitigated_distribution",
     "mitiq_zne_solution_probability",
@@ -203,6 +247,7 @@ __all__ = [
     # execution
     "ExecutionResult",
     "execute_ideal",
+    "exact_index_distribution",
     "execute_noisy",
     "execute_optimized_mitigated",
     # experiments
@@ -211,6 +256,7 @@ __all__ = [
     "InstanceResult",
     "run_batch",
     "run_random_batch",
+    "run_iteration_sweep",
     # api
     "DGRunConfig",
     "build_dg_circuit",

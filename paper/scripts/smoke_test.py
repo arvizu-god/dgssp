@@ -8,11 +8,17 @@ One tiny instance (``[1, 2, 3]``, target ``5``) is run three ways:
 1. **ideal**    -- noiseless Aer, the correctness reference;
 2. **noisy**    -- an ``AerSimulator`` built from a bundled *heavy-hex* fake
    device's calibration data;
-3. **zne**      -- the same noisy device with per-bitstring (pointwise) ZNE at
-   the scales in :data:`SCALES`: transpile once at optimization level 3, fold
-   the ISA circuit, submit the folded circuits in one job.  Three or more
-   scales are used deliberately: a two-scale linear fit is exactly determined
-   and leaves no residual to judge the extrapolation by.
+3. **zne**      -- the same noisy device through the single-job ZNE path
+   (:func:`dgssp.mitigation.zne.run_zne_batch`): transpile once at
+   optimization level 3, fold the ISA circuit at the fractional scales in
+   :data:`SCALES` (partial folding; fits use the realised scales), add Mitiq's
+   folds when Mitiq is installed, submit everything in one job, then run every
+   estimator offline -- scalar exponential ZNE with the known asymptote
+   ``P_uniform`` (the reported mode), pointwise ZNE with both
+   renormalisations, the pathology diagnostic and Mitiq's extrapolation --
+   with bootstrap intervals and the resolvability flag.  The record uses the
+   schema-2 fields (``zne_fit``, ``pathology``, ``mitiq``, ``pointwise``,
+   physical gate counts, ``fold_seed``, ``calibration_timestamp``, ``job_id``).
 
 Which fake device is used is *discovered*, not hard-coded: the set of fake
 backends changes between ``qiskit-ibm-runtime`` releases, so the script asks
@@ -23,7 +29,9 @@ All three runs go through :func:`dgssp.experiments.run_batch`, so this exercises
 exactly the code path the real experiments use, and every sampler call goes
 through :func:`dgssp.runtime.sample_counts`.
 
-Output: ``paper/data/smoke.json``, a list of three provenance-stamped records.
+Output: ``paper/data/smoke.json``, a list of three provenance-stamped records
+(``save_record`` never overwrites: with ``smoke.json`` .. ``smoke_003.json``
+present, this run writes ``smoke_004.json``).
 
 Run::
 
@@ -54,7 +62,9 @@ from dgssp.solvers import DGConfig, DGSSPSolver
 ITEMS = [1, 2, 3]
 TARGET = 5
 SHOTS = 1_000
-SCALES = [1, 3]
+SCALES = [1, 1.5, 2, 3]
+FOLD_SEED = 0
+BOOTSTRAP_B = 500
 
 #: Seeds for the simulator and the transpiler, so two runs of this script on
 #: the same machine and package versions produce identical counts.
@@ -177,7 +187,7 @@ def main() -> int:
         f"({time.time() - t0:.1f}s)"
     )
 
-    # --- 3) ZNE (pointwise) --------------------------------------------------
+    # --- 3) ZNE: one job, every estimator offline -----------------------------
     t0 = time.time()
     zne_batch = run_batch(
         [instance],
@@ -185,33 +195,49 @@ def main() -> int:
             executor="optimized",
             backend=noisy,
             shots=SHOTS,
+            run_mitiq_baseline=mitiq_is_available(),
             zne_config=ZNESamplingConfig(
                 scales=SCALES,
                 shots_per_scale=SHOTS,
-                method="linear",
+                mode="scalar",
+                method="exponential",
+                asymptote="p_uniform",
+                renorm="clip",
+                fold_seed=FOLD_SEED,
+                n_bootstrap=BOOTSTRAP_B,
                 seed_min=ZNE_SEED_MIN,
                 seed_max=ZNE_SEED_MAX,
                 optimization_level=3,
                 seed_simulator=SEED_SIMULATOR,
             ),
+            bootstrap_samples=BOOTSTRAP_B,
         ),
     )
     zne = zne_batch.results[0]
     records.append(
-        Record.from_instance_result(
-            zne,
-            executor="optimized",
-            mitigation_mode="zne_pointwise",
-            shots=SHOTS,
-            backend=fake,
-            extra_metrics={"zne_scales": list(SCALES), "zne_method": "linear"},
-        )
+        Record.from_instance_result(zne, executor="optimized", shots=SHOTS, backend=fake)
     )
+    fit = zne.zne_fit or {}
+    pathology = zne.pathology or {}
     print(
         f"[zne]    P(solution) = {zne.solution_probability:.4f} -> "
-        f"{zne.mitigated_solution_probability:.4f} mitigated  "
-        f"scales={sorted(zne.counts_per_scale or {})}  "
-        f"2q={zne.two_qubit_count} depth={zne.depth}  "
+        f"{zne.mitigated_solution_probability:.4f} "
+        f"CI {[round(v, 4) for v in fit.get('ci', [])]}  "
+        f"resolved={fit.get('resolved')}  chi2_red={fit.get('chi2_red')}"
+    )
+    print(
+        f"         reported={fit.get('reported_value'):.4f} ({fit.get('reported_source')}; "
+        f"an unresolved fit reports the lambda=1 value)  P_uniform={zne.p_uniform}"
+    )
+    print(
+        f"         realised scales={[round(s, 4) for s in fit.get('scales', [])]}  "
+        f"jobs={len(zne_batch.job_ids)}  2q={zne.two_qubit_count}  S={zne.survival}"
+    )
+    print(
+        f"         mitiq={zne.mitiq_solution_probability}  "
+        f"TV raw={pathology.get('tv_raw_min_scale'):.4f} "
+        f"clip={pathology.get('tv_pointwise_clip'):.4f} "
+        f"simplex={pathology.get('tv_pointwise_simplex'):.4f}  "
         f"({time.time() - t0:.1f}s)"
     )
 

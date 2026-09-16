@@ -16,11 +16,17 @@ evaluators, the mitigation code and the batch runner cannot silently disagree
 about which bitstring corresponds to which subset.
 
 The module is Qiskit-free; it only depends on :mod:`dgssp.instance`.
+
+``counts_to_probs``, ``solution_probability`` and
+``distribution_solution_probability`` moved to :mod:`dgssp.metrics`; importing
+them from here still works and emits a ``DeprecationWarning``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+import warnings
+from collections.abc import Sequence
+from typing import Any
 
 from .instance import DPResult, SSPSolution, SubsetSumInstance
 
@@ -142,76 +148,37 @@ def bit_is_solution(bitstring: str, items: Sequence[int], target: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Counts / distributions
+# Counts / distributions: moved to dgssp.metrics
 # ---------------------------------------------------------------------------
 
+#: Distribution helpers that used to live here.  They are metrics, not bit
+#: translation, and now have exactly one implementation in
+#: :mod:`dgssp.metrics`.  Importing them from this module still works but
+#: emits a ``DeprecationWarning``.
+_MOVED_TO_METRICS: frozenset[str] = frozenset(
+    {"counts_to_probs", "solution_probability", "distribution_solution_probability"}
+)
 
-def counts_to_probs(counts: Mapping[str, int]) -> dict[str, float]:
+
+def __getattr__(name: str) -> Any:
     """
-    Normalize a counts dictionary into a probability distribution.
+    Resolve the deprecated names in :data:`_MOVED_TO_METRICS`.
 
-    Parameters
-    ----------
-    counts:
-        Mapping bitstring -> number of shots.
-
-    Returns
-    -------
-    dict[str, float]
-        Mapping bitstring -> empirical probability.  Returns all-zeros if the
-        total shot count is zero.
+    Both ``from dgssp.decoding import solution_probability`` and
+    ``dgssp.decoding.solution_probability`` land here, warn, and return the
+    :mod:`dgssp.metrics` function itself, so the values are identical by
+    construction.
     """
-    total = sum(counts.values())
-    if total == 0:
-        return {b: 0.0 for b in counts}
-    return {b: c / total for b, c in counts.items()}
+    if name in _MOVED_TO_METRICS:
+        warnings.warn(
+            f"dgssp.decoding.{name} is deprecated; import it from dgssp.metrics.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from . import metrics
 
-
-def solution_probability(
-    counts: Mapping[str, int], solution_states: Iterable[str]
-) -> float:
-    """
-    Probability of sampling any of the given solution bitstrings.
-
-    Parameters
-    ----------
-    counts:
-        Mapping bitstring -> number of shots.
-    solution_states:
-        The bitstrings considered "correct".
-
-    Returns
-    -------
-    float
-        Fraction of shots landing on a solution bitstring; ``0.0`` if no shots
-        were collected.
-    """
-    total = sum(counts.values())
-    if total == 0:
-        return 0.0
-    return sum(counts.get(state, 0) for state in solution_states) / total
-
-
-def distribution_solution_probability(
-    distribution: Mapping[str, float], solution_states: Iterable[str]
-) -> float:
-    """
-    Same as :func:`solution_probability` but for an already-normalized
-    distribution (e.g. a ZNE-mitigated one, whose "counts" are not integers).
-
-    Parameters
-    ----------
-    distribution:
-        Mapping bitstring -> probability.
-    solution_states:
-        The bitstrings considered "correct".
-
-    Returns
-    -------
-    float
-        Summed probability mass on the solution bitstrings.
-    """
-    return float(sum(distribution.get(state, 0.0) for state in solution_states))
+        return getattr(metrics, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -253,8 +220,5 @@ __all__ = [
     "bitstring_to_subset",
     "bitstring_to_solution",
     "bit_is_solution",
-    "counts_to_probs",
-    "solution_probability",
-    "distribution_solution_probability",
     "exact_solution_bitstrings",
 ]

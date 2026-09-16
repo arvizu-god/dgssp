@@ -95,6 +95,7 @@ from dgssp import (
     resource_model,
 )
 from dgssp.backends import list_fake_backends
+from dgssp.metrics import survival_estimate  # re-exported: resource_scaling.survival_estimate
 from dgssp.runtime import backend_name
 from dgssp.transpilation import (
     LOGICAL_BASIS,
@@ -552,50 +553,8 @@ def measure_transpiled(
     return metrics
 
 
-def survival_estimate(two_q: int, one_q: int, errors: dict[str, Any]) -> dict[str, Any]:
-    """
-    Probability that no gate errs, from the device's median gate errors.
-
-    ``S2 = (1 - eps2)**two_q`` is the primary figure -- two-qubit errors are an
-    order of magnitude larger than single-qubit ones on every heavy-hex device
-    in the fake provider -- and ``S1 = (1 - eps1)**one_q`` is the secondary
-    factor.  This is a *coherence-free upper bound*: it ignores idling,
-    crosstalk, readout and the fact that not every gate error is fatal to the
-    marked amplitude.  It is used to say where the algorithm cannot work, not
-    to predict a success probability.
-
-    Parameters
-    ----------
-    two_q, one_q:
-        *Physical* gate counts of the transpiled circuit, from
-        :func:`dgssp.backends.physical_gate_counts` -- virtual ``rz`` frame
-        changes excluded, exactly as they are excluded from the medians.
-        Passing the raw single-qubit inventory instead charges the ``sx``
-        error to every ``rz`` and understates survival.
-    errors:
-        Output of :func:`dgssp.backends.median_gate_errors`.
-
-    Returns
-    -------
-    dict
-        ``{"survival_two_q", "survival_one_q", "survival"}``; entries are
-        ``None`` when the device carries no median for that gate class.
-    """
-    eps_two = errors.get("two_qubit")
-    eps_one = errors.get("one_qubit")
-
-    survival_two = (1.0 - eps_two) ** two_q if eps_two is not None else None
-    survival_one = (1.0 - eps_one) ** one_q if eps_one is not None else None
-    combined = (
-        survival_two * survival_one
-        if survival_two is not None and survival_one is not None
-        else survival_two
-    )
-    return {
-        "survival_two_q": survival_two,
-        "survival_one_q": survival_one,
-        "survival": combined,
-    }
+# `survival_estimate` moved to `dgssp.metrics` (WP4) and is imported above, so
+# `resource_scaling.survival_estimate` keeps working for existing callers.
 
 
 # ---------------------------------------------------------------------------

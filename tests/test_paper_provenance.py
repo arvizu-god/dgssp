@@ -295,7 +295,14 @@ def test_record_from_instance_result_uses_the_library_encoding():
         "depth",
         "two_q_depth",
         "physical_qubits",
+        "one_q_physical",
+        "two_q_physical",
+        "virtual_gate_count",
+        "survival",
+        "best_seed",
     }
+    assert built.schema_version == 2
+    assert built.metrics["solution_probability_ci"][0] <= built.metrics["solution_probability"]
     assert built.provenance["packages"]["qiskit"] is not None
 
 

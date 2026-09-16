@@ -37,8 +37,9 @@ from qiskit.providers import BackendV2
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_aer import AerSimulator
 
-from .decoding import exact_solution_bitstrings, solution_probability
+from .decoding import exact_solution_bitstrings
 from .instance import SubsetSumInstance
+from .metrics import solution_probability
 from .runtime import backend_name, is_simulator, sample_counts
 from .solvers.base import BaseClassicalSSPSolver
 from .solvers.classical import DPConfig, DPSSPSolver
