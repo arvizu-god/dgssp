@@ -503,11 +503,17 @@ def stage_dir(data_dir: Path, stage: str, noise: str, grid: str | None) -> Path:
     return data_dir / "_".join(parts)
 
 
-def pending(
-    directory: Path, names: list[str]
-) -> tuple[list[str], list[str]]:
+def pending(directory: Path, names: list[str]) -> tuple[list[str], list[str], list[str]]:
     """
-    Split names into those still to run and those already on disk.
+    Split names into those still to run, those already on disk, and duplicates.
+
+    ``save_record`` never overwrites: it appends ``_001``, ``_002``, ...  A
+    suffixed file in a stage directory therefore means the same instance was
+    written twice, which happens when two campaigns run into the same
+    directory at once -- both see the file missing, both run it, and the
+    second lands beside the first.  Aggregation keys by instance name, so a
+    duplicate does not double-count, but it is wasted compute and a confusing
+    archive, so it is reported.  **Run one stage at a time.**
 
     Parameters
     ----------
@@ -518,12 +524,14 @@ def pending(
 
     Returns
     -------
-    tuple[list[str], list[str]]
-        ``(to_run, done)``.
+    tuple[list[str], list[str], list[str]]
+        ``(to_run, done, duplicated)``.
     """
     done = [n for n in names if (directory / f"{n}.json").exists()]
-    todo = [n for n in names if (directory / f"{n}.json").exists() is False]
-    return todo, done
+    finished = set(done)
+    todo = [n for n in names if n not in finished]
+    duplicated = [n for n in done if any(directory.glob(f"{n}_[0-9][0-9][0-9].json"))]
+    return todo, done, duplicated
 
 
 def campaign_metadata(
@@ -1451,11 +1459,18 @@ def main(argv: list[str] | None = None) -> int:
     for grid in grids:
         directory = stage_dir(args.data_dir, args.stage, pair.noise, grid)
         directory.mkdir(parents=True, exist_ok=True)
-        todo_names, done = pending(directory, [r["name"] for r in rows])
+        todo_names, done, duplicated = pending(directory, [r["name"] for r in rows])
         todo = [r for r in rows if r["name"] in set(todo_names)]
         label = f"{args.stage}{f' [{grid}]' if grid else ''}"
         print(f"\n{label} -> {directory.name}: "
               f"{len(todo)} to run, {len(done)} already present")
+        if duplicated:
+            print(
+                f"  ! {len(duplicated)} instance(s) have a duplicate record "
+                f"({duplicated[:3]}): two runs wrote into this directory at "
+                "once. Aggregation keys by name so nothing is double-counted, "
+                "but run one stage at a time."
+            )
         if not todo:
             continue
 

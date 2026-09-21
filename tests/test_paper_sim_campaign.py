@@ -49,8 +49,21 @@ def test_stage_directories_name_what_produced_them(tmp_path):
 def test_resume_skips_only_what_is_on_disk(tmp_path):
     """A finished instance is skipped; an unfinished one is not."""
     (tmp_path / "a.json").write_text("{}", encoding="utf-8")
-    todo, done = sim_campaign.pending(tmp_path, ["a", "b", "c"])
-    assert (todo, done) == (["b", "c"], ["a"])
+    todo, done, duplicated = sim_campaign.pending(tmp_path, ["a", "b", "c"])
+    assert (todo, done, duplicated) == (["b", "c"], ["a"], [])
+
+
+def test_a_duplicate_record_is_reported(tmp_path):
+    """
+    ``save_record`` appends ``_001`` rather than overwriting, so a suffixed
+    file means two runs wrote into this directory at once.
+    """
+    (tmp_path / "a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "a_001.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "b.json").write_text("{}", encoding="utf-8")
+    todo, done, duplicated = sim_campaign.pending(tmp_path, ["a", "b"])
+    assert todo == [] and sorted(done) == ["a", "b"]
+    assert duplicated == ["a"]
 
 
 class _FakeItem:

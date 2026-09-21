@@ -40,7 +40,15 @@ the *experiments*: what was run, on what, with which numbers coming out.
    `dgssp.runtime.sample_counts`. Scripts call those; they do not reimplement
    them.
 
-5. **Hardware is metered.** The IBM Open plan gives roughly ten minutes of QPU
+5. **One stage at a time.** `sim_campaign.py` resumes by skipping instances
+   whose record already exists, so an interrupted stage continues and a
+   finished one re-runs as a no-op. Two campaigns writing into the same
+   directory at once defeat that check -- both see the file missing -- and the
+   second run's records land beside the first as `<instance>_001.json`.
+   Aggregation keys by instance name, so nothing is double-counted, but the
+   compute is wasted; the script reports any duplicates it finds.
+
+6. **Hardware is metered.** The IBM Open plan gives roughly ten minutes of QPU
    time a month, so hardware runs happen once a month and only after the exact
    same script has been validated against Aer with a calibration-derived noise
    model. `hardware/account_facts.md` records what the account actually allows.
@@ -75,6 +83,9 @@ python paper/scripts/freeze_versions.py
 | `family_table.py` | `tex/family_table.tex` | WP3 appendix table |
 | `zne_synthetic.py` | `data/zne_synthetic.json` | WP4 / C3: bias, coverage, resolvability of the ZNE estimators; clip vs simplex (no circuits) |
 | `iteration_sweep.py` | `data/sweep_<executor>.json` | WP4 / C3: P_sol vs Grover iterations, one job per instance |
+| `sim_campaign.py` | `data/sim_<stage>[_<noise>][_<grid>]/<instance>.json` | WP5: the whole simulation campaign, one stage per command, resumable |
+| `aggregate.py` | `data/sim_*.csv`, `data/sim_summary.json`, `tex/sim_table_<grid>.tex`, `notes/sim_results.md` | WP5: every table the text quotes |
+| `make_figures.py` | `figures/fig_sim_*.pdf` | WP5: the five simulation figures, from `data/` alone |
 
 `resource_scaling.py` is the C1 measurement: it checks every closed form in
 `notes/resource_model.md` against the circuit the solver builds (144 asserts),
@@ -95,3 +106,28 @@ a bundled heavy-hex fake device, and through the single-job ZNE path at scales
 diagnostics, Mitiq folds when installed), then writes the next free
 `data/smoke*.json`. It should finish in about a minute on a laptop and is the
 fastest way to confirm that a fresh environment is wired up correctly.
+
+## WP5 run order
+
+One stage per command, in this order, on `fake_marrakesh` (the frozen twin) or
+on `--noise live --backend <device>` once the real device is known. Durations
+are measured on this laptop; the script prints its own measured ETA after the
+first chunk.
+
+```
+python paper/scripts/sim_campaign.py --stage ideal --family all     #  ~1.5 min
+python paper/scripts/sim_campaign.py --stage noisy --family all     #    ~5 min
+python paper/scripts/sim_campaign.py --stage zne   --family all --grid both
+                                                                    #  ~140 min
+python paper/scripts/sim_campaign.py --stage zne   --family P --grid odd7
+                                                                    #   ~20 min
+python paper/scripts/sim_campaign.py --stage sweep                  #    ~1 min
+python paper/scripts/aggregate.py                                   #   <1 min
+python paper/scripts/make_figures.py --set sim                      #   <1 min
+```
+
+The `ideal` stage is the gate: it writes nothing until every instance has been
+compared with `sin^2((2 r_opt + 1) theta)` and with the `p_ideal` recorded in
+`instances/hardware_subset.json`, and the stage as a whole has been judged (see
+the script's docstring on why those per-instance thresholds are applied with a
+multiplicity correction). If it stops, nothing downstream should be run.
