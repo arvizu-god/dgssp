@@ -1,0 +1,863 @@
+"""
+make_figures.py
+
+Build the paper's figures from ``paper/data`` alone.
+
+Nothing here imports a backend, builds a circuit or samples anything: every
+number was measured by ``sim_campaign.py`` and reduced by ``aggregate.py``, and
+a figure that cannot be rebuilt from the archived tables is a figure whose
+provenance is broken.  Run ``aggregate.py`` first; this script reads its CSVs,
+``sim_summary.json`` and the sweep records.
+
+``--set sim`` builds five figures:
+
+``fig_sim_psol``
+    ``P(solution)`` against ``n``, for the ideal, noisy, scalar-ZNE,
+    pointwise-ZNE and Mitiq estimators, over the *feasible* instances
+    (``M >= 1``; an infeasible instance's ``P(solution)`` is identically zero
+    and pooling it would drag every curve toward zero for arithmetic reasons).
+    Cells whose fits are mostly unresolved are marked: those points are the
+    ``lambda = 1`` observation, not an extrapolation.
+
+``fig_sim_dtv``
+    ``D_TV`` to the exact reference against ``n`` for the unmitigated and
+    pointwise-mitigated distributions, and -- third panel -- the ``M = 0``
+    pathology one point per instance: distance before mitigation against
+    distance after, with the diagonal marking "no change".  Points above the
+    diagonal are instances the mitigation made *worse*.
+
+``fig_sim_grid``
+    The partial-folding result: resolved and identifiable fractions, and the
+    bias of the scalar estimator, for the odd-integer grid against the planned
+    one, at matched shots.
+
+``fig_sim_sweep``
+    ``P(solution))`` against the Grover iteration count for the two sweep
+    instances, with ``sin^2((2r+1) theta)`` as the analytic line.
+
+``fig_sim_models``
+    Model comparison on the ``odd7`` grid: per-instance residuals and the
+    median absolute error of each extrapolation, over identified fits only.
+
+Run::
+
+    python paper/scripts/make_figures.py --set sim
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:  # pragma: no cover - script bootstrap
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from _common import DATA_DIR, FIGURES_DIR  # noqa: E402
+from plotting import (  # noqa: E402
+    COLUMN_WIDTH_IN,
+    FULL_WIDTH_IN,
+    OKABE_ITO,
+    figure,
+    legend_below,
+    save_figure,
+    style_for,
+)
+
+#: Grid whose cells the main figures plot.
+MAIN_GRID = "planned"
+
+#: Grid the model comparison lives on.
+MODEL_GRID = "odd7"
+
+#: The M-class pooling the figures use (see ``aggregate._cell_members``).
+FEASIBLE = "feasible"
+ALL = "all"
+
+#: Extrapolation models are not executors, so they are not in
+#: ``plotting.EXECUTORS``; they get their own consistent identities, drawn from
+#: the same Okabe--Ito palette.
+METHOD_STYLE: dict[str, tuple[str, str]] = {
+    "linear": (OKABE_ITO["sky_blue"], "o"),
+    "quadratic": (OKABE_ITO["orange"], "s"),
+    "richardson": (OKABE_ITO["reddish_purple"], "^"),
+    "exponential": (OKABE_ITO["bluish_green"], "D"),
+}
+
+#: Below this resolved fraction a cell is reported at ``lambda = 1``; the
+#: figures mark those points rather than letting them read as extrapolations.
+RESOLVED_MARK = 0.5
+
+
+# ---------------------------------------------------------------------------
+# Loading
+# ---------------------------------------------------------------------------
+
+
+def _number(value: str) -> float | None:
+    """A CSV field as a float, or ``None`` when it is blank or not numeric."""
+    if value in ("", "None", "nan"):
+        return None
+    try:
+        out = float(value)
+    except ValueError:
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _flag(value: str) -> bool | None:
+    """A CSV field as a boolean, or ``None`` when blank."""
+    return {"True": True, "False": False}.get(value)
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    """
+    Read a CSV written by ``aggregate.py``.
+
+    Parameters
+    ----------
+    path:
+        The file.
+
+    Returns
+    -------
+    list[dict]
+        Empty when the file does not exist, so a partial campaign still
+        produces the figures it can.
+    """
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def cell_series(
+    cells: Sequence[dict[str, str]],
+    *,
+    family: str,
+    series: str,
+    grid: str,
+    m_class: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    One series of one family as arrays over ``n``.
+
+    Parameters
+    ----------
+    cells:
+        Rows of ``sim_cells.csv``.
+    family:
+        ``"P"`` or ``"S"``.
+    series:
+        Series name.
+    grid:
+        Scale grid.
+    m_class:
+        ``M``-class or a pooled class.
+
+    Returns
+    -------
+    tuple of ndarray
+        ``(n, value, se, fraction_resolved)``, sorted by ``n``; ``se`` and
+        ``fraction_resolved`` hold NaN where the table has none.
+    """
+    rows = [
+        row
+        for row in cells
+        if row["family"] == family
+        and row["series"] == series
+        and row["grid"] == grid
+        and row["m_class"] == m_class
+        and _number(row["value"]) is not None
+    ]
+    rows.sort(key=lambda r: int(r["n_items"]))
+    n = np.array([int(r["n_items"]) for r in rows], dtype=float)
+    value = np.array([_number(r["value"]) for r in rows], dtype=float)
+    se = np.array(
+        [np.nan if _number(r["se"]) is None else _number(r["se"]) for r in rows],
+        dtype=float,
+    )
+    resolved = np.array(
+        [
+            np.nan
+            if _number(r["fraction_resolved"]) is None
+            else _number(r["fraction_resolved"])
+            for r in rows
+        ],
+        dtype=float,
+    )
+    return n, value, se, resolved
+
+
+def _integer_xticks(ax: Any, values: Sequence[float]) -> None:
+    """
+    Put ticks on the integers present, so ``n`` never reads as 2.025.
+
+    Parameters
+    ----------
+    ax:
+        The axes.
+    values:
+        The ``n`` values plotted (may be empty, in which case nothing is done).
+    """
+    ticks = sorted({int(v) for v in values})
+    if ticks:
+        ax.set_xticks(ticks)
+        ax.set_xlim(min(ticks) - 0.4, max(ticks) + 0.4)
+
+
+def _plot_series(
+    ax: Any,
+    n: np.ndarray,
+    value: np.ndarray,
+    se: np.ndarray,
+    key: str,
+    *,
+    label: str | None = None,
+) -> None:
+    """Draw one executor's series with its fixed identity and SE bars."""
+    if n.size == 0:
+        return
+    style = style_for(key)
+    ax.errorbar(
+        n,
+        value,
+        yerr=np.nan_to_num(se, nan=0.0),
+        capsize=2,
+        elinewidth=0.8,
+        label=label if label is not None else style.label,
+        **style.line_kwargs(markersize=4),
+    )
+
+
+# ---------------------------------------------------------------------------
+# fig_sim_psol
+# ---------------------------------------------------------------------------
+
+
+def fig_sim_psol(cells: Sequence[dict[str, str]], grid: str, out: Path) -> list[Path]:
+    """
+    ``P(solution)`` against ``n``, one panel per instance family.
+
+    Parameters
+    ----------
+    cells:
+        Rows of ``sim_cells.csv``.
+    grid:
+        Which grid's ZNE columns to plot.
+    out:
+        Figures directory.
+
+    Returns
+    -------
+    list[Path]
+        Files written.
+    """
+    fig, axes = figure(width=FULL_WIDTH_IN, aspect=0.42, ncols=2, sharey=True)
+    plotted = ("ideal", "noisy", "zne_scalar", "zne_pointwise", "mitiq")
+    columns = {
+        "ideal": "ideal",
+        "noisy": "noisy",
+        "zne_scalar": "zne_scalar_reported",
+        "zne_pointwise": "pointwise_clip",
+        "mitiq": "mitiq",
+    }
+
+    for ax, family, title in zip(
+        axes, ("P", "S"), ("Family P (all positive)", "Family S (signed)"), strict=True
+    ):
+        for key in plotted:
+            n, value, se, resolved = cell_series(
+                cells, family=family, series=columns[key], grid=grid, m_class=FEASIBLE
+            )
+            _plot_series(ax, n, value, se, key)
+            if key == "zne_scalar" and n.size:
+                # A point whose cell is mostly unresolved is the lambda = 1
+                # observation; a filled marker says "not extrapolated".
+                mask = np.nan_to_num(resolved, nan=0.0) < RESOLVED_MARK
+                if mask.any():
+                    ax.plot(
+                        n[mask],
+                        value[mask],
+                        linestyle="none",
+                        marker=style_for(key).marker,
+                        markersize=4,
+                        color=style_for(key).color,
+                        markerfacecolor=style_for(key).color,
+                        zorder=style_for(key).zorder + 1,
+                        label="reported at $\\lambda=1$",
+                    )
+        ax.set_title(title)
+        ax.set_xlabel("$n$ (items)")
+        _integer_xticks(
+            ax, [int(r["n_items"]) for r in cells if r["family"] == family]
+        )
+    axes[0].set_ylabel("$P(\\mathrm{solution})$, feasible instances")
+    axes[0].set_ylim(-0.05, 1.05)
+    axes[1].annotate(
+        f"grid: {grid}",
+        xy=(0.98, 0.02),
+        xycoords="axes fraction",
+        ha="right",
+        va="bottom",
+        fontsize="x-small",
+        color=OKABE_ITO["grey"],
+    )
+    legend_below(axes[0], ncol=3)
+    return save_figure(fig, "fig_sim_psol", directory=out)
+
+
+# ---------------------------------------------------------------------------
+# fig_sim_dtv
+# ---------------------------------------------------------------------------
+
+
+def fig_sim_dtv(
+    cells: Sequence[dict[str, str]],
+    pathology: Sequence[dict[str, str]],
+    grid: str,
+    out: Path,
+) -> list[Path]:
+    """
+    Distance to the exact reference, and the ``M = 0`` pathology.
+
+    Parameters
+    ----------
+    cells:
+        Rows of ``sim_cells.csv``.
+    pathology:
+        Rows of ``sim_pathology.csv``.
+    grid:
+        Which grid's mitigated columns to plot.
+    out:
+        Figures directory.
+
+    Returns
+    -------
+    list[Path]
+        Files written.
+    """
+    fig, axes = figure(width=FULL_WIDTH_IN, aspect=0.40, ncols=3)
+    columns = {
+        "noisy": "tv_noisy",
+        "zne_pointwise": "tv_pointwise_clip",
+    }
+
+    for ax, family in zip(axes[:2], ("P", "S"), strict=True):
+        for key, column in columns.items():
+            n, value, se, _ = cell_series(
+                cells, family=family, series=column, grid=grid, m_class=ALL
+            )
+            _plot_series(ax, n, value, se, key)
+        n, value, se, _ = cell_series(
+            cells,
+            family=family,
+            series="tv_pointwise_simplex",
+            grid=grid,
+            m_class=ALL,
+        )
+        if n.size:
+            style = style_for("zne_pointwise")
+            ax.errorbar(
+                n,
+                value,
+                yerr=np.nan_to_num(se, nan=0.0),
+                capsize=2,
+                elinewidth=0.8,
+                label="ZNE (pointwise, simplex)",
+                **style.line_kwargs(marker="P", linestyle=":", markersize=4),
+            )
+        ax.set_title(f"Family {family}")
+        ax.set_xlabel("$n$ (items)")
+        _integer_xticks(
+            ax, [int(r["n_items"]) for r in cells if r["family"] == family]
+        )
+    axes[0].set_ylabel("$D_{\\mathrm{TV}}$ to exact reference")
+
+    ax = axes[2]
+    before = np.array([_number(r["tv_zne_lambda1"]) or np.nan for r in pathology])
+    for column, key, label in (
+        ("tv_pointwise_clip", "zne_pointwise", "clip"),
+        ("tv_pointwise_simplex", "mitiq", "simplex"),
+    ):
+        after = np.array([_number(r[column]) or np.nan for r in pathology])
+        style = style_for(key)
+        ax.plot(
+            before,
+            after,
+            linestyle="none",
+            marker=style.marker,
+            markersize=3,
+            alpha=0.6,
+            color=style.color,
+            markerfacecolor="none",
+            label=label,
+        )
+    # Log--log with matched limits, so the diagonal really is "no change" and
+    # the distance above it is the factor by which mitigation made it worse.
+    after_all = np.concatenate(
+        [
+            np.array([_number(r[column]) or np.nan for r in pathology])
+            for column in ("tv_pointwise_clip", "tv_pointwise_simplex")
+        ]
+    ) if pathology else np.array([np.nan])
+    finite = np.concatenate([before, after_all])
+    finite = finite[np.isfinite(finite) & (finite > 0)]
+    if finite.size:
+        lo, hi = float(finite.min()) / 2.0, float(finite.max()) * 2.0
+        ax.plot([lo, hi], [lo, hi], color=OKABE_ITO["grey"], linewidth=0.8, zorder=1)
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("$D_{\\mathrm{TV}}$ before ($\\lambda=1$)")
+    ax.set_ylabel("$D_{\\mathrm{TV}}$ after")
+    ax.set_title(f"$M=0$ ({len(pathology)} inst.)")
+    ax.legend(loc="lower right", fontsize="x-small")
+    legend_below(axes[0], ncol=3)
+    return save_figure(fig, "fig_sim_dtv", directory=out)
+
+
+# ---------------------------------------------------------------------------
+# fig_sim_grid
+# ---------------------------------------------------------------------------
+
+
+def fig_sim_grid(cells: Sequence[dict[str, str]], out: Path) -> list[Path]:
+    """
+    Odd-integer against planned grid: identifiability, resolvability and bias.
+
+    Parameters
+    ----------
+    cells:
+        Rows of ``sim_cells.csv``.
+    out:
+        Figures directory.
+
+    Returns
+    -------
+    list[Path]
+        Files written.
+    """
+    fig, axes = figure(width=FULL_WIDTH_IN, aspect=0.42, ncols=2)
+    grids = {"odd": ("--", OKABE_ITO["vermillion"]), "planned": ("-", OKABE_ITO["blue"])}
+
+    ax = axes[0]
+    for grid, (linestyle, color) in grids.items():
+        for column, marker, name in (
+            ("fraction_resolved", "s", "resolved"),
+            ("fraction_identifiable", "^", "identifiable"),
+        ):
+            rows = [
+                r
+                for r in cells
+                if r["grid"] == grid
+                and r["m_class"] == ALL
+                and r["series"] == "ideal"
+                and _number(r[column]) is not None
+            ]
+            # One point per n, pooling both families at that n.
+            by_n: dict[int, list[float]] = {}
+            for row in rows:
+                by_n.setdefault(int(row["n_items"]), []).append(
+                    float(_number(row[column]) or 0.0)
+                )
+            if not by_n:
+                continue
+            n = np.array(sorted(by_n), dtype=float)
+            value = np.array([float(np.mean(by_n[int(k)])) for k in n])
+            ax.plot(
+                n,
+                value,
+                linestyle=linestyle,
+                marker=marker,
+                markersize=4,
+                markerfacecolor="none",
+                color=color,
+                label=f"{grid}: {name}",
+            )
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_xlabel("$n$ (items)")
+    ax.set_ylabel("fraction of instances")
+    ax.set_title("Does the design identify the fit?")
+    _integer_xticks(ax, [int(r["n_items"]) for r in cells])
+    ax.legend(fontsize="x-small", loc="best")
+
+    ax = axes[1]
+    for grid, (linestyle, color) in grids.items():
+        rows = [
+            r
+            for r in cells
+            if r["grid"] == grid
+            and r["m_class"] == FEASIBLE
+            and r["series"] == "bias_zne_scalar_reported"
+            and _number(r["value"]) is not None
+        ]
+        by_n_value: dict[int, list[float]] = {}
+        by_n_se: dict[int, list[float]] = {}
+        for row in rows:
+            by_n_value.setdefault(int(row["n_items"]), []).append(
+                float(_number(row["value"]) or 0.0)
+            )
+            by_n_se.setdefault(int(row["n_items"]), []).append(
+                float(_number(row["se"]) or 0.0)
+            )
+        if not by_n_value:
+            continue
+        n = np.array(sorted(by_n_value), dtype=float)
+        value = np.array([float(np.mean(by_n_value[int(k)])) for k in n])
+        se = np.array([float(np.mean(by_n_se[int(k)])) for k in n])
+        ax.errorbar(
+            n,
+            value,
+            yerr=se,
+            linestyle=linestyle,
+            marker="o",
+            markersize=4,
+            markerfacecolor="none",
+            capsize=2,
+            elinewidth=0.8,
+            color=color,
+            label=f"{grid} grid",
+        )
+    ax.axhline(0.0, color=OKABE_ITO["grey"], linewidth=0.8, zorder=1)
+    ax.set_xlabel("$n$ (items)")
+    ax.set_ylabel("bias of reported $P(\\mathrm{solution})$")
+    ax.set_title("What the reporting rule delivers")
+    _integer_xticks(ax, [int(r["n_items"]) for r in cells])
+    ax.legend(fontsize="x-small", loc="best")
+    return save_figure(fig, "fig_sim_grid", directory=out)
+
+
+# ---------------------------------------------------------------------------
+# fig_sim_sweep
+# ---------------------------------------------------------------------------
+
+
+def load_sweeps(data_dir: Path) -> dict[str, dict[str, Any]]:
+    """
+    The iteration sweeps, keyed by ``"<instance>_<executor>"``.
+
+    Parameters
+    ----------
+    data_dir:
+        ``paper/data``.
+
+    Returns
+    -------
+    dict
+        Empty when the sweep stage has not run.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for directory in sorted(data_dir.glob("sim_sweep_*")):
+        for path in sorted(directory.glob("*.json")):
+            out[path.stem] = json.loads(path.read_text(encoding="utf-8"))
+    return out
+
+
+def fig_sim_sweep(sweeps: dict[str, dict[str, Any]], out: Path) -> list[Path]:
+    """
+    ``P(solution)`` against the Grover iteration count.
+
+    Parameters
+    ----------
+    sweeps:
+        As :func:`load_sweeps` returns.
+    out:
+        Figures directory.
+
+    Returns
+    -------
+    list[Path]
+        Files written; empty when nothing has been swept.
+    """
+    names = sorted({key.rsplit("_", 1)[0] for key in sweeps})
+    if not names:
+        return []
+
+    fig, axes = figure(
+        width=FULL_WIDTH_IN if len(names) > 1 else COLUMN_WIDTH_IN,
+        aspect=0.5,
+        ncols=max(1, len(names)),
+        squeeze=False,
+    )
+    flat = axes.ravel()
+
+    for ax, name in zip(flat, names, strict=False):
+        analytic_drawn = False
+        for executor, key in (
+            ("ideal", "ideal"),
+            ("noisy", "noisy"),
+            ("zne", "zne_scalar"),
+        ):
+            payload = sweeps.get(f"{name}_{executor}")
+            if payload is None:
+                continue
+            rows = payload["rows"]
+            r = np.array([row["iterations"] for row in rows], dtype=float)
+            if not analytic_drawn:
+                # The analytic success probability is smooth in r, so it is
+                # drawn as a curve rather than by joining the sampled points:
+                # sin^2((2r+1) theta), theta = arcsin(sqrt(M / 2**n)).  The
+                # measured points must land *on* it, which is the check this
+                # panel makes; interpolating between them would hide a miss.
+                n_items = len(payload["instance"]["items"])
+                theta = math.asin(math.sqrt(payload["M"] / 2**n_items))
+                fine = np.linspace(0.0, float(r.max()) + 0.3, 200)
+                ax.plot(
+                    fine,
+                    np.sin((2.0 * fine + 1.0) * theta) ** 2,
+                    color=OKABE_ITO["grey"],
+                    linewidth=1.0,
+                    zorder=1,
+                    label="$\\sin^2((2r{+}1)\\theta)$",
+                )
+                analytic_drawn = True
+            if executor == "zne":
+                value = np.array(
+                    [
+                        (row["zne"] or {}).get("reported_value", np.nan)
+                        for row in rows
+                    ],
+                    dtype=float,
+                )
+                ci = np.array(
+                    [(row["zne"] or {}).get("ci") or [np.nan, np.nan] for row in rows],
+                    dtype=float,
+                )
+                lo, hi = ci[:, 0], ci[:, 1]
+            else:
+                value = np.array([row["p_sol"] for row in rows], dtype=float)
+                ci = np.array([row["p_sol_ci"] for row in rows], dtype=float)
+                lo, hi = ci[:, 0], ci[:, 1]
+            errors = np.vstack(
+                [
+                    np.nan_to_num(value - lo, nan=0.0),
+                    np.nan_to_num(hi - value, nan=0.0),
+                ]
+            )
+            style = style_for(key)
+            ax.errorbar(
+                r,
+                value,
+                yerr=np.abs(errors),
+                capsize=2,
+                elinewidth=0.8,
+                label=style.label,
+                **style.line_kwargs(linestyle="none", markersize=5),
+            )
+            ax.axhline(
+                payload["p_uniform"],
+                color=OKABE_ITO["grey"],
+                linestyle=":",
+                linewidth=0.8,
+                zorder=1,
+            )
+        ax.set_title(name, fontsize="small")
+        ax.set_xlabel("Grover iterations $r$")
+        ax.set_xticks(
+            sorted(
+                {
+                    row["iterations"]
+                    for key, payload in sweeps.items()
+                    if key.startswith(name)
+                    for row in payload["rows"]
+                }
+            )
+        )
+    flat[0].set_ylabel("$P(\\mathrm{solution})$")
+    legend_below(flat[0], ncol=2)
+    return save_figure(fig, "fig_sim_sweep", directory=out)
+
+
+# ---------------------------------------------------------------------------
+# fig_sim_models
+# ---------------------------------------------------------------------------
+
+
+def fig_sim_models(
+    rows: Sequence[dict[str, str]],
+    models: Sequence[dict[str, str]],
+    grid: str,
+    out: Path,
+) -> list[Path]:
+    """
+    Model comparison on the four-point grid, identified fits only.
+
+    Parameters
+    ----------
+    rows:
+        Rows of ``sim_per_instance.csv``.
+    models:
+        Rows of ``sim_models.csv``.
+    grid:
+        The grid to compare on.
+    out:
+        Figures directory.
+
+    Returns
+    -------
+    list[Path]
+        Files written; empty when that grid was not run.
+    """
+    members = [r for r in rows if r["grid"] == grid and (_number(r["M"]) or 0) >= 1]
+    summary = [r for r in models if r["grid"] == grid]
+    if not members or not summary:
+        return []
+
+    fig, axes = figure(width=FULL_WIDTH_IN, aspect=0.42, ncols=2)
+
+    ax = axes[0]
+    for index, method in enumerate(METHOD_STYLE):
+        residuals = [
+            float(_number(row[f"fit_{method}"]) or 0.0) - float(_number(row["ideal"]) or 0.0)
+            for row in members
+            if _flag(row[f"fit_{method}_identifiable"]) is True
+            and _number(row[f"fit_{method}"]) is not None
+            and _number(row["ideal"]) is not None
+        ]
+        if not residuals:
+            continue
+        colour, marker = METHOD_STYLE[method]
+        jitter = np.random.default_rng(index).normal(0.0, 0.06, len(residuals))
+        ax.plot(
+            index + jitter,
+            residuals,
+            linestyle="none",
+            marker=marker,
+            markersize=3,
+            alpha=0.5,
+            color=colour,
+            markerfacecolor="none",
+        )
+        ax.plot(
+            [index - 0.25, index + 0.25],
+            [float(np.median(residuals))] * 2,
+            color=colour,
+            linewidth=1.6,
+        )
+    ax.axhline(0.0, color=OKABE_ITO["grey"], linewidth=0.8, zorder=1)
+    ax.set_xticks(range(len(METHOD_STYLE)))
+    ax.set_xticklabels(list(METHOD_STYLE), rotation=20, ha="right")
+    ax.set_ylabel("fit $-$ ideal $P(\\mathrm{solution})$")
+    ax.set_title(f"Residuals on the {grid} grid")
+
+    ax = axes[1]
+    order = [row for row in summary if row["method"] in METHOD_STYLE]
+    positions = np.arange(len(order))
+    values = [float(_number(row["median_abs_error"]) or 0.0) for row in order]
+    colours = [METHOD_STYLE[row["method"]][0] for row in order]
+    ax.bar(positions, values, color=colours, edgecolor="black", linewidth=0.5)
+    for position, row, value in zip(positions, order, values, strict=True):
+        ax.annotate(
+            f"N={row['n_used']}",
+            (position, value),
+            textcoords="offset points",
+            xytext=(0, 3),
+            ha="center",
+            fontsize="xx-small",
+        )
+    ax.set_xticks(positions)
+    ax.set_xticklabels([row["method"] for row in order], rotation=20, ha="right")
+    ax.set_ylabel("median $|$fit $-$ ideal$|$")
+    ax.set_title("Identified fits only")
+    return save_figure(fig, "fig_sim_models", directory=out)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def build_sim(data_dir: Path, figures_dir: Path, grid: str) -> list[Path]:
+    """
+    Build the five simulation figures.
+
+    Parameters
+    ----------
+    data_dir:
+        ``paper/data``.
+    figures_dir:
+        ``paper/figures``.
+    grid:
+        Which grid the main figures use.
+
+    Returns
+    -------
+    list[Path]
+        Every file written.
+    """
+    cells = read_csv(data_dir / "sim_cells.csv")
+    rows = read_csv(data_dir / "sim_per_instance.csv")
+    pathology = read_csv(data_dir / "sim_pathology.csv")
+    models = read_csv(data_dir / "sim_models.csv")
+    if not cells:
+        raise FileNotFoundError(
+            f"No sim_cells.csv in {data_dir}. Run aggregate.py first."
+        )
+
+    written: list[Path] = []
+    written += fig_sim_psol(cells, grid, figures_dir)
+    written += fig_sim_dtv(cells, pathology, grid, figures_dir)
+    written += fig_sim_grid(cells, figures_dir)
+    written += fig_sim_sweep(load_sweeps(data_dir), figures_dir)
+    written += fig_sim_models(rows, models, MODEL_GRID, figures_dir)
+    return written
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """
+    Parse the command line.
+
+    Parameters
+    ----------
+    argv:
+        Arguments; ``None`` reads ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        Parsed options.
+    """
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[3])
+    parser.add_argument("--set", dest="which", choices=("sim",), required=True)
+    parser.add_argument("--grid", default=MAIN_GRID)
+    parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    parser.add_argument("--figures-dir", type=Path, default=FIGURES_DIR)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """
+    Build one figure set.
+
+    Parameters
+    ----------
+    argv:
+        Command line; ``None`` reads ``sys.argv``.
+
+    Returns
+    -------
+    int
+        ``0`` on success.
+    """
+    args = parse_args(argv)
+    written = build_sim(args.data_dir, args.figures_dir, args.grid)
+    for path in written:
+        print(f"wrote {path}")
+    if not written:
+        print("nothing written: the campaign has produced no tables yet")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
