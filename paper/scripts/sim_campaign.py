@@ -77,6 +77,34 @@ name that already exists, so the campaign is resumable and a completed stage
 re-runs as a no-op.  Jobs are chunked by **circuits**, not instances: at most
 ``--chunk`` circuits per :func:`dgssp.runtime.sample_counts` call.
 
+Staying inside the machine
+--------------------------
+
+Aer takes every core it can see and holds them for the whole run, which on a
+laptop is a thermal event rather than a speed-up.  Four controls split a long
+stage into sittings that finish:
+
+``--max-threads N``
+    Cap the simulator's thread count.  The counts do not depend on it -- with
+    a fixed ``seed_simulator`` every experiment draws from its own seeded
+    stream, so one thread and sixteen give bit-identical results -- which means
+    a throttled run merges with an unthrottled one and a stage half-finished at
+    full speed can be finished at half speed.
+``--max-minutes M``
+    Stop cleanly after the chunk that crosses ``M`` minutes and report what is
+    left.  Re-running the same command continues from there.  It does not apply
+    to the ideal stage, which must judge every instance together before it may
+    write any of them (and takes 1.5 minutes anyway).
+``--cooldown S``
+    Idle ``S`` seconds between chunks.
+``--n 2 3 4``
+    Only these index-register widths.  Cost per instance rises steeply with
+    ``n``: about 4 s at ``n = 2`` against 26 s at ``n = 6`` for a three-scale
+    ZNE run, so ``n = 6`` alone is a third of the family's cost.
+
+``OMP_NUM_THREADS`` caps NumPy's own BLAS threads and must be set *before*
+Python starts; ``--max-threads`` cannot do it from inside the process.
+
 Run::
 
     python paper/scripts/sim_campaign.py --stage ideal  --family all
@@ -84,6 +112,10 @@ Run::
     python paper/scripts/sim_campaign.py --stage zne    --family all --grid both
     python paper/scripts/sim_campaign.py --stage zne    --family P   --grid odd7
     python paper/scripts/sim_campaign.py --stage sweep
+
+    # the same, in sittings, on a machine that has to stay usable
+    python paper/scripts/sim_campaign.py --stage zne --family all --grid odd \\
+        --n 2 3 4 --max-threads 8 --cooldown 10 --max-minutes 45
 """
 
 from __future__ import annotations
@@ -91,6 +123,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from collections.abc import Sequence
@@ -254,6 +287,7 @@ def select_rows(
     which: str,
     limit: int | None,
     only: Sequence[str] | None = None,
+    n_values: Sequence[int] | None = None,
 ) -> list[dict[str, Any]]:
     """
     The instance records a stage will run, in file order.
@@ -269,6 +303,11 @@ def select_rows(
     only:
         Run exactly these instances, by name -- for re-running one that failed,
         or for timing a stratified sample.  Overrides ``--family``.
+    n_values:
+        Keep only these index-register widths.  Cost per instance is steeply
+        increasing in ``n`` (26 s at ``n = 6`` against 4 s at ``n = 2`` for a
+        three-scale ZNE run), so this is how a long stage is split into
+        sittings that finish.
 
     Returns
     -------
@@ -278,7 +317,8 @@ def select_rows(
     Raises
     ------
     ValueError
-        If a requested name is not in the family file.
+        If a requested name is not in the family file, or no instance has one
+        of the requested widths.
     """
     if only:
         by_name = {row["name"]: row for row in family["instances"]}
@@ -286,10 +326,20 @@ def select_rows(
         if missing:
             raise ValueError(f"Not in family.json: {missing}")
         return [by_name[name] for name in only]
+    if n_values is not None:
+        available = {row["n_items"] for row in family["instances"]}
+        unknown = sorted(set(n_values) - available)
+        if unknown:
+            raise ValueError(
+                f"No instance has n_items in {unknown}; the family has "
+                f"{sorted(available)}."
+            )
+    widths = set(n_values) if n_values is not None else None
     rows = [
         row
         for row in family["instances"]
-        if which == "all" or row["family"] == which
+        if (which == "all" or row["family"] == which)
+        and (widths is None or row["n_items"] in widths)
     ]
     return rows[:limit] if limit else rows
 
@@ -346,6 +396,8 @@ class BackendPair:
         ``"fake"``, ``"live"`` or ``"none"``.
     calibration_file:
         The snapshot a live run was frozen to, when there is one.
+    max_threads:
+        Cores the simulator was allowed, or ``None`` for Aer's default.
     """
 
     def __init__(
@@ -354,11 +406,13 @@ class BackendPair:
         executor: Any,
         noise: str,
         calibration_file: Path | None = None,
+        max_threads: int | None = None,
     ) -> None:
         self.device = device
         self.executor = executor
         self.noise = noise
         self.calibration_file = calibration_file
+        self.max_threads = max_threads
 
     @property
     def name(self) -> str:
@@ -394,8 +448,43 @@ def resolve_fake_backend(name: str) -> Any:
     return available[name]
 
 
+def throttle(simulator: Any, max_threads: int | None) -> Any:
+    """
+    Cap how many cores Aer is allowed to take, and seed it.
+
+    Aer defaults to every core it can see and holds them for the whole run.
+    On a laptop that is a thermal event, not a speed-up -- which is what
+    ``--max-threads`` exists to prevent.  The counts do not depend on it: with
+    a fixed ``seed_simulator`` every experiment draws from its own seeded
+    stream, so one thread and sixteen give bit-identical results and a
+    throttled run can be merged with an unthrottled one.
+
+    Parameters
+    ----------
+    simulator:
+        The ``AerSimulator``.
+    max_threads:
+        Cores Aer may use; ``None`` leaves Aer's own default (all of them).
+
+    Returns
+    -------
+    AerSimulator
+        The same object, configured.
+    """
+    options: dict[str, Any] = {"seed_simulator": SEED_SIMULATOR}
+    if max_threads is not None:
+        options["max_parallel_threads"] = int(max_threads)
+    simulator.set_options(**options)
+    return simulator
+
+
 def build_backends(
-    noise: str, name: str, *, calibration: Path | None, hardware_dir: Path
+    noise: str,
+    name: str,
+    *,
+    calibration: Path | None,
+    hardware_dir: Path,
+    max_threads: int | None = None,
 ) -> BackendPair:
     """
     Build the (device, executor) pair a stage runs on.
@@ -417,6 +506,8 @@ def build_backends(
         An existing snapshot to reload instead of calling the service.
     hardware_dir:
         ``paper/hardware``, where a new snapshot is written.
+    max_threads:
+        Cap on the simulator's thread count (see :func:`throttle`).
 
     Returns
     -------
@@ -427,9 +518,8 @@ def build_backends(
 
     if noise == "fake":
         device = resolve_fake_backend(name)
-        executor = AerSimulator.from_backend(device)
-        executor.set_options(seed_simulator=SEED_SIMULATOR)
-        return BackendPair(device, executor, "fake")
+        executor = throttle(AerSimulator.from_backend(device), max_threads)
+        return BackendPair(device, executor, "fake", max_threads=max_threads)
 
     if calibration is not None:
         snapshot = load_noise_model(calibration)
@@ -439,9 +529,10 @@ def build_backends(
         )
         return BackendPair(
             snapshot.backend,
-            snapshot.simulator(seed_simulator=SEED_SIMULATOR),
+            throttle(snapshot.simulator(), max_threads),
             "live",
             calibration,
+            max_threads=max_threads,
         )
 
     from qiskit_aer.noise import NoiseModel
@@ -456,17 +547,17 @@ def build_backends(
         snapshot = load_noise_model(path)
         return BackendPair(
             snapshot.backend,
-            snapshot.simulator(seed_simulator=SEED_SIMULATOR),
+            throttle(snapshot.simulator(), max_threads),
             "live",
             path,
+            max_threads=max_threads,
         )
 
     model = NoiseModel.from_backend(device)
     save_noise_model(path, model, device)
     print(f"  froze {name} ({stamp}) to {path}")
-    executor = AerSimulator.from_backend(device)
-    executor.set_options(seed_simulator=SEED_SIMULATOR)
-    return BackendPair(device, executor, "live", path)
+    executor = throttle(AerSimulator.from_backend(device), max_threads)
+    return BackendPair(device, executor, "live", path, max_threads=max_threads)
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +676,7 @@ def campaign_metadata(
         ),
         "shots": shots,
         "seed_simulator": SEED_SIMULATOR,
+        "max_parallel_threads": pair.max_threads,
         "chunk_index": chunk_index,
         "chunk_circuits": chunk_size,
     }
@@ -595,7 +687,13 @@ def campaign_metadata(
 
 class Progress:
     """
-    Wall-clock progress and a measured ETA from the first chunk on.
+    Wall-clock progress, a measured ETA, and the budget that ends the run.
+
+    A stage is resumable per instance, so it does not have to finish in one
+    sitting: ``max_minutes`` stops it cleanly at a chunk boundary and the next
+    invocation picks up exactly where it left off.  ``cooldown`` idles between
+    chunks, which on a laptop is the difference between a long run and a
+    thermal shutdown.
 
     Attributes
     ----------
@@ -603,12 +701,29 @@ class Progress:
         Total circuits to run.
     done:
         Circuits completed.
+    max_minutes:
+        Stop after a chunk once this much wall clock has passed.
+    cooldown:
+        Seconds to idle after each chunk.
     """
 
-    def __init__(self, total: int) -> None:
+    def __init__(
+        self,
+        total: int,
+        *,
+        max_minutes: float | None = None,
+        cooldown: float = 0.0,
+    ) -> None:
         self.total = total
         self.done = 0
+        self.max_minutes = max_minutes
+        self.cooldown = cooldown
         self._started = time.time()
+
+    @property
+    def elapsed(self) -> float:
+        """Seconds since the stage started."""
+        return time.time() - self._started
 
     def update(self, circuits: int) -> str:
         """
@@ -625,13 +740,31 @@ class Progress:
             A line ending in the measured ETA.
         """
         self.done += circuits
-        elapsed = time.time() - self._started
+        elapsed = self.elapsed
         rate = elapsed / max(1, self.done)
         remaining = max(0, self.total - self.done) * rate
         return (
             f"{self.done}/{self.total} circuits, {elapsed / 60:.1f} min elapsed, "
             f"{rate:.2f} s/circuit, ETA {remaining / 60:.1f} min"
         )
+
+    def rest(self) -> None:
+        """Idle for ``cooldown`` seconds, so the machine is not pinned flat."""
+        if self.cooldown > 0:
+            time.sleep(self.cooldown)
+
+    def out_of_time(self) -> bool:
+        """
+        Whether the time budget is spent.
+
+        Returns
+        -------
+        bool
+            ``True`` once ``max_minutes`` has passed.  Checked only between
+            chunks: a chunk is one job, and stopping inside one would leave an
+            instance's scales half-sampled.
+        """
+        return self.max_minutes is not None and self.elapsed >= self.max_minutes * 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +957,8 @@ def run_unmitigated_stage(
     shots: int,
     chunk: int,
     strict_acceptance: bool = False,
+    max_minutes: float | None = None,
+    cooldown: float = 0.0,
 ) -> int:
     """
     Run the ideal or noisy stage: one circuit per instance, chunked into jobs.
@@ -847,6 +982,12 @@ def run_unmitigated_stage(
     strict_acceptance:
         Apply the nominal acceptance thresholds per instance, uncorrected for
         the number of instances they are applied to.
+    max_minutes:
+        Stop cleanly after the chunk that crosses this much wall clock, and
+        report what is left.  Ignored for the ideal stage, which has to judge
+        every instance together before it may write any of them.
+    cooldown:
+        Seconds to idle between chunks.
 
     Returns
     -------
@@ -855,6 +996,13 @@ def run_unmitigated_stage(
         -- in which case nothing from the stage is written at all.
     """
     is_ideal = stage == "ideal"
+    if is_ideal and max_minutes is not None:
+        print(
+            "  ! --max-minutes does not apply to the ideal stage: it is the "
+            "acceptance gate, and it writes nothing until every instance has "
+            "been judged together. It takes about 1.5 minutes."
+        )
+        max_minutes = None
     config = BatchConfig(
         executor="ideal" if is_ideal else "noisy",
         shots=shots,
@@ -866,7 +1014,7 @@ def run_unmitigated_stage(
         bootstrap_seed=BOOTSTRAP_SEED,
         compute_reference=True,
     )
-    progress = Progress(len(rows))
+    progress = Progress(len(rows), max_minutes=max_minutes, cooldown=cooldown)
     pending_writes: list[tuple[dict[str, Any], Any, int, int, int, str | None]] = []
     deviations: list[dict[str, Any]] = []
     mismatches: list[str] = []
@@ -947,6 +1095,15 @@ def run_unmitigated_stage(
                 write(row, result, index // chunk, len(batch_rows), offset, executed_on)
 
         print(f"  chunk {index // chunk}: {progress.update(len(batch_rows))}")
+        remaining = len(rows) - (index + len(batch_rows))
+        if progress.out_of_time() and remaining:
+            print(
+                f"\n  time budget spent ({max_minutes} min); {remaining} instance(s) "
+                "left. Re-run the same command to continue where this stopped."
+            )
+            break
+        if remaining:
+            progress.rest()
 
     if mismatches:
         print(f"\nFAIL: {len(mismatches)} instance(s) do not match family.json; "
@@ -1087,6 +1244,8 @@ def run_zne_stage(
     chunk: int,
     include_mitiq: bool,
     use_recorded_seeds: bool,
+    max_minutes: float | None = None,
+    cooldown: float = 0.0,
 ) -> int:
     """
     Run the ZNE stage: transpile once, fold, one job per chunk, analyse offline.
@@ -1112,6 +1271,12 @@ def run_zne_stage(
     use_recorded_seeds:
         Reuse ``best_seed``; false when the backend is not the one the subset
         file was built against.
+    max_minutes:
+        Stop cleanly after the chunk that crosses this much wall clock, and
+        report what is left.  The transpilation pass runs first and is not
+        counted -- it is a few seconds for the whole family.
+    cooldown:
+        Seconds to idle between chunks.
 
     Returns
     -------
@@ -1160,7 +1325,8 @@ def run_zne_stage(
     total_circuits = sum(
         item.n_circuits(include_mitiq=include_mitiq) for item in prepared
     )
-    progress = Progress(total_circuits)
+    progress = Progress(total_circuits, max_minutes=max_minutes, cooldown=cooldown)
+    done_instances = 0
 
     for chunk_index, group in enumerate(chunks):
         batch = run_zne_batch(
@@ -1214,7 +1380,17 @@ def run_zne_stage(
                 },
             )
             save_record(directory / f"{item.name}.json", record)
+        done_instances += len(group)
         print(f"  chunk {chunk_index}: {progress.update(batch.n_circuits)}")
+        remaining = len(prepared) - done_instances
+        if progress.out_of_time() and remaining:
+            print(
+                f"\n  time budget spent ({max_minutes} min); {remaining} instance(s) "
+                "left. Re-run the same command to continue where this stopped."
+            )
+            break
+        if remaining:
+            progress.rest()
     return 0
 
 
@@ -1372,6 +1548,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Run exactly these instances, by name (overrides --family).",
     )
+    parser.add_argument(
+        "--n",
+        dest="n_values",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Only instances of these index-register widths. Cost per instance "
+        "rises steeply with n, so this is how a long stage is split.",
+    )
+    parser.add_argument(
+        "--max-threads",
+        type=int,
+        default=None,
+        help="Cap the simulator's thread count. Aer takes every core by "
+        "default and holds it for the whole run; the counts do not depend on "
+        "this, so a throttled run merges with an unthrottled one.",
+    )
+    parser.add_argument(
+        "--max-minutes",
+        type=float,
+        default=None,
+        help="Stop cleanly after the chunk that crosses this much wall clock. "
+        "Re-running continues where it stopped.",
+    )
+    parser.add_argument(
+        "--cooldown",
+        type=float,
+        default=0.0,
+        help="Seconds to idle between chunks, to let the machine cool.",
+    )
     parser.add_argument("--no-mitiq", action="store_true")
     parser.add_argument(
         "--strict-acceptance",
@@ -1410,6 +1616,7 @@ def main(argv: list[str] | None = None) -> int:
         backend,
         calibration=args.calibration,
         hardware_dir=args.hardware_dir,
+        max_threads=args.max_threads,
     )
 
     from dgssp.mitigation import mitiq_is_available
@@ -1418,6 +1625,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"stage={args.stage} family={args.family} noise={args.noise} "
           f"backend={pair.name} calibration={calibration_timestamp(pair.device)}")
+    cores = os.cpu_count() or 1
+    print(
+        f"  threads={args.max_threads if args.max_threads else f'all ({cores})'}"
+        f"  cooldown={args.cooldown:g}s"
+        f"  budget={f'{args.max_minutes:g} min' if args.max_minutes else 'none'}"
+        f"  n={args.n_values if args.n_values else 'all'}"
+    )
     if args.stage == "zne":
         print(f"  grid={args.grid} mitiq={'on' if include_mitiq else 'off'} "
               f"methods={list(ZNE_METHODS)}")
@@ -1440,7 +1654,7 @@ def main(argv: list[str] | None = None) -> int:
             use_recorded_seeds=matches_subset,
         )
 
-    rows = select_rows(family, args.family, args.limit, args.only)
+    rows = select_rows(family, args.family, args.limit, args.only, args.n_values)
     if args.stage == "zne" and args.grid == "odd7":
         rows = [
             r for r in rows if r["family"] == ODD7_FAMILY and r["n_items"] <= ODD7_MAX_N
@@ -1487,6 +1701,8 @@ def main(argv: list[str] | None = None) -> int:
                 shots=shots,
                 chunk=args.chunk,
                 strict_acceptance=args.strict_acceptance,
+                max_minutes=args.max_minutes,
+                cooldown=args.cooldown,
             )
         else:
             status = run_zne_stage(
@@ -1499,6 +1715,8 @@ def main(argv: list[str] | None = None) -> int:
                 chunk=args.chunk,
                 include_mitiq=include_mitiq,
                 use_recorded_seeds=matches_subset,
+                max_minutes=args.max_minutes,
+                cooldown=args.cooldown,
             )
         if status:
             return status

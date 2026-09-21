@@ -392,3 +392,68 @@ def test_figures_refuse_to_guess_when_nothing_was_aggregated(tmp_path):
     """A missing table is an error, not an empty plot."""
     with pytest.raises(FileNotFoundError, match="aggregate.py"):
         make_figures.build_sim(tmp_path, tmp_path / "figures", "planned")
+
+
+# ---------------------------------------------------------------------------
+# sim_campaign: staying inside the machine
+# ---------------------------------------------------------------------------
+
+
+def test_the_time_budget_is_checked_only_between_chunks():
+    """Stopping inside a chunk would leave an instance's scales half-sampled."""
+    progress = sim_campaign.Progress(100, max_minutes=None)
+    assert progress.out_of_time() is False
+
+    spent = sim_campaign.Progress(100, max_minutes=1.0)
+    spent._started -= 61.0  # noqa: SLF001 - simulating a minute of work
+    assert spent.out_of_time() is True
+
+    fresh = sim_campaign.Progress(100, max_minutes=1.0)
+    assert fresh.out_of_time() is False
+
+
+def test_a_cooldown_of_zero_does_not_sleep():
+    """The default must not add wall clock to a run that does not need it."""
+    import time as _time
+
+    started = _time.time()
+    sim_campaign.Progress(1, cooldown=0.0).rest()
+    assert _time.time() - started < 0.1
+
+
+def test_throttling_sets_the_thread_cap_and_the_seed():
+    """The seed is always set; the cap only when asked for."""
+
+    class _Recorder:
+        def __init__(self):
+            self.options = {}
+
+        def set_options(self, **kwargs):
+            self.options.update(kwargs)
+
+    capped = sim_campaign.throttle(_Recorder(), 4)
+    assert capped.options == {
+        "seed_simulator": sim_campaign.SEED_SIMULATOR,
+        "max_parallel_threads": 4,
+    }
+
+    uncapped = sim_campaign.throttle(_Recorder(), None)
+    assert uncapped.options == {"seed_simulator": sim_campaign.SEED_SIMULATOR}
+
+
+def test_instances_can_be_selected_by_width():
+    """Cost rises steeply with n, so a long stage is split on it."""
+    family = {
+        "instances": [
+            _row(name="a", n_items=2, family="P"),
+            _row(name="b", n_items=4, family="P"),
+            _row(name="c", n_items=6, family="S"),
+        ]
+    }
+    assert [r["name"] for r in sim_campaign.select_rows(family, "all", None, None, [2, 4])] == [
+        "a",
+        "b",
+    ]
+    assert [r["name"] for r in sim_campaign.select_rows(family, "P", None, None, [6])] == []
+    with pytest.raises(ValueError, match="n_items"):
+        sim_campaign.select_rows(family, "all", None, None, [9])

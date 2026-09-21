@@ -131,3 +131,26 @@ compared with `sin^2((2 r_opt + 1) theta)` and with the `p_ideal` recorded in
 `instances/hardware_subset.json`, and the stage as a whole has been judged (see
 the script's docstring on why those per-instance thresholds are applied with a
 multiplicity correction). If it stops, nothing downstream should be run.
+
+### Splitting a long stage
+
+Aer takes every core and holds it for the whole run. On a laptop that is a
+thermal event, not a speed-up. `--max-threads N` caps it, `--max-minutes M`
+stops cleanly at a chunk boundary, `--cooldown S` idles between chunks, and
+`--n 2 3 4` selects index-register widths (an `n = 6` instance costs about 26 s
+against 4 s at `n = 2`, so `n = 6` alone is a third of the family).
+
+```
+python paper/scripts/sim_campaign.py --stage zne --family all --grid odd `
+    --n 2 3 4 --max-threads 8 --cooldown 10 --max-minutes 45
+```
+
+None of this changes a number. With a fixed `seed_simulator` every experiment
+draws from its own seeded stream, so one thread and sixteen give bit-identical
+counts and a throttled run merges with an unthrottled one — verified in
+`tests/test_paper_sim_campaign.py`. What *does* change the counts is the
+composition of a job: Aer seeds experiment `i` from `seed_simulator` and `i`,
+so changing `--chunk`, `--n` or the instance order between sittings gives the
+remaining instances different (equally valid) draws. Every record carries its
+`chunk_index`, `chunk_circuits` and `max_parallel_threads`, so which sitting
+produced it is never in doubt.
