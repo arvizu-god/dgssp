@@ -27,6 +27,8 @@ from .mitiq_baseline import (
     mitiq_zne_solution_probability,
 )
 from .zne import (
+    ZNE_METHODS,
+    ZNE_RENORMS,
     FoldResult,
     ZNEBatchRun,
     ZNEItem,
@@ -58,6 +60,8 @@ from .zne import (
 
 __all__ = [
     "ZNESamplingConfig",
+    "ZNE_METHODS",
+    "ZNE_RENORMS",
     "FoldResult",
     "fold_isa",
     "fold_transpiled",

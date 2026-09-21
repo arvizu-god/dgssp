@@ -27,13 +27,26 @@ service that was handed to it.
 
 from __future__ import annotations
 
+import json
 import statistics
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, TypeAlias
 
 from qiskit import QuantumCircuit
-from qiskit.providers import BackendV2
+from qiskit.circuit.controlflow import (
+    BreakLoopOp,
+    ContinueLoopOp,
+    ForLoopOp,
+    IfElseOp,
+    SwitchCaseOp,
+    WhileLoopOp,
+)
+from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
+from qiskit.providers import BackendV2, Options
+from qiskit.transpiler import InstructionProperties, QubitProperties, Target
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_aer import AerSimulator
 
@@ -966,6 +979,429 @@ def select_best_backends(
     }
 
 
+# ---------------------------------------------------------------------------
+# Calibration snapshots (a live noise model, frozen to disk)
+# ---------------------------------------------------------------------------
+
+#: Schema tag written into every snapshot file.
+CALIBRATION_SCHEMA: str = "dgssp/calibration-snapshot/1"
+
+#: Control-flow operations a device advertises.  They carry no calibration and
+#: the paper's circuits never use them, but they are part of the transpiler's
+#: target: dropping them changes basis translation, and the ISA circuit stops
+#: being bit-identical to the one the live device produced.
+_CONTROL_FLOW_OPS: dict[str, Any] = {
+    "if_else": IfElseOp,
+    "for_loop": ForLoopOp,
+    "switch_case": SwitchCaseOp,
+    "while_loop": WhileLoopOp,
+    "break_loop": BreakLoopOp,
+    "continue_loop": ContinueLoopOp,
+}
+
+
+class _SnapshotProperties:
+    """The one field :func:`calibration_timestamp` reads off a device."""
+
+    def __init__(self, last_update_date: str | None) -> None:
+        self.last_update_date = last_update_date
+
+
+class CalibrationSnapshotBackend(BackendV2):
+    """
+    A backend rebuilt from a saved calibration snapshot.
+
+    It is a full transpilation *and* noise target: ``AerSimulator.from_backend``
+    on it reproduces the live device's noise model, and
+    ``generate_preset_pass_manager`` on it reproduces the live device's ISA
+    circuits bit for bit.  It cannot execute -- :meth:`run` raises -- because a
+    snapshot is data, not a device; run the ``AerSimulator`` built from it.
+
+    Attributes
+    ----------
+    source_name:
+        Name of the device the snapshot came from.
+    """
+
+    def __init__(
+        self,
+        target: Target,
+        *,
+        name: str,
+        source_name: str | None = None,
+        calibration_timestamp: str | None = None,
+    ) -> None:
+        super().__init__(name=name)
+        self._target = target
+        self.source_name = source_name or name
+        self._calibration_timestamp = calibration_timestamp
+
+    @property
+    def target(self) -> Target:
+        """The reconstructed calibration target."""
+        return self._target
+
+    @property
+    def max_circuits(self) -> int | None:
+        """No batch limit: a snapshot never submits anything."""
+        return None
+
+    @classmethod
+    def _default_options(cls) -> Options:
+        """No options; present because ``BackendV2`` requires it."""
+        return Options()
+
+    def properties(self) -> _SnapshotProperties:
+        """
+        The calibration stamp, so :func:`calibration_timestamp` keeps working.
+
+        Returns
+        -------
+        _SnapshotProperties
+            Carrying ``last_update_date`` of the snapshotted device.
+        """
+        return _SnapshotProperties(self._calibration_timestamp)
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Never: a snapshot is calibration data, not a device.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.  Use ``AerSimulator.from_backend(snapshot)``.
+        """
+        raise NotImplementedError(
+            "A calibration snapshot cannot execute circuits. Use "
+            "AerSimulator.from_backend(snapshot), or SavedNoiseModel.simulator()."
+        )
+
+
+def calibration_payload(backend: BackendLike) -> dict[str, Any]:
+    """
+    Serialise everything about a device that fixes its noise and its ISA.
+
+    That is the BackendV2 ``target``: every calibrated instruction's qubits,
+    duration and error, each qubit's ``T1`` / ``T2`` / frequency, ``dt`` and
+    the timing granularity, plus the names of the control-flow operations.
+    These are the numbers ``NoiseModel.from_backend`` and the preset pass
+    managers read, so a snapshot pins both.
+
+    Parameters
+    ----------
+    backend:
+        A BackendV2 with a calibrated target (a real device or a fake twin).
+
+    Returns
+    -------
+    dict
+        Plain JSON types only.
+
+    Raises
+    ------
+    AttributeError
+        If the backend exposes no ``target``.
+    ValueError
+        If the target advertises an instruction this Qiskit release has no
+        standard definition for -- rebuilding it would silently drop a gate.
+    """
+    target = getattr(backend, "target", None)
+    if target is None:
+        raise AttributeError(
+            f"Backend {backend_name(backend)!r} exposes no `target`; "
+            "a calibration snapshot requires a BackendV2."
+        )
+
+    known = get_standard_gate_name_mapping()
+    instructions: dict[str, list[dict[str, Any]]] = {}
+    control_flow: list[str] = []
+    for name in target.operation_names:
+        if name in _CONTROL_FLOW_OPS:
+            control_flow.append(name)
+            continue
+        if name not in known:
+            raise ValueError(
+                f"Instruction {name!r} of backend {backend_name(backend)!r} has no "
+                "standard definition in this Qiskit release, so a snapshot could "
+                "not rebuild it. Keep the live backend for this device."
+            )
+        instructions[name] = [
+            {
+                "qubits": list(qargs) if qargs is not None else None,
+                "duration": None if props is None else props.duration,
+                "error": None if props is None else props.error,
+            }
+            for qargs, props in (target[name] or {}).items()
+        ]
+
+    qubit_properties = [
+        {"t1": q.t1, "t2": q.t2, "frequency": q.frequency}
+        for q in (target.qubit_properties or [])
+    ]
+
+    return {
+        "num_qubits": target.num_qubits,
+        "dt": target.dt,
+        "granularity": target.granularity,
+        "instructions": instructions,
+        "control_flow": control_flow,
+        "qubit_properties": qubit_properties,
+    }
+
+
+def backend_from_calibration(
+    payload: Mapping[str, Any],
+    *,
+    name: str,
+    source_name: str | None = None,
+    calibration_timestamp: str | None = None,
+) -> CalibrationSnapshotBackend:
+    """
+    Rebuild a transpilation and noise target from :func:`calibration_payload`.
+
+    Parameters
+    ----------
+    payload:
+        The dictionary :func:`calibration_payload` produced.
+    name:
+        Name the rebuilt backend reports.
+    source_name:
+        Name of the original device; defaults to ``name``.
+    calibration_timestamp:
+        Stamp of the original snapshot, exposed through ``properties()``.
+
+    Returns
+    -------
+    CalibrationSnapshotBackend
+        Usable anywhere a BackendV2 is.
+    """
+    known = get_standard_gate_name_mapping()
+    qubit_properties = [
+        QubitProperties(t1=q.get("t1"), t2=q.get("t2"), frequency=q.get("frequency"))
+        for q in payload.get("qubit_properties") or []
+    ]
+    target = Target(
+        num_qubits=payload["num_qubits"],
+        dt=payload.get("dt"),
+        granularity=payload.get("granularity", 1),
+        qubit_properties=qubit_properties or None,
+    )
+    for inst_name, rows in payload["instructions"].items():
+        mapped: dict[Any, InstructionProperties | None] = {}
+        for row in rows:
+            qargs = tuple(row["qubits"]) if row["qubits"] is not None else None
+            if row["duration"] is None and row["error"] is None:
+                mapped[qargs] = None
+            else:
+                mapped[qargs] = InstructionProperties(
+                    duration=row["duration"], error=row["error"]
+                )
+        target.add_instruction(known[inst_name], mapped, name=inst_name)
+    for inst_name in payload.get("control_flow") or []:
+        target.add_instruction(_CONTROL_FLOW_OPS[inst_name], name=inst_name)
+
+    return CalibrationSnapshotBackend(
+        target,
+        name=name,
+        source_name=source_name,
+        calibration_timestamp=calibration_timestamp,
+    )
+
+
+@dataclass(frozen=True)
+class SavedNoiseModel:
+    """
+    A calibration snapshot loaded back from disk.
+
+    Attributes
+    ----------
+    backend:
+        The rebuilt :class:`CalibrationSnapshotBackend`: transpile against it,
+        and derive the simulator from it.
+    backend_name:
+        The device the snapshot came from.
+    calibration_timestamp:
+        That device's calibration stamp.
+    saved_at:
+        When the snapshot was written (UTC, ISO-8601).
+    median_gate_errors:
+        The medians recorded at save time, so a table can be built without
+        recomputing them.
+    noise_model_summary:
+        ``{"basis_gates", "noise_instructions", "noise_qubits"}`` of the noise
+        model as it stood when saved -- an audit trail against the model
+        rebuilt from the target.
+    path:
+        The file it was loaded from.
+    """
+
+    backend: CalibrationSnapshotBackend
+    backend_name: str
+    calibration_timestamp: str | None
+    saved_at: str | None
+    median_gate_errors: dict[str, Any] = field(default_factory=dict)
+    noise_model_summary: dict[str, Any] = field(default_factory=dict)
+    path: Path | None = None
+
+    @property
+    def noise_model(self) -> Any:
+        """
+        The noise model, rebuilt from the snapshotted target.
+
+        Returns
+        -------
+        qiskit_aer.noise.NoiseModel
+            With the same error channels the live device produced.
+        """
+        from qiskit_aer.noise import NoiseModel
+
+        return NoiseModel.from_backend(self.backend)
+
+    def simulator(self, *, seed_simulator: int | None = None) -> AerSimulator:
+        """
+        An ``AerSimulator`` carrying the snapshot's noise.
+
+        Parameters
+        ----------
+        seed_simulator:
+            Sampling seed, for reproducible counts.
+
+        Returns
+        -------
+        AerSimulator
+            As ``AerSimulator.from_backend(live_device)`` would have been.
+        """
+        simulator = AerSimulator.from_backend(self.backend)
+        if seed_simulator is not None:
+            simulator.set_options(seed_simulator=seed_simulator)
+        return simulator
+
+
+def save_noise_model(
+    path: Path | str,
+    noise_model: Any,
+    backend: BackendLike,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """
+    Freeze a live device's noise to a JSON file that reloads without the service.
+
+    What is stored is the *calibration* the noise model was built from (the
+    BackendV2 target: per-instruction errors and durations, qubit ``T1`` /
+    ``T2`` / frequency), not the channel matrices.  ``NoiseModel.to_dict`` is
+    deprecated in qiskit-aer, and its ``from_dict`` cannot read back a
+    backend-derived model at all -- it raises on the readout error -- so the
+    to_dict/from_dict round trip is not available.  The target is what
+    ``NoiseModel.from_backend`` consumes anyway, it is an order of magnitude
+    smaller, it is human-auditable, and it pins the *transpilation* too, so a
+    reloaded snapshot reproduces the ISA circuits as well as the counts.  The
+    model itself is recorded as a summary, for audit.
+
+    Parameters
+    ----------
+    path:
+        Destination file; parent directories are created.
+    noise_model:
+        The ``NoiseModel`` in use, summarised into the file.  ``None`` records
+        no summary.
+    backend:
+        The calibrated device the model came from (not the ``AerSimulator``
+        derived from it, which carries no calibration date).
+    overwrite:
+        Replace an existing file.  Off by default: a calibration snapshot is
+        evidence for a hardware run -- deleted deliberately, never clobbered.
+
+    Returns
+    -------
+    Path
+        The file written.
+
+    Raises
+    ------
+    FileExistsError
+        If the file exists and ``overwrite`` is false.
+    """
+    target_path = Path(path)
+    if target_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"{target_path} exists. A calibration snapshot is evidence: pass "
+            "overwrite=True only if you mean to replace it."
+        )
+
+    summary: dict[str, Any] = {}
+    if noise_model is not None:
+        summary = {
+            "basis_gates": sorted(getattr(noise_model, "basis_gates", []) or []),
+            "noise_instructions": sorted(
+                getattr(noise_model, "noise_instructions", []) or []
+            ),
+            "noise_qubits": list(getattr(noise_model, "noise_qubits", []) or []),
+        }
+
+    payload = {
+        "schema": CALIBRATION_SCHEMA,
+        "backend": backend_name(backend),
+        "calibration_timestamp": calibration_timestamp(backend),
+        "saved_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "median_gate_errors": median_gate_errors(backend),
+        "noise_model_summary": summary,
+        "calibration": calibration_payload(backend),
+    }
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return target_path
+
+
+def load_noise_model(path: Path | str) -> SavedNoiseModel:
+    """
+    Load a snapshot written by :func:`save_noise_model`.
+
+    Parameters
+    ----------
+    path:
+        The snapshot file.
+
+    Returns
+    -------
+    SavedNoiseModel
+        Whose ``backend`` is a transpilation target, ``noise_model`` the
+        rebuilt model and ``simulator()`` the noisy simulator.
+
+    Raises
+    ------
+    ValueError
+        If the file is not a calibration snapshot.
+    """
+    source = Path(path)
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    if payload.get("schema") != CALIBRATION_SCHEMA:
+        raise ValueError(
+            f"{source} is not a {CALIBRATION_SCHEMA} file "
+            f"(schema={payload.get('schema')!r})."
+        )
+
+    name = payload.get("backend") or source.stem
+    return SavedNoiseModel(
+        backend=backend_from_calibration(
+            payload["calibration"],
+            name=name,
+            source_name=name,
+            calibration_timestamp=payload.get("calibration_timestamp"),
+        ),
+        backend_name=name,
+        calibration_timestamp=payload.get("calibration_timestamp"),
+        saved_at=payload.get("saved_at"),
+        median_gate_errors=payload.get("median_gate_errors") or {},
+        noise_model_summary=payload.get("noise_model_summary") or {},
+        path=source,
+    )
+
+
 __all__ = [
     "BackendLike",
     "BackendSelectionConfig",
@@ -989,4 +1425,11 @@ __all__ = [
     "run_circuit_on_backend",
     "evaluate_backends_for_circuit",
     "select_best_backends",
+    "CALIBRATION_SCHEMA",
+    "CalibrationSnapshotBackend",
+    "SavedNoiseModel",
+    "calibration_payload",
+    "backend_from_calibration",
+    "save_noise_model",
+    "load_noise_model",
 ]

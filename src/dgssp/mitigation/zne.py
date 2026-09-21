@@ -2287,6 +2287,55 @@ def _physical_one_q(circuit: QuantumCircuit, virtual: Sequence[str]) -> int:
     )
 
 
+def _scalar_block(
+    run: ZNEItemRun,
+    cfg: ZNESamplingConfig,
+    observable_fn: Callable[[Mapping[str, int]], float],
+    p_uniform: float,
+) -> dict[str, Any]:
+    """
+    One method's scalar fit on an item's counts, with its bootstrap interval.
+
+    Parameters
+    ----------
+    run:
+        The item's counts.
+    cfg:
+        Estimator settings; ``cfg.method`` is the method fitted.
+    observable_fn:
+        The proportion to extrapolate.
+    p_uniform:
+        Resolvability null and ``"p_uniform"`` asymptote.
+
+    Returns
+    -------
+    dict
+        :func:`fit_scalar_series` output plus ``ci``, ``bootstrap_se``,
+        ``n_failed``, ``B``, ``bootstrap_seed`` and the item's folding record.
+    """
+    boot = zne_bootstrap(
+        run.counts_per_scale,
+        _with_mode(cfg, "scalar"),
+        observable_fn=observable_fn,
+        p_uniform=p_uniform,
+    )
+    block = dict(boot["fit"])
+    block.update(
+        {
+            "ci": [boot["lo"], boot["hi"]],
+            "bootstrap_se": boot["se"],
+            "n_failed": boot["n_failed"],
+            "B": boot["B"],
+            "bootstrap_seed": boot["seed"],
+            "nominal_scales": list(run.nominal_scales),
+            "realised_scales_exact": [list(f) for f in run.realised_scales_exact],
+            "realised_scales_1q": list(run.realised_scales_1q),
+            "fold_seed": run.fold_seed,
+        }
+    )
+    return block
+
+
 def analyse_zne_item(
     run: ZNEItemRun,
     cfg: ZNESamplingConfig,
@@ -2294,6 +2343,7 @@ def analyse_zne_item(
     solution_bitstrings: Sequence[str],
     p_uniform: float,
     reference: Mapping[str, float] | None = None,
+    methods: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """
     Every estimator and diagnostic on one item's counts -- offline.
@@ -2313,41 +2363,46 @@ def analyse_zne_item(
         ``M / 2**n``: resolvability null and ``"p_uniform"`` asymptote.
     reference:
         Noiseless reference distribution for the pointwise diagnostics.
+    methods:
+        Extrapolation methods to fit, all from the *same* counts -- nothing is
+        re-sampled, so model comparison costs no shots.  ``None`` fits only
+        ``cfg.method``.  ``cfg.method`` is always fitted, whether or not it
+        appears here.
 
     Returns
     -------
     dict
-        ``{"scalar", "pointwise", "pathology", "mitiq"}``.  ``scalar`` is the
-        :func:`fit_scalar_series` dict plus ``ci`` (``[lo, hi]``),
-        ``bootstrap_se`` and ``n_failed``; ``pointwise`` holds both
-        renormalised distributions, their ``P(solution)``, and bootstrap
-        intervals for ``cfg.renorm``; ``pathology`` is
+        ``{"scalar", "scalars", "pointwise", "pathology", "mitiq"}``.
+        ``scalar`` is the :func:`fit_scalar_series` dict for ``cfg.method``
+        plus ``ci`` (``[lo, hi]``), ``bootstrap_se`` and ``n_failed``;
+        ``scalars`` holds the same block for every requested method, keyed by
+        method name (it always contains ``cfg.method``, and equals
+        ``{cfg.method: scalar}`` when ``methods`` is ``None``); ``pointwise``
+        holds both renormalised distributions, their ``P(solution)``, and
+        bootstrap intervals for ``cfg.renorm``; ``pathology`` is
         :func:`pathology_diagnostic` (``None`` without a reference); ``mitiq``
         is ``None`` unless Mitiq folds were run.
+
+    Raises
+    ------
+    ValueError
+        If ``methods`` names an unknown extrapolation method.
     """
     sols = list(solution_bitstrings)
 
     def p_sol(counts: Mapping[str, int]) -> float:
         return solution_probability(counts, sols)
 
-    scalar_cfg = _with_mode(cfg, "scalar")
-    boot = zne_bootstrap(
-        run.counts_per_scale, scalar_cfg, observable_fn=p_sol, p_uniform=p_uniform
-    )
-    scalar = dict(boot["fit"])
-    scalar.update(
-        {
-            "ci": [boot["lo"], boot["hi"]],
-            "bootstrap_se": boot["se"],
-            "n_failed": boot["n_failed"],
-            "B": boot["B"],
-            "bootstrap_seed": boot["seed"],
-            "nominal_scales": list(run.nominal_scales),
-            "realised_scales_exact": [list(f) for f in run.realised_scales_exact],
-            "realised_scales_1q": list(run.realised_scales_1q),
-            "fold_seed": run.fold_seed,
-        }
-    )
+    wanted = [cfg.method] if methods is None else [cfg.method, *methods]
+    for name in wanted:
+        if name not in ZNE_METHODS:
+            raise ValueError(f"Unknown method '{name}'. Use one of {', '.join(ZNE_METHODS)}.")
+    # dict.fromkeys de-duplicates while keeping cfg.method first.
+    scalars = {
+        name: _scalar_block(run, replace(cfg, method=name), p_sol, p_uniform)  # type: ignore[arg-type]
+        for name in dict.fromkeys(wanted)
+    }
+    scalar = scalars[cfg.method]
 
     pointwise: dict[str, Any] = {}
     for renorm in ZNE_RENORMS:
@@ -2392,7 +2447,13 @@ def analyse_zne_item(
         mitiq["realised_scales"] = list(run.mitiq_realised_scales)
         mitiq["fold_seed"] = run.fold_seed
 
-    return {"scalar": scalar, "pointwise": pointwise, "pathology": pathology, "mitiq": mitiq}
+    return {
+        "scalar": scalar,
+        "scalars": scalars,
+        "pointwise": pointwise,
+        "pathology": pathology,
+        "mitiq": mitiq,
+    }
 
 
 def _with_mode(cfg: ZNESamplingConfig, mode: str) -> ZNESamplingConfig:

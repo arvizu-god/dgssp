@@ -63,6 +63,7 @@ from .metrics import (
 )
 from .mitigation import (
     ZNEItem,
+    ZNEItemRun,
     ZNESamplingConfig,
     analyse_zne_item,
     run_zne_batch,
@@ -113,6 +114,9 @@ class BatchConfig:
         ZNE settings for the ``"optimized"`` executor.  Defaults are supplied
         if omitted.  Scale 1 is always measured (it is the unmitigated
         result) and is added when missing.
+    zne_methods:
+        Extrapolation methods fitted side by side from the same counts
+        (``"optimized"`` executor).  ``None`` fits only ``zne_config.method``.
     run_mitiq_baseline:
         Also fold with Mitiq (inside the same job) and extrapolate offline
         with its factories.  Requires the ``dgssp[mitiq]`` extra.
@@ -139,6 +143,7 @@ class BatchConfig:
     backend_config: BackendSelectionConfig | None = None
     service: Any | None = None
     zne_config: ZNESamplingConfig | None = None
+    zne_methods: tuple[str, ...] | None = None
     run_mitiq_baseline: bool = False
     seed_simulator: int | None = None
     seed_transpiler: int | None = None
@@ -223,6 +228,13 @@ class InstanceResult:
         and ``mitiq_solution_probability`` ``[lo, hi]``.
     zne_fit, pointwise, pathology, mitiq:
         The blocks of :func:`dgssp.mitigation.zne.analyse_zne_item`.
+    zne_fits:
+        Every extrapolation method fitted to the same counts, keyed by method
+        name (``zne_fit`` is the reported one).  Archived inside
+        ``metrics["zne_fits"]``, which keeps the record schema at version 2.
+    seed_source:
+        Where the transpiler seed came from: ``"hardware_subset"``,
+        ``"sabre_sweep"`` or ``"fixed_seed"``.
     mitigation_mode:
         ``"none"``, ``"zne_scalar"`` or ``"zne_pointwise"``.
     renorm, fold_seed:
@@ -259,12 +271,14 @@ class InstanceResult:
     reference_distribution: dict[str, float] | None = None
     metrics_ci: dict[str, Any] = field(default_factory=dict)
     zne_fit: dict[str, Any] | None = None
+    zne_fits: dict[str, Any] | None = None
     pointwise: dict[str, Any] | None = None
     pathology: dict[str, Any] | None = None
     mitiq: dict[str, Any] | None = None
     mitigation_mode: str = "none"
     renorm: str | None = None
     fold_seed: int | None = None
+    seed_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -332,7 +346,7 @@ class InstanceResult:
             ``{"two_q_count", "depth", "two_q_depth", "physical_qubits"}``
             (matching :func:`dgssp.transpilation.transpiled_metrics`) plus
             ``{"one_q_physical", "two_q_physical", "virtual_gate_count",
-            "survival", "best_seed"}``.
+            "survival", "best_seed", "seed_source"}``.
         """
         return {
             "two_q_count": self.two_qubit_count,
@@ -346,6 +360,7 @@ class InstanceResult:
             "virtual_gate_count": self.virtual_gate_count,
             "survival": self.survival,
             "best_seed": self.best_seed,
+            "seed_source": self.seed_source,
         }
 
     def to_record(
@@ -408,6 +423,11 @@ class InstanceResult:
             metrics["error_metrics"] = self.error_metrics.to_dict()
         if self.mitigated_distribution is not None:
             metrics["mitigated_distribution"] = dict(self.mitigated_distribution)
+        # Every method's fit lives in `metrics`, not in a new top-level field:
+        # the record schema stays at version 2 and `zne_fit` stays the one the
+        # run reported.
+        if self.zne_fits is not None:
+            metrics["zne_fits"] = self.zne_fits
         if extra_metrics:
             metrics.update(extra_metrics)
 
@@ -915,7 +935,6 @@ def _run_optimized(metas: list[_InstanceMeta], cfg: BatchConfig) -> BatchResult:
     results: list[InstanceResult | None] = [None] * len(metas)
     job_ids: list[str] = []
     scales = _with_unit_scale(zne_cfg.scales)
-    mode_label = f"zne_{zne_cfg.mode}"
 
     for backend, indices in groups.values():
         items = [
@@ -938,73 +957,363 @@ def _run_optimized(metas: list[_InstanceMeta], cfg: BatchConfig) -> BatchResult:
             started = time.time()
             meta = metas[i]
             tqc, seed = prepared[i]
-            sols = meta.solution_bitstrings
-            p_u = _p_uniform(meta.instance, sols)
-            reference = exact_index_distribution(meta.instance, meta.iterations)
-            analysis = analyse_zne_item(
-                run, zne_cfg, solution_bitstrings=sols, p_uniform=p_u, reference=reference
-            )
-            counts = run.counts_per_scale[1.0]
-            scalar = analysis["scalar"]
-            pointwise_block = analysis["pointwise"]
-            mitiq_block = analysis["mitiq"]
-
-            if zne_cfg.mode == "scalar":
-                mitigated_p = scalar["value"]
-                mitigated_ci = scalar["ci"]
-            else:
-                mitigated_p = pointwise_block[zne_cfg.renorm]["solution_probability"]
-                boot = pointwise_block["bootstrap"]["solution_probability"]
-                mitigated_ci = [boot["lo"], boot["hi"]]
-
-            metrics_ci = _distribution_metrics(
-                counts, sols, reference, B=cfg.bootstrap_samples, seed=cfg.bootstrap_seed
-            )
-            metrics_ci["mitigated_solution_probability"] = mitigated_ci
-            if mitiq_block is not None:
-                metrics_ci["mitiq_solution_probability"] = [mitiq_block["lo"], mitiq_block["hi"]]
-
-            sizes = transpiled_metrics(tqc)
-            results[i] = InstanceResult(
+            item = PreparedInstance(
                 instance=meta.instance,
-                n_qubits=meta.circuit.num_qubits,
+                solution_bitstrings=meta.solution_bitstrings,
                 iterations=meta.iterations,
-                solution_bitstrings=sols,
-                num_solutions=len(sols),
-                counts=counts,
-                distribution=counts_to_probs(counts),
-                solution_probability=solution_probability(counts, sols),
-                mitigated_distribution=pointwise_block[zne_cfg.renorm]["distribution"],
-                mitigated_solution_probability=mitigated_p,
-                counts_per_scale=run.counts_per_scale,
-                mitiq_solution_probability=(
-                    mitiq_block["value"] if mitiq_block is not None else None
-                ),
-                error_metrics=_error_metrics(backend, tqc),
-                backend_name=backend_name(backend),
-                depth=sizes["depth"],  # type: ignore[arg-type]
-                two_qubit_depth=sizes["two_q_depth"],  # type: ignore[arg-type]
-                two_qubit_count=sizes["two_q_count"],  # type: ignore[arg-type]
-                physical_qubits=sizes["physical_qubits"],  # type: ignore[arg-type]
-                elapsed_s=time.time() - started,
+                circuit=meta.circuit,
+                transpiled=tqc,
                 best_seed=seed,
-                calibration_timestamp=cal,
+                seed_source=(
+                    "sabre_sweep"
+                    if zne_cfg.seed_max > zne_cfg.seed_min + 1
+                    else "fixed_seed"
+                ),
+                scales=scales,
+                p_uniform=_p_uniform(meta.instance, meta.solution_bitstrings),
+            )
+            results[i] = build_instance_result(
+                item,
+                run,
+                backend,
+                zne_cfg,
+                reference=exact_index_distribution(meta.instance, meta.iterations),
+                bootstrap_samples=cfg.bootstrap_samples,
+                bootstrap_seed=cfg.bootstrap_seed,
+                methods=cfg.zne_methods,
                 job_id=batch.job_id,
-                p_uniform=p_u,
-                reference_distribution=reference,
-                metrics_ci=metrics_ci,
-                zne_fit=scalar,
-                pointwise=pointwise_block,
-                pathology=analysis["pathology"],
-                mitiq=mitiq_block,
-                mitigation_mode=mode_label,
-                renorm=zne_cfg.renorm,
-                fold_seed=zne_cfg.fold_seed,
-                **_noise_counts(backend, tqc),
+                calibration=cal,
+                elapsed_s=time.time() - started,
             )
 
     return BatchResult(
         results=[r for r in results if r is not None], config=cfg, job_ids=job_ids
+    )
+
+
+# ---------------------------------------------------------------------------
+# Prepared instances: one transpilation, reused by every stage
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PreparedInstance:
+    """
+    One instance transpiled once for one backend, ready to be folded.
+
+    This is the unit the paper's campaign works in: the frozen instance files
+    already say which circuit to build (``r_opt``) and which transpiler seed
+    reproduces the ranked layout (``best_seed``), so nothing downstream needs
+    to re-derive register widths, iteration counts or layouts.
+
+    Attributes
+    ----------
+    instance:
+        The Subset Sum instance.
+    solution_bitstrings:
+        Ground truth, index-register bitstrings.
+    iterations:
+        Grover iterations built into the circuit.
+    circuit:
+        The logical circuit.
+    transpiled:
+        The ISA circuit -- the one and only transpilation, which every noise
+        scale folds.
+    best_seed:
+        Transpiler seed that produced ``transpiled``.
+    seed_source:
+        ``"hardware_subset"`` (a recorded ``best_seed`` was reused),
+        ``"sabre_sweep"`` (the seed range was searched) or ``"fixed_seed"``.
+    scales:
+        Nominal noise scales for this instance.
+    p_uniform:
+        ``M / 2**n``.
+    """
+
+    instance: SubsetSumInstance
+    solution_bitstrings: list[str]
+    iterations: int
+    circuit: QuantumCircuit
+    transpiled: QuantumCircuit
+    best_seed: int
+    seed_source: str
+    scales: list[float] = field(default_factory=lambda: [1.0])
+    p_uniform: float = 0.0
+
+    @property
+    def name(self) -> str:
+        """The instance's name, or a placeholder when it has none."""
+        return self.instance.name or "instance"
+
+    def zne_item(self) -> ZNEItem:
+        """
+        This instance's entry in a batched ZNE job.
+
+        Returns
+        -------
+        ZNEItem
+            Carrying the ISA circuit, this instance's scales and its ground
+            truth.
+        """
+        return ZNEItem(
+            name=self.name,
+            circuit=self.transpiled,
+            scales=list(self.scales),
+            solution_bitstrings=list(self.solution_bitstrings),
+        )
+
+    def n_circuits(self, *, include_mitiq: bool = False) -> int:
+        """
+        How many circuits this instance contributes to a job.
+
+        Parameters
+        ----------
+        include_mitiq:
+            Whether Mitiq's folds are also submitted.  Mitiq reuses the
+            unfolded circuit at ``lambda = 1``, so it adds one circuit per
+            scale above 1.
+
+        Returns
+        -------
+        int
+            Circuits submitted for this instance.
+        """
+        n = len(self.scales)
+        return n + (n - 1 if include_mitiq else 0)
+
+
+def prepare_from_records(
+    family_row: Mapping[str, Any],
+    candidate_row: Mapping[str, Any] | None,
+    backend: BackendLike,
+    zne_config: ZNESamplingConfig,
+    *,
+    scales: Sequence[float] | None = None,
+    use_recorded_seed: bool = True,
+    verify_solutions: bool = True,
+) -> PreparedInstance:
+    """
+    Turn a frozen instance record into a transpiled, foldable item.
+
+    The two records are the paper's instance files:
+    ``paper/instances/family.json`` (``instances[i]``) supplies the problem,
+    its ground truth and ``r_opt``; ``paper/instances/hardware_subset.json``
+    (``candidates[i]``) supplies the ``best_seed`` that reproduces the ranked
+    layout **on that file's backend**.  Pass ``candidate_row=None`` (or
+    ``use_recorded_seed=False``) when running on any other device: the seed
+    means nothing there and the layout must be searched again.
+
+    Parameters
+    ----------
+    family_row:
+        Needs ``items``, ``target``, ``name``, ``n_items``, ``M``,
+        ``solution_bitstrings`` and ``r_opt``.
+    candidate_row:
+        Needs ``best_seed``; ``None`` falls back to ``zne_config``'s seed
+        range.
+    backend:
+        The backend to transpile against.
+    zne_config:
+        Supplies the optimization level, layout method and the fallback seed
+        range.
+    scales:
+        Nominal scales for this instance; ``None`` uses ``zne_config.scales``.
+        Scale 1 is always included -- it is the unmitigated observation.
+    use_recorded_seed:
+        Honour ``candidate_row["best_seed"]``.
+    verify_solutions:
+        Re-solve the instance classically and check the recorded ground truth.
+        This is the cross-check that a campaign is running the instances the
+        file claims; leave it on.
+
+    Returns
+    -------
+    PreparedInstance
+        With exactly one transpilation done.
+
+    Raises
+    ------
+    ValueError
+        If ``r_opt`` disagrees with :func:`dgssp.solvers.optimal_iterations`,
+        or (with ``verify_solutions``) if the recorded ground truth disagrees
+        with the DP solver.
+    """
+    instance = SubsetSumInstance(
+        items=list(family_row["items"]),
+        target=family_row["target"],
+        name=family_row.get("name"),
+    )
+    n_items = int(family_row["n_items"])
+    num_solutions = int(family_row["M"])
+    recorded = list(family_row["solution_bitstrings"])
+    iterations = int(family_row["r_opt"])
+
+    expected = optimal_iterations(n_items, max(1, num_solutions))
+    if iterations != expected:
+        raise ValueError(
+            f"Instance {instance.name!r}: recorded r_opt={iterations} but "
+            f"optimal_iterations({n_items}, {max(1, num_solutions)})={expected}."
+        )
+    if verify_solutions:
+        solved = exact_solution_bitstrings(
+            instance, DPSSPSolver(DPConfig(enumerate_all=True)).solve(instance)
+        )
+        if sorted(solved) != sorted(recorded):
+            raise ValueError(
+                f"Instance {instance.name!r}: recorded solutions {sorted(recorded)} "
+                f"but the DP solver finds {sorted(solved)}."
+            )
+
+    circuit = DGSSPSolver(DGConfig(iterations=iterations)).build_circuit(instance)
+
+    seed = None
+    if use_recorded_seed and candidate_row is not None:
+        seed = candidate_row.get("best_seed")
+    if seed is not None:
+        cfg = replace(zne_config, seed_min=int(seed), seed_max=int(seed) + 1)
+        seed_source = "hardware_subset"
+    else:
+        cfg = zne_config
+        seed_source = (
+            "sabre_sweep" if zne_config.seed_max > zne_config.seed_min + 1 else "fixed_seed"
+        )
+    tqc, used_seed = transpile_once_seeded(circuit, backend, cfg)
+
+    return PreparedInstance(
+        instance=instance,
+        solution_bitstrings=recorded,
+        iterations=iterations,
+        circuit=circuit,
+        transpiled=tqc,
+        best_seed=used_seed,
+        seed_source=seed_source,
+        scales=_with_unit_scale(zne_config.scales if scales is None else scales),
+        p_uniform=num_solutions / 2**n_items,
+    )
+
+
+def build_instance_result(
+    prepared: PreparedInstance,
+    run: ZNEItemRun,
+    backend: BackendLike,
+    zne_cfg: ZNESamplingConfig,
+    *,
+    reference: Mapping[str, float] | None,
+    bootstrap_samples: int = 1000,
+    bootstrap_seed: int = 0,
+    methods: Sequence[str] | None = None,
+    job_id: str | None = None,
+    calibration: str | None = None,
+    elapsed_s: float | None = None,
+) -> InstanceResult:
+    """
+    Assemble one :class:`InstanceResult` from a batched ZNE job's output.
+
+    Every estimator runs offline here (:func:`dgssp.mitigation.zne.
+    analyse_zne_item`), so this is also the function that analyses a hardware
+    job fetched back later.
+
+    Parameters
+    ----------
+    prepared:
+        The instance as it was submitted.
+    run:
+        Its counts, keyed by realised scale.
+    backend:
+        The backend the job ran on (for calibration metrics).
+    zne_cfg:
+        Estimator settings; ``mode`` and ``renorm`` pick what is *reported*.
+    reference:
+        Noiseless reference distribution, or ``None`` to skip the distances
+        and the pathology diagnostic.
+    bootstrap_samples, bootstrap_seed:
+        Bootstrap settings for the unmitigated metrics.
+    methods:
+        Extrapolation methods to fit side by side from the same counts (see
+        :func:`dgssp.mitigation.zne.analyse_zne_item`).
+    job_id:
+        The runtime job id.
+    calibration:
+        Calibration timestamp; looked up from ``backend`` when omitted.
+    elapsed_s:
+        Wall clock to record.
+
+    Returns
+    -------
+    InstanceResult
+        With ``zne_fit`` (the reported method), ``zne_fits`` (every method),
+        ``pointwise`` (both renormalisations), ``pathology`` and ``mitiq``.
+    """
+    sols = prepared.solution_bitstrings
+    analysis = analyse_zne_item(
+        run,
+        zne_cfg,
+        solution_bitstrings=sols,
+        p_uniform=prepared.p_uniform,
+        reference=reference,
+        methods=methods,
+    )
+    counts = run.counts_per_scale[1.0]
+    scalar = analysis["scalar"]
+    pointwise_block = analysis["pointwise"]
+    mitiq_block = analysis["mitiq"]
+
+    if zne_cfg.mode == "scalar":
+        mitigated_p = scalar["value"]
+        mitigated_ci = scalar["ci"]
+    else:
+        mitigated_p = pointwise_block[zne_cfg.renorm]["solution_probability"]
+        boot = pointwise_block["bootstrap"]["solution_probability"]
+        mitigated_ci = [boot["lo"], boot["hi"]]
+
+    metrics_ci = _distribution_metrics(
+        counts, sols, reference, B=bootstrap_samples, seed=bootstrap_seed
+    )
+    metrics_ci["mitigated_solution_probability"] = mitigated_ci
+    if mitiq_block is not None:
+        metrics_ci["mitiq_solution_probability"] = [mitiq_block["lo"], mitiq_block["hi"]]
+
+    sizes = transpiled_metrics(prepared.transpiled)
+    return InstanceResult(
+        instance=prepared.instance,
+        n_qubits=prepared.circuit.num_qubits,
+        iterations=prepared.iterations,
+        solution_bitstrings=sols,
+        num_solutions=len(sols),
+        counts=counts,
+        distribution=counts_to_probs(counts),
+        solution_probability=solution_probability(counts, sols),
+        mitigated_distribution=pointwise_block[zne_cfg.renorm]["distribution"],
+        mitigated_solution_probability=mitigated_p,
+        counts_per_scale=run.counts_per_scale,
+        mitiq_solution_probability=(
+            mitiq_block["value"] if mitiq_block is not None else None
+        ),
+        error_metrics=_error_metrics(backend, prepared.transpiled),
+        backend_name=backend_name(backend),
+        depth=sizes["depth"],  # type: ignore[arg-type]
+        two_qubit_depth=sizes["two_q_depth"],  # type: ignore[arg-type]
+        two_qubit_count=sizes["two_q_count"],  # type: ignore[arg-type]
+        physical_qubits=sizes["physical_qubits"],  # type: ignore[arg-type]
+        elapsed_s=elapsed_s,
+        best_seed=prepared.best_seed,
+        seed_source=prepared.seed_source,
+        calibration_timestamp=(
+            calibration if calibration is not None else calibration_timestamp(backend)
+        ),
+        job_id=job_id,
+        p_uniform=prepared.p_uniform,
+        reference_distribution=dict(reference) if reference is not None else None,
+        metrics_ci=metrics_ci,
+        zne_fit=scalar,
+        zne_fits=analysis["scalars"],
+        pointwise=pointwise_block,
+        pathology=analysis["pathology"],
+        mitiq=mitiq_block,
+        mitigation_mode=f"zne_{zne_cfg.mode}",
+        renorm=zne_cfg.renorm,
+        fold_seed=zne_cfg.fold_seed,
+        **_noise_counts(backend, prepared.transpiled),
     )
 
 
@@ -1074,6 +1383,7 @@ def run_iteration_sweep(
     seed_simulator: int | None = None,
     bootstrap_samples: int = 1000,
     bootstrap_seed: int = 0,
+    methods: Sequence[str] | None = None,
     mode: str = "auto",
 ) -> dict[str, Any]:
     """
@@ -1120,6 +1430,9 @@ def run_iteration_sweep(
         Simulator seed.
     bootstrap_samples, bootstrap_seed:
         Bootstrap settings for the unmitigated ``P(solution)`` intervals.
+    methods:
+        Extrapolation methods fitted from the same counts (``"zne"`` only);
+        stored per row under ``zne_fits``.
     mode:
         Execution mode.
 
@@ -1131,7 +1444,8 @@ def run_iteration_sweep(
         ``best_seed``, the transpiled sizes, ``survival`` (calibrated
         backends), ``p_sol`` with ``p_sol_ci``, the analytic
         ``sin^2((2r+1) theta)``, the raw counts, and for ZNE the scalar fit
-        (``zne``: value, CI, resolved, reported value) and the Mitiq block.
+        (``zne``: value, CI, resolved, reported value; ``zne_fits``: the
+        same for every requested method) and the Mitiq block.
     """
     if not r_values:
         raise ValueError("run_iteration_sweep needs at least one iteration count.")
@@ -1226,9 +1540,11 @@ def run_iteration_sweep(
                 solution_bitstrings=sols,
                 p_uniform=p_u,
                 reference=exact_index_distribution(instance, int(r)),
+                methods=methods,
             )
             row["counts"] = {scale_key(s): dict(c) for s, c in run.counts_per_scale.items()}
             row["zne"] = analysis["scalar"]
+            row["zne_fits"] = analysis["scalars"]
             row["pathology"] = analysis["pathology"]
             row["mitiq"] = analysis["mitiq"]
         rows.append(row)
@@ -1251,7 +1567,10 @@ __all__ = [
     "BatchConfig",
     "InstanceResult",
     "BatchResult",
+    "PreparedInstance",
     "prepare_instances",
+    "prepare_from_records",
+    "build_instance_result",
     "run_batch",
     "run_random_batch",
     "run_iteration_sweep",
