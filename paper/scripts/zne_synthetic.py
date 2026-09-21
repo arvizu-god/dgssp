@@ -15,7 +15,21 @@ Two studies, no circuits, seconds to run:
    plan_scales` pre-registers.  For each method x S x grid the file records
    the Monte-Carlo bias and its standard error, the analytic bias (the
    estimator applied to the exact curve), bootstrap-interval coverage of the
-   truth, median interval width, and the fraction of fits flagged resolved.
+   truth, median interval width, the fractions of fits flagged resolved and
+   identifiable, and -- on the same counts, through Mitiq's own factories --
+   the Mitiq baseline.
+
+   **Robust statistics, and why.**  Where a design resolves fewer scales than
+   the model has parameters (S = 0.17 on odd scales: only lambda = 1 carries
+   signal), the exponential estimator is not identified and not bounded --
+   chi2 is flat in the decay rate and its infimum sits at rate -> infinity,
+   where the extrapolation diverges; only ``exp_rate_max`` keeps it finite,
+   so its *mean* over seeds measures that bound, not the estimator.  The file
+   therefore carries the median and the interquartile range beside the mean,
+   and coverage/bias conditioned on the resolved seeds; the printed table
+   shows the median and an ``UNRESOLVED`` marker for such cells.  Coverage
+   there is vacuous rather than good: read it next to
+   ``median_ci_width``.
 
 2. **Pointwise renormalisation on near-uniform inputs** (the pathology
    regime).  A 4-bit register whose ideal output is uniform (every M = 0
@@ -52,6 +66,8 @@ if str(SCRIPTS_DIR) not in sys.path:  # pragma: no cover - script bootstrap
 
 from _common import DATA_DIR, INSTANCES_DIR, save_record  # noqa: E402
 from dgssp.metrics import solution_probability, uniform_distribution  # noqa: E402
+from dgssp.mitigation import mitiq_is_available  # noqa: E402
+from dgssp.mitigation.mitiq_baseline import mitiq_extrapolate  # noqa: E402
 from dgssp.mitigation.zne import (  # noqa: E402
     ZNESamplingConfig,
     expected_extrapolation,
@@ -62,7 +78,10 @@ from dgssp.mitigation.zne import (  # noqa: E402
     zne_bootstrap,
 )
 
-SCHEMA = "dgssp/paper/zne-synthetic/1"
+SCHEMA = "dgssp/paper/zne-synthetic/2"
+
+#: Mitiq is an optional extra; without it the baseline columns are absent.
+MITIQ = mitiq_is_available()
 
 #: Survival grid and the subset instance that supplies P_ideal, P_uniform and
 #: N_2q at each S.  The S values are the subset's range, rounded.
@@ -120,7 +139,7 @@ def load_cases() -> list[dict[str, Any]]:
 def scalar_cell(
     case: dict[str, Any], grid_name: str, nominal: list[float], method: str, seeds: list[int]
 ) -> dict[str, Any]:
-    """One method x S x grid cell of the scalar study."""
+    """One method x S x grid cell of the scalar study, with the Mitiq baseline."""
     s, p_ideal, p_u = case["survival"], case["p_ideal"], case["p_uniform"]
     scales = [float(realised_scale(lam, case["two_q_count"])) for lam in nominal]
     cfg = ZNESamplingConfig(
@@ -128,27 +147,41 @@ def scalar_cell(
         asymptote="p_uniform" if method == "exponential" else None,
         n_bootstrap=BOOTSTRAP_B,
     )
+    asymptote = p_u if method == "exponential" else None
 
-    points, reported, widths = [], [], []
-    covered = resolved = failed = at_bound = 0
+    points, reported, widths, mitiq_points = [], [], [], []
+    covered, covered_resolved, resolved, identifiable, failed, at_bound = 0, 0, 0, 0, 0, 0
+    resolved_points: list[float] = []
     for seed in seeds:
         counts = synthetic_depolarising_counts(
             s, scales, p_ideal, p_u, SHOTS, np.random.default_rng(seed)
         )
         boot = zne_bootstrap(counts, cfg, observable_fn=_observable, p_uniform=p_u, seed=seed)
         fit = boot["fit"]
+        hit = boot["lo"] <= p_ideal <= boot["hi"]
         points.append(boot["point"])
         reported.append(fit["reported_value"])
         widths.append(boot["hi"] - boot["lo"])
-        covered += boot["lo"] <= p_ideal <= boot["hi"]
+        covered += hit
         resolved += bool(fit["resolved"])
+        identifiable += bool(fit["identifiable"])
         failed += boot["n_failed"] > 0
         at_bound += bool(fit.get("rate_at_bound"))
+        if fit["resolved"]:
+            resolved_points.append(boot["point"])
+            covered_resolved += hit
+        if MITIQ:
+            mitiq_points.append(
+                mitiq_extrapolate(scales, fit["observed"], method, asymptote=asymptote)
+            )
 
     arr = np.array(points)
+    resolved_arr = np.array(resolved_points)
     analytic = expected_extrapolation(cfg, scales, s, p_ideal, p_u, SHOTS)
     signal = p_ideal - p_u
-    return {
+    q25, q75 = np.percentile(arr, [25, 75])
+
+    cell = {
         "method": method,
         "survival": s,
         "instance": case["instance"],
@@ -156,21 +189,52 @@ def scalar_cell(
         "nominal_scales": list(nominal),
         "realised_scales": scales,
         "n_seeds": len(seeds),
+        # Location: the mean is meaningless where the estimator is unbounded
+        # (see the module docstring); the median is the headline number.
         "mean_estimate": float(np.mean(arr)),
         "median_estimate": float(np.median(arr)),
+        "iqr": float(q75 - q25),
         "bias_mc": float(np.mean(arr) - p_ideal),
         "bias_mc_se": float(np.std(arr, ddof=1) / np.sqrt(arr.size)),
+        "bias_median": float(np.median(arr) - p_ideal),
         "bias_analytic": analytic - p_ideal,
         "signal_recovered_analytic": (analytic - p_u) / signal if signal else None,
+        # Conditional on the fits the paper would actually report.
+        "n_resolved_seeds": resolved,
+        "resolved_fraction": resolved / len(seeds),
+        "identifiable_fraction": identifiable / len(seeds),
+        "bias_mc_resolved": (
+            float(np.mean(resolved_arr) - p_ideal) if resolved_arr.size else None
+        ),
+        "median_estimate_resolved": (
+            float(np.median(resolved_arr)) if resolved_arr.size else None
+        ),
         "coverage": covered / len(seeds),
         "coverage_count": covered,
+        "coverage_resolved": covered_resolved / resolved if resolved else None,
         "median_ci_width": float(np.median(widths)),
-        "resolved_fraction": resolved / len(seeds),
         "fraction_with_failed_replicates": failed / len(seeds),
         "fraction_rate_at_bound": at_bound / len(seeds) if method == "exponential" else None,
+        "exp_rate_max": cfg.exp_rate_max if method == "exponential" else None,
         "mean_reported_value": float(np.mean(reported)),
         "bias_reported": float(np.mean(reported) - p_ideal),
     }
+
+    if MITIQ:
+        mitiq_arr = np.array(mitiq_points, dtype=float)
+        finite = mitiq_arr[np.isfinite(mitiq_arr)]
+        cell.update(
+            {
+                "mitiq_median_estimate": float(np.median(finite)) if finite.size else None,
+                "mitiq_bias_median": (
+                    float(np.median(finite) - p_ideal) if finite.size else None
+                ),
+                "mitiq_mean_estimate": float(np.mean(finite)) if finite.size else None,
+                "mitiq_max_estimate": float(np.max(finite)) if finite.size else None,
+                "mitiq_n_failed": int(mitiq_arr.size - finite.size),
+            }
+        )
+    return cell
 
 
 def _pointwise_counts(
@@ -261,11 +325,20 @@ def main(argv: list[str] | None = None) -> int:
             for method in METHODS:
                 cell = scalar_cell(case, grid_name, list(nominal), method, seeds)
                 scalar.append(cell)
+                # Where most fits are unresolved the mean is a function of
+                # exp_rate_max, not of the estimator: show the median.
+                unresolved = cell["resolved_fraction"] < 0.5
+                mitiq = cell.get("mitiq_bias_median")
                 print(
                     f"S={cell['survival']:<4} {grid_name:<7} {str(nominal):<18} {method:<11} "
-                    f"bias={cell['bias_mc']:+.3f}+-{cell['bias_mc_se']:.3f} "
-                    f"(analytic {cell['bias_analytic']:+.3f})  "
-                    f"coverage={cell['coverage']:.2f}  resolved={cell['resolved_fraction']:.2f}"
+                    f"bias_med={cell['bias_median']:+.3f} "
+                    f"(analytic {cell['bias_analytic']:+.3f}"
+                    + (f", mitiq {mitiq:+.3f}" if mitiq is not None else "")
+                    + ")  "
+                    f"coverage={cell['coverage']:.2f}  "
+                    f"resolved={cell['resolved_fraction']:.2f} "
+                    f"ident={cell['identifiable_fraction']:.2f}"
+                    + ("   UNRESOLVED: mean is unbounded" if unresolved else "")
                 )
 
     pointwise = pointwise_cells(seeds)
@@ -290,6 +363,12 @@ def main(argv: list[str] | None = None) -> int:
             "plan_k": PLAN_K,
             "plan_points": PLAN_POINTS,
             "resolvability_k": 2.0,
+            "mitiq_available": MITIQ,
+            "mitiq_note": (
+                "same counts, same realised scales, Mitiq's own factory "
+                "extrapolation (LinearFactory / PolyFactory(2) / "
+                "RichardsonFactory / ExpFactory(asymptote=P_uniform))"
+            ),
             "model": "P(lam) = S**lam * P_ideal + (1 - S**lam) * P_uniform",
             "exponential_asymptote": "P_uniform (fixed)",
             "cases": cases,

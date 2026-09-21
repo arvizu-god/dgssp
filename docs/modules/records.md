@@ -47,8 +47,12 @@ by `scale_key` of the **realised** scale — the only irrecoverable numbers),
   `realised_scales_exact` (`[numerator, denominator]`), `nominal_scales`,
   `observed`, `sigma`, `params`, `param_names`, `cov`, `residuals`, `dof`,
   `chi2`, `chi2_red` (`null` when `dof == 0`), `asymptote`, `null_value`,
-  `resolved`, `reported_value` / `reported_source`, `ci`, `bootstrap_se`,
-  `fold_seed`.
+  `resolved` / `resolved_scales` / `n_resolved_scales`, `identifiable` /
+  `informative_scales` / `n_informative_scales`, `rate_at_bound`,
+  `exp_rate_max`, `reported_value` / `reported_source`, `ci`, `bootstrap_se`,
+  `fold_seed`. A fit that is unresolved or unidentified keeps its raw `value`
+  but reports `value_at_min_scale`; see
+  [`mitigation.zne`](mitigation.zne.md).
 - `pathology: dict | None` — `zne.pathology_diagnostic`.
 - `mitiq: dict | None` — Mitiq's scales, realised two-qubit scales, per-scale
   values, extrapolation and interval.

@@ -41,7 +41,8 @@ Mitiq's folds of the same circuits) and submits everything through one
 | `ZNESamplingConfig` | dataclass |
 | `resolve_asymptote` | function |
 | `richardson_weights`, `zne_fit_single_value` | functions |
-| `fit_scalar_series`, `extrapolate_scalar`, `is_resolved` | functions |
+| `fit_scalar_series`, `extrapolate_scalar` | functions |
+| `is_resolved`, `resolved_scales_mask`, `informative_scales_mask` | functions |
 | `project_to_simplex`, `clip_renormalise`, `simplex_renormalise` | functions |
 | `pointwise_raw`, `extrapolate_distribution` | functions |
 | `zne_bootstrap` | function |
@@ -117,6 +118,9 @@ layout. After it, a folded circuit is ISA-valid for the backend
   `2⁻ⁿ`.
 - `fold_seed: int = 0` — partial-folding and Mitiq-folding seed.
 - `n_bootstrap: int = 500`, `bootstrap_seed: int = 0`.
+- `exp_rate_max: float = 10.0` — bound on the exponential's decay rate. It
+  bounds an estimator that is unbounded on an unidentified design and never
+  binds otherwise (see below).
 
 Unknown `method`/`mode`/`renorm`/`asymptote` values raise at construction.
 
@@ -141,17 +145,41 @@ Weighted fit (`w = 1/σ²`, `σ = metrics.proportion_sigma`):
 
 Returns `value`, `value_se`, `params`, `param_names`, `cov`, `fitted`,
 `residuals`, `n_params`, `dof`, `chi2`, `chi2_red`, `fit_ok`,
-`rate_at_bound`, `scales`, `observed`, `sigma`, `shots`, `asymptote`,
-`null_value`, `resolved`, `resolvability_k`, `value_at_min_scale`,
+`rate_at_bound`, `exp_rate_max`, `scales`, `observed`, `sigma`, `shots`,
+`asymptote`, `null_value`, `resolved`, `resolved_scales`,
+`n_resolved_scales`, `identifiable`, `informative_scales`,
+`n_informative_scales`, `resolvability_k`, `value_at_min_scale`,
 `reported_value`, `reported_source`.
 
-#### Resolvability: `is_resolved(values, shots, null_value, *, k=2)`
+#### Resolvability and identifiability
 
-`resolved = True` only if **every** scale has `|obs(λ) − P_uniform| ≥ 2·SE`.
-SE is the closed-form binomial SE, which is the exact multinomial-bootstrap SE
-of a proportion, so the flag is deterministic. An unresolved fit still returns
-its numbers, but `reported_value` is the lowest-scale observation
-(`reported_source = "min_scale"`): the paper reports `λ = 1` for it.
+Two distinct questions, both answered on every scalar fit:
+
+- **`is_resolved` / `resolved_scales_mask`** (two-sided) — `resolved = True`
+  only if **every** scale has `|obs(λ) − P_uniform| ≥ 2·SE`. SE is the
+  closed-form binomial SE, which is the exact multinomial-bootstrap SE of a
+  proportion, so the flag is deterministic.
+- **`informative_scales_mask`** (signed) — a scale is *informative* only if it
+  sits ≥ 2·SE from the asymptote **on the same side as the lowest scale**. A
+  point that far on the other side is a fluctuation, not information about a
+  decay. `identifiable = n_informative_scales ≥ n_params`.
+
+`reported_value` is the extrapolation only when the fit is resolved **and**
+identified; otherwise it is the lowest-scale observation
+(`reported_source = "min_scale"`) and the paper reports `λ = 1`.
+
+**Why identifiability is not a formality.** With one informative scale the
+exponential is not merely noisy, it is *unbounded*: every `(b, c)` with
+`b·e^(−c·λ_min) = obs(λ_min) − a` fits the one informative point, and for large
+`c` they all predict the asymptote everywhere else, so χ² is flat in `c` and
+its infimum sits at `c → ∞`, where `value = a + b = a + d·e^(c·λ_min)`
+diverges. `exp_rate_max` (default `EXP_RATE_MAX = 10`) only turns that
+divergence into a large finite number — it is a **display convention, not part
+of the estimator**, and `rate_at_bound` records when it bound. This is exactly
+the n = 4 odd-folding regime: in the synthetic study 85% of seeds are
+unidentified and the raw *mean* estimate tracks `exp_rate_max` rather than the
+data (median 0.83 against a mean of 582). Average the raw value only over
+identified fits — or use the median.
 
 #### `extrapolate_scalar(counts_per_scale, observable_fn, cfg, *, p_uniform=None) -> dict`
 

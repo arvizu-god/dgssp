@@ -31,6 +31,7 @@ from dgssp.metrics import solution_probability
 from dgssp.mitigation.zne import (
     ZNESamplingConfig,
     expected_extrapolation,
+    extrapolate_scalar,
     plan_scales,
     realised_scale,
     synthetic_depolarising_counts,
@@ -115,3 +116,29 @@ def test_resolvability_flags_odd_scales_and_passes_the_planned_grid():
     _, _, resolved_plan = _study(s, p_ideal, p_u, _grid(planned, n_2q), cfg, B=50)
     assert resolved_odd <= 2, resolved_odd
     assert resolved_plan >= 36, resolved_plan
+
+
+def test_odd_scales_do_not_identify_the_exponential_at_n_equals_4():
+    """The design, not the implementation, is what fails at S = 0.17.
+
+    Odd-integer folding leaves one informative scale, so (amplitude, rate) are
+    not jointly identified and the extrapolation is unbounded; the planned
+    grid identifies every seed.  This is the diagnosis behind the divergent
+    cell in paper/data/zne_synthetic.json.
+    """
+    s, p_ideal, p_u, n_2q = CASES[2]
+    cfg = ZNESamplingConfig(method="exponential", asymptote="p_uniform")
+
+    def identified(nominal):
+        scales = _grid(nominal, n_2q)
+        out = 0
+        for seed in SEEDS:
+            counts = synthetic_depolarising_counts(
+                s, scales, p_ideal, p_u, SHOTS, np.random.default_rng(seed)
+            )
+            fit = extrapolate_scalar(counts, _observable, cfg, p_uniform=p_u)
+            out += bool(fit["identifiable"])
+        return out
+
+    assert identified([1, 3, 5]) <= 12
+    assert identified(_planned(s, p_ideal, p_u)) >= 38

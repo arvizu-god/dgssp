@@ -20,10 +20,12 @@ from dgssp.mitigation.zne import (
     extrapolate_distribution,
     extrapolate_scalar,
     fit_scalar_series,
+    informative_scales_mask,
     is_resolved,
     pathology_diagnostic,
     plan_scales,
     project_to_simplex,
+    resolved_scales_mask,
     richardson_weights,
     simplex_renormalise,
     zne_bootstrap,
@@ -289,3 +291,88 @@ def test_scalar_bootstrap_requires_an_observable():
     """Scalar mode needs to know what it is extrapolating."""
     with pytest.raises(ValueError):
         zne_bootstrap({1.0: {"0": 10}, 3.0: {"0": 10}}, ZNESamplingConfig(mode="scalar"))
+
+
+# ---------------------------------------------------------------------------
+# Identifiability: the exponential is unbounded when too few scales resolve
+# ---------------------------------------------------------------------------
+
+#: A series in the n = 4 / odd-folding regime: only lambda = 1 carries signal,
+#: and the higher scales fluctuate *below* the asymptote.  Taken from seed
+#: 20261023 of the synthetic study (S = 0.17, P_uniform = 0.125, 4000 shots).
+_DEGENERATE = ([1.0, 3.0, 5.0], [0.2620, 0.1155, 0.1113], 0.125)
+
+
+def test_informative_scales_mask_is_signed():
+    """A point k sigma on the *wrong* side of the null is not information."""
+    scales, y, null = _DEGENERATE
+    two_sided = resolved_scales_mask(y, [4000] * 3, null)
+    signed = informative_scales_mask(y, [4000] * 3, null)
+    # lambda = 5 sits ~2.8 sigma below the asymptote: "distinguishable", but it
+    # says nothing about a signal decaying from above.
+    assert two_sided == [True, False, True]
+    assert signed == [True, False, False]
+
+
+def test_unidentified_exponential_is_flagged_and_never_reported():
+    """One informative scale cannot identify (amplitude, rate)."""
+    scales, y, null = _DEGENERATE
+    cfg = ZNESamplingConfig(method="exponential", asymptote="p_uniform")
+    fit = fit_scalar_series(scales, y, [4000] * 3, cfg, p_uniform=null)
+
+    assert fit["n_informative_scales"] == 1
+    assert fit["n_params"] == 2
+    assert fit["identifiable"] is False
+    assert fit["resolved"] is False
+    assert fit["rate_at_bound"] is True
+    # The raw value is preserved (diagnostic) but is not what gets reported.
+    assert fit["value"] > 100
+    assert fit["reported_value"] == pytest.approx(y[0])
+    assert fit["reported_source"] == "min_scale"
+
+
+def test_unidentified_exponential_is_unbounded_in_the_rate_cap():
+    """chi2 is flat in the rate: the 'estimate' just tracks exp_rate_max."""
+    scales, y, null = _DEGENERATE
+    values = []
+    for cap in (5.0, 10.0, 20.0):
+        cfg = ZNESamplingConfig(method="exponential", asymptote="p_uniform", exp_rate_max=cap)
+        fit = fit_scalar_series(scales, y, [4000] * 3, cfg, p_uniform=null)
+        values.append(fit["value"])
+        assert fit["identifiable"] is False
+        assert fit["exp_rate_max"] == cap
+    # Roughly exp(cap) growth: the infimum of chi2 is at rate -> infinity.
+    assert values[0] < values[1] < values[2]
+    assert values[2] > 1e5
+
+
+def test_identified_exponential_ignores_the_rate_cap():
+    """On a resolvable design the bound never binds, so it changes nothing."""
+    s, p_ideal, p_u = 0.4, 0.942, 0.125
+    scales = [1.0, 1.5, 2.0]
+    y = [depolarised_probability(s, lam, p_ideal, p_u) for lam in scales]
+    fits = [
+        fit_scalar_series(
+            scales,
+            y,
+            [4000] * 3,
+            ZNESamplingConfig(method="exponential", asymptote="p_uniform", exp_rate_max=cap),
+            p_uniform=p_u,
+        )
+        for cap in (5.0, 10.0, 20.0)
+    ]
+    assert all(f["identifiable"] is True and f["rate_at_bound"] is False for f in fits)
+    # The bound changes the rate-search grid, so agreement is numerical, not bitwise.
+    assert fits[0]["value"] == pytest.approx(fits[1]["value"], abs=1e-6)
+    assert fits[1]["value"] == pytest.approx(fits[2]["value"], abs=1e-6)
+
+
+def test_polynomial_fits_stay_bounded_on_the_degenerate_series():
+    """Only the exponential is unbounded there; the linear fits are not."""
+    scales, y, null = _DEGENERATE
+    for method in ("linear", "richardson"):
+        fit = fit_scalar_series(
+            scales, y, [4000] * 3, ZNESamplingConfig(method=method), p_uniform=null
+        )
+        assert abs(fit["value"]) < 1.0
+        assert fit["exp_rate_max"] is None

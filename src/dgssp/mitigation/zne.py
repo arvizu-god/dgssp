@@ -47,6 +47,7 @@ import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
+from functools import lru_cache
 from typing import Any, Literal, TypeAlias
 
 import numpy as np
@@ -454,16 +455,33 @@ _N_PARAMS: dict[str, int] = {"linear": 2, "quadratic": 3, "exponential": 3}
 #: therefore have a closed-form least-squares solution.
 _POLYNOMIAL_DEGREE: dict[str, int] = {"linear": 1, "quadratic": 2}
 
-#: Upper bound on the exponential model's decay rate per unit noise scale.
-#: ``exp(-10) = 4.5e-5`` per unit scale is far below the smallest survival in
-#: the frozen family (0.0104 at n = 4, i.e. rate 4.6).  Without a bound, data
-#: in which the signal has vanished at every scale above the first let the
-#: rate run away and the extrapolation diverge; with it, such a fit is
-#: flagged ``rate_at_bound`` and is in any case unresolved.
+#: Default upper bound on the exponential model's decay rate per unit noise
+#: scale (:attr:`ZNESamplingConfig.exp_rate_max`).  ``exp(-10) = 4.5e-5`` per
+#: unit scale is far below the smallest survival in the frozen family (0.0104
+#: at n = 4, i.e. rate 4.6), so the bound never binds on an identified fit.
+#:
+#: **It is a display convention, not part of the estimator.**  When fewer
+#: scales are resolved than the model has free parameters -- at n = 4 with
+#: odd-integer folding only ``lambda = 1`` carries signal -- the amplitude and
+#: the rate are not jointly identified: every pair obeying
+#: ``b exp(-c lam_min) = obs(lam_min) - a`` fits the one informative point,
+#: and once ``c`` is large they all predict the asymptote at every other
+#: scale, so ``chi2`` is flat in ``c`` and its infimum sits at ``c -> inf``,
+#: where the extrapolation ``a + b = a + d exp(c lam_min)`` diverges.  The
+#: bound turns that divergence into a large finite number; ``rate_at_bound``
+#: and ``identifiable`` record that it happened, and such a fit is never
+#: reported (``reported_source == "min_scale"``).  Averaging the raw value
+#: over such fits is meaningless: use the median, or condition on
+#: ``resolved``.
 EXP_RATE_MAX: float = 10.0
 
-_EXP_RATE_GRID: np.ndarray = np.concatenate(([0.0], np.geomspace(1e-4, EXP_RATE_MAX, 400)))
 _GOLDEN: float = (math.sqrt(5.0) - 1.0) / 2.0
+
+
+@lru_cache(maxsize=8)
+def _rate_grid(rate_max: float) -> np.ndarray:
+    """Rate search grid: zero plus 400 log-spaced points up to ``rate_max``."""
+    return np.concatenate(([0.0], np.geomspace(1e-4, float(rate_max), 400)))
 
 
 def richardson_weights(scales: Sequence[float] | np.ndarray) -> np.ndarray:
@@ -641,14 +659,18 @@ def _safe_inverse(matrix: np.ndarray) -> np.ndarray | None:
 
 
 def _exp_fixed_many(
-    x: np.ndarray, Y: np.ndarray, W: np.ndarray, asymptote: float
+    x: np.ndarray,
+    Y: np.ndarray,
+    W: np.ndarray,
+    asymptote: float,
+    rate_max: float = EXP_RATE_MAX,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Weighted fit of ``a + b exp(-c x)`` with ``a`` fixed, for many series.
 
     Variable projection: for a fixed rate ``c`` the amplitude is linear,
     ``b(c) = S_yg / S_gg``, and ``chi2(c) = S_yy - S_yg^2 / S_gg``.  The
-    one-dimensional minimisation over ``c in [0, EXP_RATE_MAX]`` is a grid
+    one-dimensional minimisation over ``c in [0, rate_max]`` is a grid
     search followed by a vectorised golden-section refinement, so a whole
     bootstrap (thousands of series) is fitted in a few array operations and
     never depends on an initial guess.
@@ -663,6 +685,8 @@ def _exp_fixed_many(
         Weights ``1 / sigma^2``, shape ``(B, n)`` or ``(1, n)``.
     asymptote:
         The fixed ``a``.
+    rate_max:
+        Upper bound of the rate search; see :data:`EXP_RATE_MAX`.
 
     Returns
     -------
@@ -680,12 +704,13 @@ def _exp_fixed_many(
         sgg = np.sum(W * g * g, axis=1)
         return Syy - syg**2 / sgg
 
-    G = np.exp(-np.outer(_EXP_RATE_GRID, x))
+    rates = _rate_grid(float(rate_max))
+    G = np.exp(-np.outer(rates, x))
     grid = Syy[:, None] - (WD @ G.T) ** 2 / (W @ (G * G).T)
     best = np.argmin(grid, axis=1)
-    last = _EXP_RATE_GRID.size - 1
-    lo = _EXP_RATE_GRID[np.maximum(best - 1, 0)]
-    hi = _EXP_RATE_GRID[np.minimum(best + 1, last)]
+    last = rates.size - 1
+    lo = rates[np.maximum(best - 1, 0)]
+    hi = rates[np.minimum(best + 1, last)]
     for _ in range(60):
         c1 = hi - _GOLDEN * (hi - lo)
         c2 = lo + _GOLDEN * (hi - lo)
@@ -693,7 +718,7 @@ def _exp_fixed_many(
         hi = np.where(left, c2, hi)
         lo = np.where(left, lo, c1)
     c = 0.5 * (lo + hi)
-    grid_c = _EXP_RATE_GRID[best]
+    grid_c = rates[best]
     c = np.where(chi2(c) <= chi2(grid_c), c, grid_c)
 
     g = np.exp(-np.outer(c, x))
@@ -702,7 +727,10 @@ def _exp_fixed_many(
 
 
 def _fit_exponential_free(
-    x: np.ndarray, y: np.ndarray, sigma: np.ndarray | None
+    x: np.ndarray,
+    y: np.ndarray,
+    sigma: np.ndarray | None,
+    rate_max: float = EXP_RATE_MAX,
 ) -> tuple[np.ndarray, np.ndarray | None] | None:
     """``curve_fit`` of ``amplitude * exp(-rate x) + asymptote``, or ``None``."""
     p0 = (float(y[0] - y[-1]) or 0.1, 0.5, float(y[-1]))
@@ -716,7 +744,7 @@ def _fit_exponential_free(
                 p0=p0,
                 sigma=sigma,
                 absolute_sigma=sigma is not None,
-                bounds=([-np.inf, 0.0, -np.inf], [np.inf, EXP_RATE_MAX, np.inf]),
+                bounds=([-np.inf, 0.0, -np.inf], [np.inf, float(rate_max), np.inf]),
                 maxfev=10_000,
             )
         except (RuntimeError, ValueError):
@@ -731,6 +759,7 @@ def _fit_series(
     y: np.ndarray,
     sigma: np.ndarray | None = None,
     asymptote: float | None = None,
+    rate_max: float = EXP_RATE_MAX,
 ) -> dict[str, Any]:
     """
     Fit one series and extrapolate it to zero noise, with full diagnostics.
@@ -790,14 +819,14 @@ def _fit_series(
         if n < n_params:
             raise ValueError(f"Exponential with a fixed asymptote needs >= 2 scales, got {n}.")
         w_row = (np.ones(n) if weights is None else weights)[None, :]
-        b_arr, c_arr = _exp_fixed_many(x, y[None, :], w_row, float(asymptote))
+        b_arr, c_arr = _exp_fixed_many(x, y[None, :], w_row, float(asymptote), rate_max)
         b, c = float(b_arr[0]), float(c_arr[0])
         g = np.exp(-c * x)
         fitted = asymptote + b * g
         params = np.array([b, c])
         value = float(asymptote + b)
         names = ["amplitude", "rate"]
-        rate_at_bound = bool(c >= EXP_RATE_MAX * (1.0 - 1e-9))
+        rate_at_bound = bool(c >= rate_max * (1.0 - 1e-9))
         if sigma is not None:
             jac = np.column_stack([g, -b * x * g]) / sigma[:, None]
             cov = _safe_inverse(jac.T @ jac)
@@ -808,7 +837,7 @@ def _fit_series(
         n_params = 3
         if n < n_params:
             raise ValueError(f"Exponential with a free asymptote needs >= 3 scales, got {n}.")
-        fitted_free = _fit_exponential_free(x, y, sigma)
+        fitted_free = _fit_exponential_free(x, y, sigma, rate_max)
         names = ["amplitude", "rate", "asymptote"]
         if fitted_free is None:
             fit_ok = False
@@ -819,7 +848,7 @@ def _fit_series(
             params, cov = fitted_free
             fitted = _exponential_model(x, *params)
             value = float(params[0] + params[2])
-            rate_at_bound = bool(params[1] >= EXP_RATE_MAX * (1.0 - 1e-9))
+            rate_at_bound = bool(params[1] >= rate_max * (1.0 - 1e-9))
             if cov is not None and sigma is not None:
                 grad = np.array([1.0, 0.0, 1.0])
                 value_se = float(np.sqrt(max(0.0, grad @ cov @ grad)))
@@ -859,6 +888,7 @@ def _extrapolate_many(
     Y: np.ndarray,
     S: np.ndarray | None,
     asymptote: float | None,
+    rate_max: float = EXP_RATE_MAX,
 ) -> np.ndarray:
     """
     Zero-noise values of many series at once (the bootstrap's inner loop).
@@ -879,11 +909,11 @@ def _extrapolate_many(
         return Y @ richardson_weights(x)
     if asymptote is not None:
         W = np.ones_like(Y) if S is None else 1.0 / S**2
-        b, _ = _exp_fixed_many(x, Y, W, float(asymptote))
+        b, _ = _exp_fixed_many(x, Y, W, float(asymptote), rate_max)
         return asymptote + b
     out = np.full(Y.shape[0], np.nan)
     for i, row in enumerate(Y):
-        fitted = _fit_exponential_free(x, row, None if S is None else S[i])
+        fitted = _fit_exponential_free(x, row, None if S is None else S[i], rate_max)
         if fitted is not None:
             out[i] = fitted[0][0] + fitted[0][2]
     return out
@@ -947,6 +977,11 @@ class ZNESamplingConfig:
         Bootstrap resamples per fit.
     bootstrap_seed:
         Seed of the bootstrap resampling.
+    exp_rate_max:
+        Upper bound of the exponential model's decay rate.  See
+        :data:`EXP_RATE_MAX`: it bounds an estimator that is unbounded on a
+        design resolving fewer scales than the model has parameters, and never
+        binds otherwise.
     """
 
     scales: Sequence[float] = field(default_factory=lambda: [1, 3, 5])
@@ -965,6 +1000,7 @@ class ZNESamplingConfig:
     fold_seed: int = 0
     n_bootstrap: int = 500
     bootstrap_seed: int = 0
+    exp_rate_max: float = EXP_RATE_MAX
 
     def __post_init__(self) -> None:
         """Reject unknown names early, before any circuit is built."""
@@ -1013,6 +1049,89 @@ def resolve_asymptote(cfg: ZNESamplingConfig, p_uniform: float | None) -> float 
 # ---------------------------------------------------------------------------
 
 
+def resolved_scales_mask(
+    values: Sequence[float],
+    shots: Sequence[int],
+    null_value: float,
+    *,
+    k: float = RESOLVABILITY_K,
+) -> list[bool]:
+    """
+    Per scale: is the observable at least ``k`` standard errors from the null?
+
+    How many entries are ``True`` is what decides whether a model is
+    *identified*: a fit with fewer informative scales than free parameters is
+    determined by noise, and the exponential is then not even bounded (see
+    :data:`EXP_RATE_MAX`).
+
+    Parameters
+    ----------
+    values:
+        Observed proportions, one per scale.
+    shots:
+        Shots behind each.
+    null_value:
+        The random-guessing baseline ``P_uniform``.
+    k:
+        Threshold in standard errors.
+
+    Returns
+    -------
+    list[bool]
+        One flag per scale, in the order given.
+    """
+    return [
+        abs(v - null_value) >= k * proportion_sigma(v, int(n))
+        for v, n in zip(values, shots, strict=True)
+    ]
+
+
+def informative_scales_mask(
+    values: Sequence[float],
+    shots: Sequence[int],
+    null_value: float,
+    *,
+    k: float = RESOLVABILITY_K,
+) -> list[bool]:
+    """
+    Per scale: does it carry signal *in the direction the model decays from*?
+
+    :func:`resolved_scales_mask` is two-sided -- it asks whether an
+    observation is distinguishable from the null at all.  Identification asks
+    something stricter: under a decaying model every scale lies on the same
+    side of the asymptote as the least-noisy one, so a point that sits ``k``
+    standard errors on the *other* side is a fluctuation, not information
+    about the decay.  Counting it would make a fit look identified when the
+    rate is in fact unconstrained (see :data:`EXP_RATE_MAX`).
+
+    The reference direction is the sign of ``values[0] - null_value`` (the
+    lowest scale, the least attenuated point).
+
+    Parameters
+    ----------
+    values:
+        Observed proportions, one per scale, lowest scale first.
+    shots:
+        Shots behind each.
+    null_value:
+        The random-guessing baseline ``P_uniform``.
+    k:
+        Threshold in standard errors.
+
+    Returns
+    -------
+    list[bool]
+        One flag per scale, in the order given.
+    """
+    if not values:
+        return []
+    sign = 1.0 if values[0] >= null_value else -1.0
+    return [
+        sign * (v - null_value) >= k * proportion_sigma(v, int(n))
+        for v, n in zip(values, shots, strict=True)
+    ]
+
+
 def is_resolved(
     values: Sequence[float],
     shots: Sequence[int],
@@ -1048,10 +1167,7 @@ def is_resolved(
     """
     if null_value is None:
         return None
-    return all(
-        abs(v - null_value) >= k * proportion_sigma(v, int(n))
-        for v, n in zip(values, shots, strict=True)
-    )
+    return all(resolved_scales_mask(values, shots, null_value, k=k))
 
 
 def fit_scalar_series(
@@ -1089,12 +1205,23 @@ def fit_scalar_series(
         Everything :func:`_fit_series` returns (``value``, ``value_se``,
         ``params``, ``cov``, ``residuals``, ``dof``, ``chi2_red`` -- ``None``
         when ``dof == 0``, e.g. Richardson) plus ``scales``, ``observed``,
-        ``sigma``, ``shots``, ``asymptote``, ``null_value``, ``resolved``,
-        ``resolvability_k``, ``value_at_min_scale`` and ``reported_value`` /
-        ``reported_source``: the extrapolation when the fit is resolved (or no
-        null was given), otherwise the lowest-scale observation.  An
-        unresolved fit still returns its numbers; the paper reports the
-        ``lambda = 1`` value for it instead.
+        ``sigma``, ``shots``, ``asymptote``, ``null_value``,
+        ``resolvability_k``, ``value_at_min_scale`` and:
+
+        ``resolved`` / ``resolved_scales`` / ``n_resolved_scales``
+            Two-sided: is each observation distinguishable from the null?
+            ``resolved`` is ``True`` only when every scale is.
+        ``identifiable`` / ``informative_scales`` / ``n_informative_scales``
+            Signed (:func:`informative_scales_mask`): are there at least as
+            many scales carrying signal, on the same side of the asymptote as
+            the lowest scale, as the model has free parameters?  A fit that is
+            not identified is determined by noise, and an exponential one is
+            not even bounded -- see :data:`EXP_RATE_MAX`.
+        ``reported_value`` / ``reported_source``
+            The extrapolation when the fit is resolved *and* identified (or no
+            null was given), otherwise the lowest-scale observation.  An
+            unresolved or unidentified fit still returns its raw numbers; the
+            paper reports the ``lambda = 1`` value for it instead.
     """
     order = np.argsort(np.asarray(scales, dtype=float))
     x = np.asarray(scales, dtype=float)[order]
@@ -1103,9 +1230,22 @@ def fit_scalar_series(
     sigma = np.array([proportion_sigma(v, int(s)) for v, s in zip(y, n, strict=True)])
     asymptote = resolve_asymptote(cfg, p_uniform)
 
-    fit = _fit_series(cfg.method, x, y, sigma, asymptote)
-    resolved = is_resolved(y.tolist(), n.astype(int).tolist(), p_uniform)
-    use_fit = fit["fit_ok"] and resolved is not False
+    fit = _fit_series(cfg.method, x, y, sigma, asymptote, cfg.exp_rate_max)
+    if p_uniform is None:
+        mask: list[bool] | None = None
+        informative: list[bool] | None = None
+        resolved: bool | None = None
+        n_resolved: int | None = None
+        n_informative: int | None = None
+        identifiable: bool | None = None
+    else:
+        mask = resolved_scales_mask(y.tolist(), n.astype(int).tolist(), p_uniform)
+        informative = informative_scales_mask(y.tolist(), n.astype(int).tolist(), p_uniform)
+        resolved = all(mask)
+        n_resolved = int(sum(mask))
+        n_informative = int(sum(informative))
+        identifiable = bool(n_informative >= fit["n_params"])
+    use_fit = fit["fit_ok"] and resolved is not False and identifiable is not False
     fit.update(
         {
             "scales": x.tolist(),
@@ -1115,7 +1255,13 @@ def fit_scalar_series(
             "asymptote": asymptote,
             "null_value": p_uniform,
             "resolved": resolved,
+            "resolved_scales": mask,
+            "n_resolved_scales": n_resolved,
+            "informative_scales": informative,
+            "n_informative_scales": n_informative,
+            "identifiable": identifiable,
             "resolvability_k": RESOLVABILITY_K,
+            "exp_rate_max": cfg.exp_rate_max if cfg.method == "exponential" else None,
             "value_at_min_scale": float(y[0]),
             "reported_value": fit["value"] if use_fit else float(y[0]),
             "reported_source": "extrapolation" if use_fit else "min_scale",
@@ -1310,7 +1456,7 @@ def _pointwise_raw_matrix(x: np.ndarray, P: np.ndarray, cfg: ZNESamplingConfig, 
             ]
         )
     else:
-        raw = _extrapolate_many(cfg.method, x, series, None, asymptote)
+        raw = _extrapolate_many(cfg.method, x, series, None, asymptote, cfg.exp_rate_max)
     raw = np.where(np.all(series == 0.0, axis=1), 0.0, raw)
     return raw.reshape(*lead, k)
 
@@ -1455,7 +1601,12 @@ def zne_bootstrap(
                 observable_fn(dict(zip(keys, row.tolist(), strict=True))) for row in draws
             ]
         values = _extrapolate_many(
-            cfg.method, x, Y, _sigma_matrix(Y, shots), resolve_asymptote(cfg, p_uniform)
+            cfg.method,
+            x,
+            Y,
+            _sigma_matrix(Y, shots),
+            resolve_asymptote(cfg, p_uniform),
+            cfg.exp_rate_max,
         )
         lo, hi = percentile_interval(values, alpha)
         finite = values[np.isfinite(values)]
@@ -2356,7 +2507,11 @@ def expected_extrapolation(
     x = np.asarray(scales, dtype=float)
     y = np.array([depolarised_probability(survival, s, p_ideal, p_uniform) for s in x])
     sigma = np.sqrt(y * (1.0 - y) / shots)
-    return float(_fit_series(cfg.method, x, y, sigma, resolve_asymptote(cfg, p_uniform))["value"])
+    return float(
+        _fit_series(
+            cfg.method, x, y, sigma, resolve_asymptote(cfg, p_uniform), cfg.exp_rate_max
+        )["value"]
+    )
 
 
 __all__ = [
@@ -2377,6 +2532,8 @@ __all__ = [
     "zne_fit_single_value",
     "resolve_asymptote",
     "is_resolved",
+    "informative_scales_mask",
+    "resolved_scales_mask",
     "fit_scalar_series",
     "extrapolate_scalar",
     "project_to_simplex",
