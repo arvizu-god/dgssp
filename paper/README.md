@@ -86,6 +86,7 @@ python paper/scripts/freeze_versions.py
 | `sim_campaign.py` | `data/sim_<stage>[_<noise>][_<grid>]/<instance>.json` | WP5: the whole simulation campaign, one stage per command, resumable |
 | `aggregate.py` | `data/sim_*.csv`, `data/sim_summary.json`, `tex/sim_table_<grid>.tex`, `notes/sim_results.md` | WP5: every table the text quotes |
 | `make_figures.py` | `figures/fig_sim_*.pdf` | WP5: the five simulation figures, from `data/` alone |
+| `qpu_budget.py` | stdout, optional `hardware/qpu_budget.json` | QPU minutes a job shape would cost, offline from the device's calibrated durations |
 
 `resource_scaling.py` is the C1 measurement: it checks every closed form in
 `notes/resource_model.md` against the circuit the solver builds (144 asserts),
