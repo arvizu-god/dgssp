@@ -94,6 +94,7 @@ grow with every record a campaign writes. The git probe runs once per process.
 | `iteration_sweep.py` | `data/sweep_<executor>.json` | WP4 / C3: P_sol vs Grover iterations, one job per instance |
 | `sim_campaign.py` | `data/sim_<stage>[_<noise>][_<grid>]/<instance>.json` | WP5: the whole simulation campaign, one stage per command, resumable |
 | `run_campaign.py` | the six `sim_*` stages, `data/campaign_log.json` | WP5: the campaign unattended, gated, logged, optionally synced to a bucket |
+| `verify_campaign.py` | stdout; exit 1 on any failure | WP5: every record present, one commit, one environment, shot totals, Mitiq present |
 | `aggregate.py` | `data/sim_*.csv`, `data/sim_summary.json`, `tex/sim_table_<grid>.tex`, `notes/sim_results.md` | WP5: every table the text quotes |
 | `make_figures.py` | `figures/fig_sim_*.pdf` | WP5: the five simulation figures, from `data/` alone |
 | `qpu_budget.py` | stdout, optional `hardware/qpu_budget.json` | QPU minutes a job shape would cost, offline from the device's calibrated durations |
