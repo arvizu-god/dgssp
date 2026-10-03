@@ -62,8 +62,9 @@ Remove-Item -Recurse -Force $Slice -ErrorAction SilentlyContinue
 
 Expect:
 
-- three stages `OK (exit 0)`, then `campaign complete (exit 0)`;
-- then `PASS: one complete campaign, one commit, one environment.`, with `KB/rec` around 3 for `ideal` and around 40 for `zne-planned`.
+- three stages `OK (exit 0)`, then `campaign complete (exit 0)`, in about 1 minute (measured: 66 s);
+- then `PASS: one complete campaign, one commit, one environment.`;
+- `KB/rec` of 3.2 for `ideal`, 3.8 for `noisy` and 18.5 for `zne-planned`. The first 20 instances are all `n = 2`; larger `n` gives larger records.
 
 ## 2. Google Cloud, once
 
@@ -206,7 +207,7 @@ Expect:
 
 - `TERMINATED`.
 - The log's tail ends in `PASS` and `finished with status 0`.
-- `rsync` copies 6 `sim_*` directories (2055 records, about 39 MB) plus `campaign_log.json` and `campaign_stdout.log`, and nothing else.
+- `rsync` copies 6 `sim_*` directories (2055 records, about 33 MB projected) plus `campaign_log.json` and `campaign_stdout.log`, and nothing else.
 - `verify_campaign.py` prints the six-stage table with `missing 0`, `dup 0` and `bad 0`, a single `commit` (= `$Commit`), `dirty 0`, `= requirements-lock.txt`, `python 3.11.2`, then `PASS`.
 - `git status --porcelain` shows only untracked `paper/data/` entries.
 - Deleting the stopped VM ends the disk's billing.
