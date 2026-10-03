@@ -32,6 +32,7 @@ import copy
 import getpass
 import json
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -64,6 +65,10 @@ TEX_DIR = PAPER_ROOT / "tex"
 
 #: Where :func:`write_requirements_lock` writes the pinned versions.
 LOCK_FILE = PAPER_ROOT / "requirements-lock.txt"
+
+#: Where :func:`write_cloud_requirements` writes the full environment a cloud
+#: VM installs (``paper/cloud/bootstrap.sh``).
+CLOUD_REQUIREMENTS_FILE = PAPER_ROOT / "cloud" / "requirements-cloud.txt"
 
 #: Directories that hold pipeline *outputs*.  An untracked file here is a
 #: result, not code, and does not make the tree dirty (see :func:`git_state`).
@@ -170,6 +175,184 @@ def write_requirements_lock(path: Path | str = LOCK_FILE) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines), encoding="utf-8")
     return out
+
+
+def normalise_name(name: str) -> str:
+    """A distribution name in PEP 503 form (``Typing_Extensions`` -> ``typing-extensions``)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def pip_freeze() -> list[str]:
+    """
+    ``pip freeze --exclude-editable`` of the running interpreter.
+
+    The editable install is ``dgssp`` itself, which a VM installs from its
+    pinned checkout rather than from a requirements file.
+
+    Returns
+    -------
+    list[str]
+        One ``name==version`` line per distribution, in pip's order.
+
+    Raises
+    ------
+    ValueError
+        If a line is not a plain ``name==version`` pin -- a ``name @ file://``
+        line (what a conda-built package can produce) names a path on this
+        machine, and no other machine can install it.
+    """
+    out = subprocess.run(
+        [sys.executable, "-m", "pip", "freeze", "--exclude-editable"],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=True,
+    )
+    pins = [
+        line.strip()
+        for line in out.stdout.splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    unpinnable = [p for p in pins if "==" not in p or " @ " in p]
+    if unpinnable:
+        raise ValueError(
+            f"{len(unpinnable)} distribution(s) are not installable elsewhere: "
+            f"{unpinnable[:5]}. Reinstall them from PyPI with pip first."
+        )
+    return pins
+
+
+def write_cloud_requirements(path: Path | str = CLOUD_REQUIREMENTS_FILE) -> Path:
+    """
+    Write the full environment, every distribution pinned, for a cloud VM.
+
+    :data:`LOCK_FILE` pins the seven packages that can move a number and is
+    the provenance record.  This file pins *everything* (``rustworkx``,
+    ``cirq-core`` and the rest), because that is what a fresh machine has to
+    install to reproduce the environment rather than merely resemble it.
+
+    Parameters
+    ----------
+    path:
+        Destination file; parent directories are created.
+
+    Returns
+    -------
+    Path
+        The path written (rewritten in place, like the lock file).
+    """
+    from importlib.metadata import version
+
+    pins = pip_freeze()
+    git = git_state()
+    lines = [
+        "# Build input for the cloud campaign VM (paper/cloud/bootstrap.sh): the full",
+        "# `pip freeze --exclude-editable` of the environment of record.  dgssp itself is",
+        "# installed editable from the pinned checkout, not from this file.",
+        "# paper/requirements-lock.txt (7 packages) is the provenance record; this file",
+        "# is what reproduces it on another machine.",
+        "# Regenerate with: python paper/scripts/freeze_versions.py",
+        f"# generated: {utc_timestamp()}",
+        f"# python:    {platform.python_version()} ({platform.platform()})",
+        f"# pip:       {version('pip')}",
+        f"# commit:    {git['commit']}{' (dirty)' if git['dirty'] else ''}",
+        "",
+        *pins,
+        "",
+    ]
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines), encoding="utf-8")
+    return out
+
+
+def read_pins(path: Path | str) -> dict[str, str]:
+    """
+    The ``name==version`` lines of a requirements file, keyed by normalised name.
+
+    Comments (including the lock file's ``# mitiq not installed``) and blank
+    lines are skipped.
+
+    Parameters
+    ----------
+    path:
+        A file written by :func:`write_requirements_lock` or
+        :func:`write_cloud_requirements`.
+
+    Returns
+    -------
+    dict[str, str]
+        ``{normalised name: version}``.
+    """
+    pins: dict[str, str] = {}
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        text = line.split("#", 1)[0].strip()
+        if not text:
+            continue
+        name, _, ver = text.partition("==")
+        if not ver:
+            raise ValueError(f"{path}: not a pin: {line!r}")
+        pins[normalise_name(name)] = ver.strip()
+    return pins
+
+
+def pin_drift(expected: dict[str, str], installed: dict[str, str | None]) -> list[str]:
+    """
+    Every way an installed environment differs from a set of pins.
+
+    Parameters
+    ----------
+    expected:
+        Pins, as :func:`read_pins` returns them.
+    installed:
+        ``{name: version}`` actually present; ``None`` means not installed.
+        Names are normalised here.
+
+    Returns
+    -------
+    list[str]
+        One line per difference -- missing, extra or a different version --
+        empty when the two agree exactly.
+    """
+    have = {normalise_name(k): v for k, v in installed.items() if v is not None}
+    problems = []
+    for name in sorted(set(expected) | set(have)):
+        want, got = expected.get(name), have.get(name)
+        if want is None:
+            problems.append(f"{name}=={got} installed but not pinned")
+        elif got is None:
+            problems.append(f"{name}=={want} pinned but not installed")
+        elif want != got:
+            problems.append(f"{name} pinned {want}, installed {got}")
+    return problems
+
+
+def environment_drift(
+    lock: Path | str = LOCK_FILE,
+    cloud: Path | str | None = CLOUD_REQUIREMENTS_FILE,
+) -> list[str]:
+    """
+    How the running interpreter differs from the lock file and the cloud pins.
+
+    Parameters
+    ----------
+    lock:
+        :data:`LOCK_FILE`: the seven packages recorded in every result.
+    cloud:
+        :data:`CLOUD_REQUIREMENTS_FILE`, checked against the full
+        ``pip freeze``; ``None`` skips it (it costs a ``pip`` subprocess).
+
+    Returns
+    -------
+    list[str]
+        Differences, each prefixed with the file it came from; empty when the
+        environment is exactly the one of record.
+    """
+    problems = [f"lock: {p}" for p in pin_drift(read_pins(lock), package_versions())]
+    if cloud is not None:
+        frozen = dict(line.split("==", 1) for line in pip_freeze())
+        problems += [f"cloud: {p}" for p in pin_drift(read_pins(cloud), dict(frozen))]
+    return problems
 
 
 # ---------------------------------------------------------------------------
@@ -569,10 +752,17 @@ __all__ = [
     "NOTES_DIR",
     "TEX_DIR",
     "LOCK_FILE",
+    "CLOUD_REQUIREMENTS_FILE",
     "OUTPUT_DIRS",
     "PINNED_PACKAGES",
     "package_versions",
     "write_requirements_lock",
+    "normalise_name",
+    "pip_freeze",
+    "write_cloud_requirements",
+    "read_pins",
+    "pin_drift",
+    "environment_drift",
     "utc_timestamp",
     "git_state",
     "record_provenance",

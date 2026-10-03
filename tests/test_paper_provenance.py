@@ -469,3 +469,72 @@ def test_pinned_packages_and_lock_file_agree(tmp_path):
     for name, version in versions.items():
         expected = f"{name}=={version}" if version else f"# {name} not installed"
         assert expected in text
+
+
+# ---------------------------------------------------------------------------
+# The cloud build input
+# ---------------------------------------------------------------------------
+
+
+def test_pins_are_read_by_normalised_name(tmp_path):
+    """``Typing_Extensions`` and ``typing-extensions`` are one distribution."""
+    path = tmp_path / "pins.txt"
+    path.write_text(
+        "# header: x\n\nTyping_Extensions==4.16.0\nqiskit==2.5.2  # trailing\n"
+        "# mitiq not installed\n",
+        encoding="utf-8",
+    )
+    assert _common.read_pins(path) == {"typing-extensions": "4.16.0", "qiskit": "2.5.2"}
+
+
+def test_pin_drift_names_every_kind_of_difference():
+    """Missing, extra and different versions are all failures, each named."""
+    problems = _common.pin_drift(
+        {"qiskit": "2.5.2", "mitiq": "1.1.0", "numpy": "2.2.6"},
+        {"qiskit": "2.5.2", "mitiq": None, "NumPy": "2.3.0", "cirq_core": "1.6.1"},
+    )
+    assert problems == [
+        "cirq-core==1.6.1 installed but not pinned",
+        "mitiq==1.1.0 pinned but not installed",
+        "numpy pinned 2.2.6, installed 2.3.0",
+    ]
+    assert _common.pin_drift({"qiskit": "2.5.2"}, {"Qiskit": "2.5.2"}) == []
+
+
+def test_a_freeze_line_no_other_machine_can_install_is_refused(monkeypatch):
+    """A conda build's ``name @ file:///...`` pins a path on this laptop."""
+
+    class _Done:
+        stdout = "numpy==2.2.6\nfoo @ file:///C:/conda/foo-1.0.tar.bz2\n"
+
+    monkeypatch.setattr(_common.subprocess, "run", lambda *a, **k: _Done())
+    with pytest.raises(ValueError, match="not installable elsewhere"):
+        _common.pip_freeze()
+
+
+def test_the_committed_cloud_pins_contain_the_lock():
+    """
+    The two committed files describe one environment: every lock pin appears
+    in the cloud file at the same version -- Mitiq included, since a VM
+    without it runs the campaign to completion with the C2 baseline missing.
+    """
+    cloud = _common.read_pins(_common.CLOUD_REQUIREMENTS_FILE)
+    lock = _common.read_pins(_common.LOCK_FILE)
+    assert {name: cloud.get(name) for name in lock} == lock
+    assert {"mitiq", "cirq-core", "qiskit-aer", "rustworkx"} <= set(cloud)
+    assert "dgssp" not in cloud  # installed editable from the checkout
+
+
+def test_the_pin_file_header_is_readable(tmp_path):
+    """``--verify`` compares the Python minor version against this header."""
+    freeze_versions = pytest.importorskip("freeze_versions")
+    path = tmp_path / "pins.txt"
+    path.write_text(
+        "# Some prose: with a colon\n# python:    3.11.16 (Windows-10)\n"
+        "# pip:       26.2.1\n\nqiskit==2.5.2\n",
+        encoding="utf-8",
+    )
+    header = freeze_versions.read_header(path)
+    assert header["python"].startswith("3.11.16")
+    assert header["pip"] == "26.2.1"
+    assert "Some prose" not in header

@@ -62,12 +62,21 @@ from _common import Record, record_provenance, save_record, load_records
 ```
 
 The pinned dependency set is `_common.PINNED_PACKAGES`; the same list drives
-both the provenance block and `paper/requirements-lock.txt`. Regenerate the
-lock file with:
+both the provenance block and `paper/requirements-lock.txt`. That lock is the
+provenance record (7 packages). `paper/cloud/requirements-cloud.txt` is the
+build input: the full `pip freeze` (every distribution) that a cloud VM
+installs to reproduce the environment exactly. One command regenerates both,
+from one interpreter, and should be run from a clean tree:
 
 ```
-python paper/scripts/freeze_versions.py
+python paper/scripts/freeze_versions.py                # write both
+python paper/scripts/freeze_versions.py --verify       # this interpreter == both files, mitiq importable
+python paper/scripts/freeze_versions.py --check-linux  # pins resolve on Linux cp311 from wheels alone
 ```
+
+Each record's provenance block holds the git commit, the dirty flag and the
+list of dirty files, but only a *count* of untracked outputs: a list would
+grow with every record a campaign writes. The git probe runs once per process.
 
 ## Scripts
 
