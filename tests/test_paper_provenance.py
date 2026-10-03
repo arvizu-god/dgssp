@@ -382,6 +382,26 @@ def test_save_record_never_overwrites(tmp_path, record):
     assert first.exists() and second.exists() and third.exists()
 
 
+def test_save_record_never_leaves_a_truncated_record_under_its_name(
+    tmp_path, record, monkeypatch
+):
+    """
+    A process killed mid-write must not leave ``r.json`` behind: a resumed
+    campaign would take a truncated record for finished work.
+    """
+    _common.save_record(tmp_path / "ok.json", record)
+    assert not list(tmp_path.glob("*.tmp"))
+
+    def killed(src, dst):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_common.os, "replace", killed)
+    with pytest.raises(KeyboardInterrupt):
+        _common.save_record(tmp_path / "r.json", record)
+    assert not (tmp_path / "r.json").exists()
+    assert (tmp_path / "r.json.tmp").exists()  # what run_campaign clears
+
+
 def test_save_record_accepts_a_list_and_stamps_each_entry(tmp_path, record):
     """A batch is a list of records, each independently traceable."""
     path = _common.save_record(tmp_path / "batch.json", [record, record])

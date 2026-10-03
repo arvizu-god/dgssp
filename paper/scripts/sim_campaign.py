@@ -77,6 +77,19 @@ name that already exists, so the campaign is resumable and a completed stage
 re-runs as a no-op.  Jobs are chunked by **circuits**, not instances: at most
 ``--chunk`` circuits per :func:`dgssp.runtime.sample_counts` call.
 
+The chunk plan is drawn over the whole selection and kept fixed across
+sittings: a resumed stage re-runs, whole, only the chunks that still hold a
+missing instance, and writes only the missing records.  Aer seeds each
+experiment from ``seed_simulator`` and its position in the job, so this makes
+a stage interrupted and resumed any number of times bit-identical to one
+uninterrupted pass (:func:`chunks_to_run`).  Changing the *selection*
+(``--chunk``, ``--n``, ``--only``, ``--limit``) between sittings still moves
+instances to new positions.
+
+``--stage zne`` and ``--stage sweep`` refuse to start when Mitiq is not
+importable, unless ``--no-mitiq`` says the baseline is being left out on
+purpose.  ``run_campaign.py`` runs the whole campaign (:data:`CAMPAIGN`).
+
 Staying inside the machine
 --------------------------
 
@@ -126,9 +139,10 @@ import math
 import os
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal, TypeVar
 
 from scipy.stats import binom, norm
 
@@ -167,6 +181,8 @@ from dgssp.mitigation.zne import (  # noqa: E402
 )
 from dgssp.runtime import backend_name  # noqa: E402
 from dgssp.solvers import grover_success_probability, optimal_iterations  # noqa: E402
+
+T = TypeVar("T")
 
 # ---------------------------------------------------------------------------
 # Frozen campaign parameters
@@ -217,9 +233,9 @@ PATHOLOGY_GRID: tuple[float, ...] = (1.0, 1.5, 2.0)
 
 #: The reported estimator.  Every method in :data:`dgssp.mitigation.
 #: ZNE_METHODS` is fitted beside it from the same counts.
-ZNE_METHOD = "exponential"
-ZNE_MODE = "scalar"
-ZNE_RENORM = "clip"
+ZNE_METHOD: Final = "exponential"
+ZNE_MODE: Final = "scalar"
+ZNE_RENORM: Final = "clip"
 
 #: Acceptance thresholds of the ideal stage, in sigma (see the module
 #: docstring: they are nominal per-instance levels, corrected for multiplicity
@@ -237,6 +253,58 @@ COUNT_TAIL_ALPHA = 1e-3
 
 #: Default circuits per job.
 DEFAULT_CHUNK = 50
+
+#: The three ways the sweep stage runs each sweep instance.
+SWEEP_EXECUTORS: tuple[Literal["ideal", "noisy", "zne"], ...] = ("ideal", "noisy", "zne")
+
+
+@dataclass(frozen=True)
+class CampaignStage:
+    """
+    One invocation of this script, as the full campaign runs it.
+
+    Attributes
+    ----------
+    key:
+        Short name (``"zne-odd"``), unique within :data:`CAMPAIGN`.
+    stage:
+        ``--stage``.
+    family:
+        ``--family``.
+    grid:
+        ``--grid`` for the ZNE stage, else ``None``.
+    """
+
+    key: str
+    stage: str
+    family: str = "all"
+    grid: str | None = None
+
+    def argv(self) -> list[str]:
+        """The command-line arguments that select this stage."""
+        args = ["--stage", self.stage]
+        if self.stage != "sweep":
+            args += ["--family", self.family]
+        if self.grid:
+            args += ["--grid", self.grid]
+        return args
+
+    def directory(self, data_dir: Path, noise: str) -> Path:
+        """Where this stage's records live (see :func:`stage_dir`)."""
+        return stage_dir(data_dir, self.stage, noise, self.grid)
+
+
+#: The whole campaign, in order.  ``ideal`` is first because it is the gate:
+#: nothing downstream means anything if it fails.  ``run_campaign.py`` runs
+#: exactly this list; ``verify_campaign.py`` checks exactly this list.
+CAMPAIGN: tuple[CampaignStage, ...] = (
+    CampaignStage("ideal", "ideal"),
+    CampaignStage("noisy", "noisy"),
+    CampaignStage("zne-odd", "zne", grid="odd"),
+    CampaignStage("zne-planned", "zne", grid="planned"),
+    CampaignStage("zne-odd7", "zne", family=ODD7_FAMILY, grid="odd7"),
+    CampaignStage("sweep", "sweep"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +410,73 @@ def select_rows(
         and (widths is None or row["n_items"] in widths)
     ]
     return rows[:limit] if limit else rows
+
+
+def stage_rows(
+    family: dict[str, Any],
+    stage: str,
+    which: str,
+    grid: str | None,
+    limit: int | None = None,
+    only: Sequence[str] | None = None,
+    n_values: Sequence[int] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    The instances one stage runs: :func:`select_rows`, then the ``odd7`` cut.
+
+    Parameters
+    ----------
+    family, which, limit, only, n_values:
+        As for :func:`select_rows`.
+    stage, grid:
+        The stage and its grid; ``odd7`` keeps only Family
+        :data:`ODD7_FAMILY` with ``n <= ODD7_MAX_N``.
+
+    Returns
+    -------
+    list[dict]
+        The selected records, in file order.  The order is part of the
+        result: it fixes each instance's position in its job.
+    """
+    rows = select_rows(family, which, limit, only, n_values)
+    if stage == "zne" and grid == "odd7":
+        rows = [
+            r for r in rows if r["family"] == ODD7_FAMILY and r["n_items"] <= ODD7_MAX_N
+        ]
+    return rows
+
+
+def expected_names(
+    spec: CampaignStage,
+    family: dict[str, Any],
+    sweep: dict[str, Any],
+    limit: int | None = None,
+) -> list[str]:
+    """
+    The record names a campaign stage writes when it completes.
+
+    Parameters
+    ----------
+    spec:
+        The stage.
+    family, sweep:
+        ``family.json`` and ``sweep.json``.
+    limit:
+        ``--limit``, for a slice; the sweep stage ignores it.
+
+    Returns
+    -------
+    list[str]
+        File stems: instance names, or ``<instance>_<executor>`` for the
+        sweep.
+    """
+    if spec.stage == "sweep":
+        return [
+            f"{row['name']}_{executor}"
+            for row in sweep["instances"]
+            for executor in SWEEP_EXECUTORS
+        ]
+    return [r["name"] for r in stage_rows(family, spec.stage, spec.family, spec.grid, limit)]
 
 
 def check_r_opt(rows: list[dict[str, Any]]) -> None:
@@ -623,6 +758,51 @@ def pending(directory: Path, names: list[str]) -> tuple[list[str], list[str], li
     todo = [n for n in names if n not in finished]
     duplicated = [n for n in done if any(directory.glob(f"{n}_[0-9][0-9][0-9].json"))]
     return todo, done, duplicated
+
+
+def chunks_to_run(
+    chunks: list[list[T]], done: frozenset[str], *, name: Callable[[T], str]
+) -> list[tuple[int, list[T]]]:
+    """
+    The chunks a (possibly resumed) stage must run, with their plan indices.
+
+    Aer seeds experiment ``i`` of a job from ``seed_simulator`` and ``i``, and
+    from nothing else: an experiment's counts depend on its *position* in its
+    job, not on what else the job holds (``tests/test_paper_sim_campaign.py``
+    pins both halves of that).  So the chunk plan is drawn over the **whole**
+    selection -- finished instances included -- and kept fixed across
+    sittings.  A chunk is run if it holds any instance not yet on disk, and
+    run *whole*, so every missing instance lands at the position it would
+    have had in one uninterrupted pass; the finished ones ride along
+    unwritten.  An interruption (a preempted VM, ``--max-minutes``, a
+    thermal shutdown) therefore costs at most the chunk it interrupted, and a
+    resumed stage is bit-identical to an uninterrupted one.
+
+    Re-planning over only the missing instances -- what this replaced --
+    shifted every instance after the interruption to a new position, giving
+    the rest of the stage different (equally valid) draws, so a resumed
+    dataset differed from an uninterrupted one in ways no record could show.
+
+    Parameters
+    ----------
+    chunks:
+        The full plan, in order.
+    done:
+        Names already on disk.
+    name:
+        An item's instance name.
+
+    Returns
+    -------
+    list[tuple[int, list]]
+        ``(plan index, chunk)`` for every chunk with work left.  The plan
+        index is what records store as ``chunk_index``.
+    """
+    return [
+        (index, group)
+        for index, group in enumerate(chunks)
+        if any(name(item) not in done for item in group)
+    ]
 
 
 def campaign_metadata(
@@ -956,6 +1136,7 @@ def run_unmitigated_stage(
     *,
     shots: int,
     chunk: int,
+    done: frozenset[str] = frozenset(),
     strict_acceptance: bool = False,
     max_minutes: float | None = None,
     cooldown: float = 0.0,
@@ -968,7 +1149,8 @@ def run_unmitigated_stage(
     stage:
         ``"ideal"`` or ``"noisy"``.
     rows:
-        Instance records still to run.
+        **Every** instance the stage covers, including those already on disk
+        (see :func:`chunks_to_run` for why the plan needs them).
     candidates:
         ``hardware_subset.json`` rows, keyed by name.
     pair:
@@ -979,6 +1161,9 @@ def run_unmitigated_stage(
         Shots per circuit.
     chunk:
         Circuits (here: instances) per job.
+    done:
+        Names already on disk: their chunks are re-run only when they share
+        one with a missing instance, and they are never written again.
     strict_acceptance:
         Apply the nominal acceptance thresholds per instance, uncorrected for
         the number of instances they are applied to.
@@ -1014,7 +1199,14 @@ def run_unmitigated_stage(
         bootstrap_seed=BOOTSTRAP_SEED,
         compute_reference=True,
     )
-    progress = Progress(len(rows), max_minutes=max_minutes, cooldown=cooldown)
+    plan = chunks_to_run(
+        [rows[i : i + chunk] for i in range(0, len(rows), chunk)],
+        done,
+        name=lambda row: row["name"],
+    )
+    progress = Progress(
+        sum(len(group) for _, group in plan), max_minutes=max_minutes, cooldown=cooldown
+    )
     pending_writes: list[tuple[dict[str, Any], Any, int, int, int, str | None]] = []
     deviations: list[dict[str, Any]] = []
     mismatches: list[str] = []
@@ -1057,8 +1249,7 @@ def run_unmitigated_stage(
         )
         save_record(directory / f"{row['name']}.json", record)
 
-    for index in range(0, len(rows), chunk):
-        batch_rows = rows[index : index + chunk]
+    for step, (chunk_index, batch_rows) in enumerate(plan):
         instances = [
             SubsetSumInstance(
                 items=list(r["items"]), target=r["target"], name=r["name"]
@@ -1071,6 +1262,9 @@ def run_unmitigated_stage(
         executed_on = results[0].backend_name if results else None
 
         for offset, (row, result) in enumerate(zip(batch_rows, results, strict=True)):
+            if row["name"] in done:
+                # Re-run only to hold the missing instances at their positions.
+                continue
             if sorted(result.solution_bitstrings) != sorted(row["solution_bitstrings"]):
                 mismatches.append(
                     f"{row['name']}: ground truth disagrees with family.json "
@@ -1089,13 +1283,15 @@ def run_unmitigated_stage(
                 # The ideal stage is the gate: nothing is written until every
                 # instance has been seen and judged together.
                 pending_writes.append(
-                    (row, result, index // chunk, len(batch_rows), offset, executed_on)
+                    (row, result, chunk_index, len(batch_rows), offset, executed_on)
                 )
             else:
-                write(row, result, index // chunk, len(batch_rows), offset, executed_on)
+                write(row, result, chunk_index, len(batch_rows), offset, executed_on)
 
-        print(f"  chunk {index // chunk}: {progress.update(len(batch_rows))}")
-        remaining = len(rows) - (index + len(batch_rows))
+        print(f"  chunk {chunk_index}: {progress.update(len(batch_rows))}")
+        remaining = sum(
+            1 for _, later in plan[step + 1 :] for r in later if r["name"] not in done
+        )
         if progress.out_of_time() and remaining:
             print(
                 f"\n  time budget spent ({max_minutes} min); {remaining} instance(s) "
@@ -1244,6 +1440,7 @@ def run_zne_stage(
     chunk: int,
     include_mitiq: bool,
     use_recorded_seeds: bool,
+    done: frozenset[str] = frozenset(),
     max_minutes: float | None = None,
     cooldown: float = 0.0,
 ) -> int:
@@ -1253,7 +1450,10 @@ def run_zne_stage(
     Parameters
     ----------
     rows:
-        Instance records still to run.
+        **Every** instance the stage covers, including those already on disk:
+        the circuit-packed chunk plan needs all of them to stay the same
+        across sittings (see :func:`chunks_to_run`).  Transpiling the whole
+        family takes about 15 s.
     candidates:
         ``hardware_subset.json`` rows, keyed by name.
     pair:
@@ -1271,10 +1471,13 @@ def run_zne_stage(
     use_recorded_seeds:
         Reuse ``best_seed``; false when the backend is not the one the subset
         file was built against.
+    done:
+        Names already on disk: run again only to hold a missing instance's
+        position in a shared chunk, never analysed or written again.
     max_minutes:
         Stop cleanly after the chunk that crosses this much wall clock, and
         report what is left.  The transpilation pass runs first and is not
-        counted -- it is a few seconds for the whole family.
+        counted.
     cooldown:
         Seconds to idle between chunks.
 
@@ -1321,14 +1524,17 @@ def run_zne_stage(
     print(f"  transpiled in {time.time() - started:.1f}s")
 
     by_name = {row["name"]: row for row in rows}
-    chunks = chunk_by_circuits(prepared, chunk, include_mitiq=include_mitiq)
+    plan = chunks_to_run(
+        chunk_by_circuits(prepared, chunk, include_mitiq=include_mitiq),
+        done,
+        name=lambda item: item.name,
+    )
     total_circuits = sum(
-        item.n_circuits(include_mitiq=include_mitiq) for item in prepared
+        item.n_circuits(include_mitiq=include_mitiq) for _, group in plan for item in group
     )
     progress = Progress(total_circuits, max_minutes=max_minutes, cooldown=cooldown)
-    done_instances = 0
 
-    for chunk_index, group in enumerate(chunks):
+    for step, (chunk_index, group) in enumerate(plan):
         batch = run_zne_batch(
             [item.zne_item() for item in group],
             pair.executor,
@@ -1336,6 +1542,9 @@ def run_zne_stage(
             include_mitiq=include_mitiq,
         )
         for item, run in zip(group, batch.items, strict=True):
+            if item.name in done:
+                # Re-run only to hold the missing instances at their positions.
+                continue
             row = by_name[item.name]
             started = time.time()
             result = build_instance_result(
@@ -1380,9 +1589,10 @@ def run_zne_stage(
                 },
             )
             save_record(directory / f"{item.name}.json", record)
-        done_instances += len(group)
         print(f"  chunk {chunk_index}: {progress.update(batch.n_circuits)}")
-        remaining = len(prepared) - done_instances
+        remaining = sum(
+            1 for _, later in plan[step + 1 :] for item in later if item.name not in done
+        )
         if progress.out_of_time() and remaining:
             print(
                 f"\n  time budget spent ({max_minutes} min); {remaining} instance(s) "
@@ -1459,7 +1669,7 @@ def run_sweep_stage(
             if use_recorded_seeds and candidate.get("best_seed") is not None
             else {}
         )
-        for executor in ("ideal", "noisy", "zne"):
+        for executor in SWEEP_EXECUTORS:
             path = directory / f"{row['name']}_{executor}.json"
             if path.exists():
                 print(f"  {path.name}: present, skipping")
@@ -1606,6 +1816,20 @@ def main(argv: list[str] | None = None) -> int:
         ``0`` on success, ``1`` when a check failed.
     """
     args = parse_args(argv)
+
+    from dgssp.mitigation import mitiq_is_available
+
+    if args.stage in ("zne", "sweep") and not args.no_mitiq and not mitiq_is_available():
+        # Without this the stage runs to completion with mitiq=off and every
+        # record silently lacks the Mitiq baseline, which is a deliverable.
+        print(
+            f"FAIL: --stage {args.stage} runs the Mitiq baseline, and mitiq is not "
+            "importable in this interpreter. Install it (pip install -e "
+            '".[mitiq]") or pass --no-mitiq to run without the baseline on purpose.'
+        )
+        return 2
+    include_mitiq = not args.no_mitiq
+
     family, subset, sweep = load_inputs(args.instances_dir)
     candidates = {row["name"]: row for row in subset["candidates"]}
 
@@ -1618,10 +1842,6 @@ def main(argv: list[str] | None = None) -> int:
         hardware_dir=args.hardware_dir,
         max_threads=args.max_threads,
     )
-
-    from dgssp.mitigation import mitiq_is_available
-
-    include_mitiq = (not args.no_mitiq) and mitiq_is_available()
 
     print(f"stage={args.stage} family={args.family} noise={args.noise} "
           f"backend={pair.name} calibration={calibration_timestamp(pair.device)}")
@@ -1654,11 +1874,10 @@ def main(argv: list[str] | None = None) -> int:
             use_recorded_seeds=matches_subset,
         )
 
-    rows = select_rows(family, args.family, args.limit, args.only, args.n_values)
+    rows = stage_rows(
+        family, args.stage, args.family, args.grid, args.limit, args.only, args.n_values
+    )
     if args.stage == "zne" and args.grid == "odd7":
-        rows = [
-            r for r in rows if r["family"] == ODD7_FAMILY and r["n_items"] <= ODD7_MAX_N
-        ]
         print(f"  odd7 covers Family {ODD7_FAMILY}, n <= {ODD7_MAX_N}: "
               f"{len(rows)} instance(s)")
     check_r_opt(rows)
@@ -1673,8 +1892,8 @@ def main(argv: list[str] | None = None) -> int:
     for grid in grids:
         directory = stage_dir(args.data_dir, args.stage, pair.noise, grid)
         directory.mkdir(parents=True, exist_ok=True)
-        todo_names, done, duplicated = pending(directory, [r["name"] for r in rows])
-        todo = [r for r in rows if r["name"] in set(todo_names)]
+        todo, done_names, duplicated = pending(directory, [r["name"] for r in rows])
+        done = frozenset(done_names)
         label = f"{args.stage}{f' [{grid}]' if grid else ''}"
         print(f"\n{label} -> {directory.name}: "
               f"{len(todo)} to run, {len(done)} already present")
@@ -1694,19 +1913,20 @@ def main(argv: list[str] | None = None) -> int:
             )
             status = run_unmitigated_stage(
                 args.stage,
-                todo,
+                rows,
                 candidates,
                 pair,
                 directory,
                 shots=shots,
                 chunk=args.chunk,
+                done=done,
                 strict_acceptance=args.strict_acceptance,
                 max_minutes=args.max_minutes,
                 cooldown=args.cooldown,
             )
         else:
             status = run_zne_stage(
-                todo,
+                rows,
                 candidates,
                 pair,
                 directory,
@@ -1715,6 +1935,7 @@ def main(argv: list[str] | None = None) -> int:
                 chunk=args.chunk,
                 include_mitiq=include_mitiq,
                 use_recorded_seeds=matches_subset,
+                done=done,
                 max_minutes=args.max_minutes,
                 cooldown=args.cooldown,
             )

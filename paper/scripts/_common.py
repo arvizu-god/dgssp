@@ -31,6 +31,7 @@ from __future__ import annotations
 import copy
 import getpass
 import json
+import os
 import platform
 import re
 import socket
@@ -684,7 +685,13 @@ def save_record(path: Path | str, payload: Any) -> Path:
 
     target = _next_free_path(Path(path))
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(obj, indent=2, default=str), encoding="utf-8")
+    # Written beside the target and renamed into place, so a process killed
+    # mid-write (a preempted VM, a thermal shutdown) or a sync running
+    # concurrently never sees a truncated record under the final name -- a
+    # resumed campaign would take it for finished work.
+    partial = target.with_name(target.name + ".tmp")
+    partial.write_text(json.dumps(obj, indent=2, default=str), encoding="utf-8")
+    os.replace(partial, target)
     return target
 
 

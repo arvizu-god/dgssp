@@ -93,6 +93,7 @@ grow with every record a campaign writes. The git probe runs once per process.
 | `zne_synthetic.py` | `data/zne_synthetic.json` | WP4 / C3: bias, coverage, resolvability of the ZNE estimators; clip vs simplex (no circuits) |
 | `iteration_sweep.py` | `data/sweep_<executor>.json` | WP4 / C3: P_sol vs Grover iterations, one job per instance |
 | `sim_campaign.py` | `data/sim_<stage>[_<noise>][_<grid>]/<instance>.json` | WP5: the whole simulation campaign, one stage per command, resumable |
+| `run_campaign.py` | the six `sim_*` stages, `data/campaign_log.json` | WP5: the campaign unattended, gated, logged, optionally synced to a bucket |
 | `aggregate.py` | `data/sim_*.csv`, `data/sim_summary.json`, `tex/sim_table_<grid>.tex`, `notes/sim_results.md` | WP5: every table the text quotes |
 | `make_figures.py` | `figures/fig_sim_*.pdf` | WP5: the five simulation figures, from `data/` alone |
 | `qpu_budget.py` | stdout, optional `hardware/qpu_budget.json` | QPU minutes a job shape would cost, offline from the device's calibrated durations |
@@ -119,10 +120,22 @@ fastest way to confirm that a fresh environment is wired up correctly.
 
 ## WP5 run order
 
-One stage per command, in this order, on `fake_marrakesh` (the frozen twin) or
-on `--noise live --backend <device>` once the real device is known. Durations
-are measured on this laptop; the script prints its own measured ETA after the
-first chunk.
+The campaign of record runs in one pass on one cloud VM, through the
+orchestrator (`paper/cloud/README.md` has the exact commands):
+
+```
+python paper/scripts/run_campaign.py --dry-run    # the six stages, expected counts, pre-flight
+python paper/scripts/run_campaign.py              # all six stages, logged to data/campaign_log.json
+python paper/scripts/verify_campaign.py           # one commit, one environment, nothing missing
+```
+
+`run_campaign.py` refuses to start from a dirty tree, from an environment that
+differs from the pinned files, without Mitiq when a ZNE stage is planned, or on
+top of records from another commit or environment; it stops the run if the
+ideal gate fails. Underneath, it runs these commands, one stage each, on
+`fake_marrakesh` (the frozen twin) or on `--noise live --backend <device>` once
+the real device is known. Durations are measured on this laptop; the script
+prints its own measured ETA after the first chunk.
 
 ```
 python paper/scripts/sim_campaign.py --stage ideal --family all     #  ~1.5 min
@@ -157,10 +170,14 @@ python paper/scripts/sim_campaign.py --stage zne --family all --grid odd `
 
 None of this changes a number. With a fixed `seed_simulator` every experiment
 draws from its own seeded stream, so one thread and sixteen give bit-identical
-counts and a throttled run merges with an unthrottled one — verified in
-`tests/test_paper_sim_campaign.py`. What *does* change the counts is the
-composition of a job: Aer seeds experiment `i` from `seed_simulator` and `i`,
-so changing `--chunk`, `--n` or the instance order between sittings gives the
-remaining instances different (equally valid) draws. Every record carries its
-`chunk_index`, `chunk_circuits` and `max_parallel_threads`, so which sitting
-produced it is never in doubt.
+counts and a throttled run merges with an unthrottled one. What *does* change
+the counts is an instance's *position* in its job: Aer seeds experiment `i`
+from `seed_simulator` and `i`, and from nothing else. So the chunk plan is
+drawn over the whole selection and held fixed across sittings: a resumed stage
+re-runs whole only the chunks that still hold a missing instance, writes only
+the missing records, and gives exactly the counts an uninterrupted pass would
+have. Both facts are pinned in `tests/test_paper_sim_campaign.py`. Changing
+the *selection* between sittings (`--chunk`, `--n`, `--only`, `--limit`) does
+move instances, and gives them different (equally valid) draws; `--max-minutes`,
+`--max-threads` and `--cooldown` do not. Every record carries its absolute
+`chunk_index`, `chunk_circuits` and `max_parallel_threads`.

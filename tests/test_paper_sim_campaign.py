@@ -98,6 +98,196 @@ def test_one_instance_is_never_split_across_jobs():
 
 
 # ---------------------------------------------------------------------------
+# sim_campaign: resuming gives the same counts as not stopping
+# ---------------------------------------------------------------------------
+
+
+def test_an_experiment_is_seeded_by_its_position_not_its_company_or_threads():
+    """
+    The premise of the resume design, pinned: Aer seeds experiment ``i`` of a
+    job from ``seed_simulator`` and ``i``.  Same position -> same counts,
+    whatever else is in the job and however many threads run it; another
+    position -> other counts.
+    """
+    qiskit_aer = pytest.importorskip("qiskit_aer")
+    from qiskit import QuantumCircuit, transpile
+
+    from dgssp.runtime import sample_counts
+
+    def circuit(theta: float) -> QuantumCircuit:
+        qc = QuantumCircuit(3)
+        qc.ry(theta, 0)
+        qc.h(1)
+        qc.cx(0, 2)
+        qc.measure_all()
+        return qc
+
+    def counts(threads: int, *thetas: float) -> list[dict[str, int]]:
+        sim = qiskit_aer.AerSimulator()
+        sim.set_options(max_parallel_threads=threads)
+        circuits = transpile([circuit(t) for t in thetas], sim)
+        return sample_counts(sim, circuits, shots=2000, seed_simulator=7, run_log=None)
+
+    alone = counts(1, 0.7)[0]
+    assert counts(1, 0.7, 1.3)[0] == alone  # other company, same position
+    assert counts(4, 0.7, 1.3)[0] == alone  # other thread count
+    assert counts(1, 1.3, 0.7)[1] != alone  # other position
+
+
+def test_the_chunk_plan_survives_an_interruption():
+    """
+    Chunks are planned over the whole selection; a resumed stage runs whole
+    every chunk with something missing, at its original index.
+    """
+    items = [f"i{k}" for k in range(10)]
+    chunks = [items[k : k + 3] for k in range(0, 10, 3)]
+
+    fresh = sim_campaign.chunks_to_run(chunks, frozenset(), name=str)
+    assert [index for index, _ in fresh] == [0, 1, 2, 3]
+
+    # Interrupted after chunk 0 and part of chunk 1 had been written.
+    resumed = sim_campaign.chunks_to_run(chunks, frozenset(items[:4]), name=str)
+    assert resumed == [(1, ["i3", "i4", "i5"]), (2, ["i6", "i7", "i8"]), (3, ["i9"])]
+
+    assert sim_campaign.chunks_to_run(chunks, frozenset(items), name=str) == []
+
+
+def _counts_by_name(directory: Path) -> dict[str, dict]:
+    return {
+        path.stem: json.loads(path.read_text(encoding="utf-8"))["counts"]
+        for path in sorted(directory.glob("*.json"))
+    }
+
+
+_BACKENDS: dict = {}
+
+
+def _shared_backends(*args, **kwargs):
+    """``build_backends``, built once: the noise model costs ~5 s per call."""
+    key = (args, tuple(sorted(kwargs.items())))
+    if key not in _BACKENDS:
+        _BACKENDS[key] = _build_backends(*args, **kwargs)
+    return _BACKENDS[key]
+
+
+_build_backends = sim_campaign.build_backends
+
+
+@pytest.mark.parametrize(
+    "stage_args, subdir",
+    [
+        # 5 instances, 3 per job: chunks {0,1,2} {3,4}.
+        (["--stage", "noisy", "--chunk", "3"], "sim_noisy_fake"),
+        # 3 circuits per instance, 9 per job: the same two chunks.
+        (["--stage", "zne", "--grid", "odd", "--chunk", "9", "--no-mitiq"], "sim_zne_fake_odd"),
+    ],
+)
+def test_a_resumed_stage_is_bit_identical_to_an_uninterrupted_one(
+    tmp_path, monkeypatch, capsys, stage_args, subdir
+):
+    """
+    End to end on the real script: run a 5-instance slice in one go, then
+    delete what an interruption inside the second job would have lost and
+    resume -- every count must match the uninterrupted run.
+
+    Before the fix, the resumed run re-chunked only the missing instances, so
+    each landed at a new position in its job and drew different counts.
+    """
+    import shutil
+
+    pytest.importorskip("qiskit_ibm_runtime")
+    monkeypatch.setattr(sim_campaign, "build_backends", _shared_backends)
+    data = tmp_path / "data"
+    command = [*stage_args, "--limit", "5", "--family", "P", "--shots", "512",
+               "--data-dir", str(data)]  # fmt: skip
+
+    assert sim_campaign.main(command) == 0
+    reference = _counts_by_name(data / subdir)
+    assert len(reference) == 5
+    whole = tmp_path / "whole"
+    shutil.copytree(data / subdir, whole)
+
+    # Stopped after writing chunk 0 and the first record of chunk 1: the
+    # resumed run must skip chunk 0 and re-run chunk 1 whole.
+    for name in sorted(reference)[4:]:
+        (data / subdir / f"{name}.json").unlink()
+    assert sim_campaign.main(command) == 0
+    capsys.readouterr()
+
+    assert _counts_by_name(data / subdir) == reference
+    # Instance 3 was already on disk, so it rode along unwritten.
+    assert (data / subdir / f"{sorted(reference)[3]}.json").read_bytes() == (
+        whole / f"{sorted(reference)[3]}.json"
+    ).read_bytes()
+
+
+def test_a_mitiq_stage_refuses_to_run_without_mitiq(monkeypatch, capsys):
+    """
+    Without Mitiq a ZNE stage used to run to completion with ``mitiq=off``,
+    and every record silently lacked the C2 baseline.
+    """
+    import dgssp.mitigation
+
+    monkeypatch.setattr(dgssp.mitigation, "mitiq_is_available", lambda: False)
+    for stage in ("zne", "sweep"):
+        assert sim_campaign.main(["--stage", stage]) == 2
+        assert "mitiq is not importable" in capsys.readouterr().out
+
+    # --no-mitiq says it is deliberate, and gets past the guard.
+    class _PastTheGuard(Exception):
+        pass
+
+    def stop(*_args, **_kwargs):
+        raise _PastTheGuard
+
+    monkeypatch.setattr(sim_campaign, "load_inputs", stop)
+    with pytest.raises(_PastTheGuard):
+        sim_campaign.main(["--stage", "zne", "--no-mitiq"])
+
+
+# ---------------------------------------------------------------------------
+# sim_campaign: the campaign plan
+# ---------------------------------------------------------------------------
+
+
+def test_the_campaign_is_six_stages_ideal_first():
+    """The gate runs first; the stage keys are what run_campaign accepts."""
+    keys = [stage.key for stage in sim_campaign.CAMPAIGN]
+    assert keys == ["ideal", "noisy", "zne-odd", "zne-planned", "zne-odd7", "sweep"]
+    assert sim_campaign.CAMPAIGN[4].argv() == [
+        "--stage", "zne", "--family", "P", "--grid", "odd7",
+    ]  # fmt: skip
+    assert sim_campaign.CAMPAIGN[5].argv() == ["--stage", "sweep"]
+
+
+def test_expected_record_counts_come_from_the_frozen_family():
+    """463 per full stage, the Family-P n <= 4 cut for odd7, 2 x 3 sweep files."""
+    family, _subset, sweep = sim_campaign.load_inputs(REPO_ROOT / "paper" / "instances")
+    counts = {
+        stage.key: len(sim_campaign.expected_names(stage, family, sweep))
+        for stage in sim_campaign.CAMPAIGN
+    }
+    p_small = sum(
+        1 for r in family["instances"] if r["family"] == "P" and r["n_items"] <= 4
+    )
+    assert counts == {
+        "ideal": len(family["instances"]),
+        "noisy": len(family["instances"]),
+        "zne-odd": len(family["instances"]),
+        "zne-planned": len(family["instances"]),
+        "zne-odd7": p_small,
+        "sweep": 6,
+    }
+
+    sliced = {
+        stage.key: len(sim_campaign.expected_names(stage, family, sweep, limit=20))
+        for stage in sim_campaign.CAMPAIGN
+    }
+    assert sliced["ideal"] == sliced["zne-planned"] == 20
+    assert sliced["sweep"] == 6  # the sweep is two instances; --limit does not apply
+
+
+# ---------------------------------------------------------------------------
 # sim_campaign: scale grids
 # ---------------------------------------------------------------------------
 
