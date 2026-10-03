@@ -28,6 +28,7 @@ Usage
 
 from __future__ import annotations
 
+import copy
 import getpass
 import json
 import platform
@@ -93,11 +94,21 @@ PINNED_PACKAGES: tuple[str, ...] = (
 )
 
 
+#: Per-process memo of :func:`package_versions`, keyed by the package tuple.
+_PACKAGE_VERSIONS: dict[tuple[str, ...], dict[str, str | None]] = {}
+
+
 def package_versions(
     packages: tuple[str, ...] = PINNED_PACKAGES,
 ) -> dict[str, str | None]:
     """
     Installed version of each pinned distribution.
+
+    Looked up once per process and per ``packages`` tuple: the modules that
+    ran are the ones imported when the process started, so a mid-run
+    ``pip install`` would make a fresh lookup *less* accurate, not more --
+    and the lookup costs 10 ms, paid once per record by a campaign that
+    writes thousands of them.
 
     Parameters
     ----------
@@ -109,17 +120,20 @@ def package_versions(
     dict[str, str | None]
         Version string per package; ``None`` when the package is not
         installed (Mitiq is an optional extra, so ``None`` is a legitimate
-        value, not an error).
+        value, not an error).  A fresh copy: callers may mutate it.
     """
     from importlib.metadata import PackageNotFoundError, version
 
-    versions: dict[str, str | None] = {}
-    for name in packages:
-        try:
-            versions[name] = version(name)
-        except PackageNotFoundError:
-            versions[name] = None
-    return versions
+    key = tuple(packages)
+    if key not in _PACKAGE_VERSIONS:
+        versions: dict[str, str | None] = {}
+        for name in key:
+            try:
+                versions[name] = version(name)
+            except PackageNotFoundError:
+                versions[name] = None
+        _PACKAGE_VERSIONS[key] = versions
+    return dict(_PACKAGE_VERSIONS[key])
 
 
 def write_requirements_lock(path: Path | str = LOCK_FILE) -> Path:
@@ -200,19 +214,38 @@ def _git(*args: str) -> str | None:
     return out.stdout.rstrip()
 
 
-def git_state() -> dict[str, Any]:
+#: The working tree as this process first saw it (see :func:`git_state`).
+_GIT_STATE: dict[str, Any] | None = None
+
+
+def git_state(*, refresh: bool = False) -> dict[str, Any]:
     """
     Commit, branch and dirty flag of the working tree that produced a result.
+
+    The probe runs **once per process** and is reused for every record the
+    process stamps.  The code that ran is the code the process imported when
+    it started, so the tree as it stood then is the state that describes the
+    results; re-probing per record cost 95 ms each (four ``git`` calls
+    scanning a directory the campaign itself keeps filling), about three
+    minutes over a full campaign, and could only ever add noise -- such as a
+    record flagged dirty because someone edited a file the running process
+    had long since imported.  ``probed_utc`` says when the snapshot was taken.
+
+    Parameters
+    ----------
+    refresh:
+        Probe again and replace the cached state.
 
     Returns
     -------
     dict
         ``{"commit", "short_commit", "branch", "dirty", "dirty_files",
-        "untracked_outputs"}``.  ``commit`` is ``None`` outside a git checkout.
-        ``dirty`` is ``True`` when the code that ran is not exactly the code in
-        ``HEAD`` -- a dirty result is not reproducible from the commit alone,
-        so this flag is what tells you a number needs re-running before it goes
-        in the paper.
+        "untracked_output_count", "untracked_outputs_by_dir", "probed_utc"}``,
+        a fresh copy the caller may mutate.  ``commit`` is ``None`` outside a
+        git checkout.  ``dirty`` is ``True`` when the code that ran is not
+        exactly the code in ``HEAD`` -- a dirty result is not reproducible
+        from the commit alone, so this flag is what tells you a number needs
+        re-running before it goes in the paper.
 
         That means: any modified tracked file, and any untracked file *outside*
         the paper's output directories (:data:`OUTPUT_DIRS`) -- an uncommitted
@@ -220,10 +253,31 @@ def git_state() -> dict[str, Any]:
         files *inside* the output directories do not count.  They are results,
         not code, and counting them made clean results impossible: a stage that
         writes ``resources.json`` and then stamps ``resources_fits.json`` would
-        always see its own first output as a dirty file.  Untracked *inputs*
-        stay traceable through the hashes downstream files carry
-        (``family_payload_sha256``), and are listed in ``untracked_outputs``.
+        always see its own first output as a dirty file.
+
+        Untracked outputs are **counted, not listed**: a total, and the same
+        count per output directory (all five keys, always present).  The list
+        used to be stored verbatim, and since a campaign writes into those
+        directories as it runs, every record embedded the names of all the
+        records before it -- O(N^2) bytes, 60-73% of the WP5 data volume, and
+        a provenance block that grew with the run.  Nothing ever read the
+        list: untracked *inputs* stay traceable through the hashes downstream
+        files carry (``family_payload_sha256``), and the per-directory counts
+        still say whether an input directory (``paper/instances``,
+        ``paper/hardware``) held anything untracked.  The block is now a
+        fixed size.  A digest of the list was considered and rejected: no
+        one keeps the list it would be checked against, and mid-campaign it
+        fingerprints the campaign's own progress, not its inputs.
     """
+    global _GIT_STATE
+    if _GIT_STATE is None or refresh:
+        _GIT_STATE = _probe_git()
+    return copy.deepcopy(_GIT_STATE)
+
+
+def _probe_git() -> dict[str, Any]:
+    """The uncached probe behind :func:`git_state`."""
+    by_dir = {prefix.rstrip("/"): 0 for prefix in _OUTPUT_PREFIXES}
     commit = _git("rev-parse", "HEAD")
     if commit is None:
         return {
@@ -232,7 +286,9 @@ def git_state() -> dict[str, Any]:
             "branch": None,
             "dirty": None,
             "dirty_files": [],
-            "untracked_outputs": [],
+            "untracked_output_count": 0,
+            "untracked_outputs_by_dir": by_dir,
+            "probed_utc": utc_timestamp(),
         }
 
     # Porcelain v1: two status columns, a space, then the path.  Tracked files
@@ -242,9 +298,12 @@ def git_state() -> dict[str, Any]:
 
     # `ls-files` prints repo-relative POSIX paths, one per line, unquoted.
     untracked = _git("ls-files", "--others", "--exclude-standard") or ""
-    untracked_paths = [line for line in untracked.splitlines() if line.strip()]
-    outputs = [p for p in untracked_paths if p.startswith(_OUTPUT_PREFIXES)]
-    dirty_files += [p for p in untracked_paths if not p.startswith(_OUTPUT_PREFIXES)]
+    for path in (line for line in untracked.splitlines() if line.strip()):
+        prefix = next((p for p in _OUTPUT_PREFIXES if path.startswith(p)), None)
+        if prefix is None:
+            dirty_files.append(path)
+        else:
+            by_dir[prefix.rstrip("/")] += 1
 
     return {
         "commit": commit,
@@ -252,7 +311,9 @@ def git_state() -> dict[str, Any]:
         "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "dirty": bool(dirty_files),
         "dirty_files": dirty_files,
-        "untracked_outputs": outputs,
+        "untracked_output_count": sum(by_dir.values()),
+        "untracked_outputs_by_dir": by_dir,
+        "probed_utc": utc_timestamp(),
     }
 
 
@@ -274,7 +335,10 @@ def record_provenance(backend: Any | None = None) -> dict[str, Any]:
         ``{"timestamp_utc", "git", "packages", "python", "platform", "host",
         "user", "backend"}``.  ``backend`` is ``None`` when no backend was
         passed, otherwise ``{"name", "num_qubits", "processor_family",
-        "heavy_hex", "calibration_timestamp"}``.
+        "heavy_hex", "calibration_timestamp"}``.  ``git`` and ``packages`` are
+        probed once per process (:func:`git_state`, :func:`package_versions`),
+        so the block is the same size for the first record of a run and the
+        two-thousandth, and costs no subprocess after the first.
     """
     provenance: dict[str, Any] = {
         "timestamp_utc": utc_timestamp(),

@@ -117,13 +117,20 @@ def test_git_state_records_dirty_paths_verbatim():
         )
 
 
-def _fake_git(monkeypatch, *, status: str, untracked: str) -> None:
+def _fake_git(monkeypatch, *, status: str, untracked: str) -> list[tuple[str, ...]]:
     """
-    Replace ``_git`` with a table lookup.
+    Replace ``_git`` with a table lookup, and empty the per-process cache.
 
     A call ``git_state`` is not expected to make raises ``KeyError`` -- in
     particular a plain ``status --porcelain`` without ``--untracked-files=no``,
-    which is the regression these tests guard.
+    which is the regression these tests guard.  The cache is reset through
+    ``monkeypatch``, so the faked state is discarded when the test ends and
+    never leaks into a test that probes the real checkout.
+
+    Returns
+    -------
+    list
+        Every call made, in order -- for asserting how often git ran.
     """
     responses = {
         ("rev-parse", "HEAD"): "a" * 40,
@@ -131,7 +138,29 @@ def _fake_git(monkeypatch, *, status: str, untracked: str) -> None:
         ("status", "--porcelain", "--untracked-files=no"): status,
         ("ls-files", "--others", "--exclude-standard"): untracked,
     }
-    monkeypatch.setattr(_common, "_git", lambda *args: responses[args])
+    calls: list[tuple[str, ...]] = []
+
+    def fake(*args: str) -> str:
+        calls.append(args)
+        return responses[args]
+
+    monkeypatch.setattr(_common, "_git", fake)
+    monkeypatch.setattr(_common, "_GIT_STATE", None)
+    return calls
+
+
+def _no_outputs(**counts: int) -> dict[str, int]:
+    """The per-directory count block, zero except where given."""
+    block = {
+        "paper/data": 0,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 0,
+        "paper/tex": 0,
+    }
+    for key, value in counts.items():
+        block[f"paper/{key}"] = value
+    return block
 
 
 def test_untracked_files_do_not_make_the_tree_dirty(monkeypatch):
@@ -150,10 +179,9 @@ def test_untracked_files_do_not_make_the_tree_dirty(monkeypatch):
     state = _common.git_state()
     assert state["dirty"] is False
     assert state["dirty_files"] == []
-    assert state["untracked_outputs"] == [
-        "paper/data/resources.json",
-        "paper/instances/family.json",
-    ]
+    assert state["untracked_output_count"] == 2
+    assert state["untracked_outputs_by_dir"] == _no_outputs(data=1, instances=1)
+    assert "untracked_outputs" not in state
 
 
 def test_untracked_code_still_makes_the_tree_dirty(monkeypatch):
@@ -171,7 +199,8 @@ def test_untracked_code_still_makes_the_tree_dirty(monkeypatch):
     state = _common.git_state()
     assert state["dirty"] is True
     assert state["dirty_files"] == ["paper/scripts/new_analysis.py", "src/dgssp/new.py"]
-    assert state["untracked_outputs"] == ["paper/data/out.json"]
+    assert state["untracked_output_count"] == 1
+    assert state["untracked_outputs_by_dir"] == _no_outputs(data=1)
 
 
 def test_a_modified_tracked_file_still_makes_the_tree_dirty(monkeypatch):
@@ -180,7 +209,64 @@ def test_a_modified_tracked_file_still_makes_the_tree_dirty(monkeypatch):
     state = _common.git_state()
     assert state["dirty"] is True
     assert state["dirty_files"] == ["src/dgssp/encoding.py"]
-    assert state["untracked_outputs"] == []
+    assert state["untracked_output_count"] == 0
+    assert state["untracked_outputs_by_dir"] == _no_outputs()
+
+
+def test_a_sibling_directory_is_not_mistaken_for_an_output(monkeypatch):
+    """``paper/data_old/`` shares a prefix with ``paper/data`` but is not one."""
+    _fake_git(monkeypatch, status="", untracked="paper/data_old/x.json\n")
+    state = _common.git_state()
+    assert state["dirty_files"] == ["paper/data_old/x.json"]
+    assert state["untracked_output_count"] == 0
+
+
+def test_provenance_size_does_not_grow_with_the_files_already_written(monkeypatch):
+    """
+    The invariant the count exists for: record 2000 costs what record 1 did.
+
+    Regression: the provenance block stored the full list of untracked
+    outputs, and a campaign writes into those directories as it runs -- so
+    every record embedded the names of all the records before it.  A late
+    ZNE record carried 1179 paths (89 KB, of which 59 KB was the list).
+    """
+    sizes = {}
+    for written in (0, 1, 50, 2000):
+        names = "".join(f"paper/data/sim_zne_fake_odd/P-n6-{k:05d}.json\n" for k in range(written))
+        _fake_git(monkeypatch, status="", untracked=names)
+        sizes[written] = len(json.dumps(_common.record_provenance()))
+
+    # Only the digits of the count may differ ("0" against "2000"), and the
+    # count appears twice: the total and its directory's entry.  The list
+    # this replaced would have added ~100 KB here.
+    assert max(sizes.values()) - min(sizes.values()) <= 2 * len(str(2000)), sizes
+
+
+def test_the_git_probe_runs_once_per_process(monkeypatch):
+    """Two thousand records, one probe: the tree does not change mid-run."""
+    calls = _fake_git(monkeypatch, status="", untracked="paper/data/a.json\n")
+    first = _common.record_provenance()
+    for _ in range(50):
+        _common.record_provenance()
+    assert len(calls) == 4  # rev-parse, status, ls-files, abbrev-ref: once each
+
+    # Callers get copies, so one record's mutation cannot rewrite the next.
+    first["git"]["dirty_files"].append("tampered")
+    first["git"]["untracked_outputs_by_dir"]["paper/data"] = -1
+    again = _common.git_state()
+    assert again["dirty_files"] == []
+    assert again["untracked_outputs_by_dir"]["paper/data"] == 1
+
+    # An explicit refresh does probe again.
+    _common.git_state(refresh=True)
+    assert len(calls) == 8
+
+
+def test_package_versions_are_looked_up_once_and_handed_out_as_copies():
+    """The cache must not let one caller's edit leak into the next record."""
+    versions = _common.package_versions()
+    versions["qiskit"] = "tampered"
+    assert _common.package_versions()["qiskit"] != "tampered"
 
 
 def test_output_prefixes_are_the_paper_output_directories():
@@ -194,12 +280,79 @@ def test_output_prefixes_are_the_paper_output_directories():
     }
 
 
-def test_live_output_and_dirty_lists_are_disjoint():
-    """In the real checkout, no path is reported as both an output and dirty."""
-    state = _common.git_state()
+def test_live_output_summary_is_consistent():
+    """
+    In the real checkout, the counts add up and no untracked output is dirty.
+
+    An untracked path is either counted as an output or listed as dirty,
+    never both: no dirty path that git reports as untracked may lie in an
+    output directory.
+    """
+    state = _common.git_state(refresh=True)
     if state["commit"] is None:
         pytest.skip("not a git checkout")
-    assert not set(state["dirty_files"]) & set(state["untracked_outputs"])
+    by_dir = state["untracked_outputs_by_dir"]
+    assert set(by_dir) == {p.rstrip("/") for p in _common._OUTPUT_PREFIXES}
+    assert all(isinstance(v, int) and v >= 0 for v in by_dir.values())
+    assert sum(by_dir.values()) == state["untracked_output_count"]
+
+    untracked = set((_common._git("ls-files", "--others", "--exclude-standard") or "").splitlines())
+    assert not {p for p in state["dirty_files"] if p in untracked and p.startswith(
+        _common._OUTPUT_PREFIXES
+    )}
+
+
+# ---------------------------------------------------------------------------
+# Files written before the count replaced the list
+# ---------------------------------------------------------------------------
+
+DATA_DIR = REPO_ROOT / "paper" / "data"
+
+
+@pytest.mark.parametrize(
+    "pattern", ["smoke*.json", "resources.json", "sim_*/*.json"]
+)
+def test_records_written_with_the_old_list_still_load(pattern):
+    """
+    ``smoke*``, ``resources.json`` and any WP5 records on disk carry the old
+    ``untracked_outputs`` list; they must load and round-trip unchanged.
+
+    ``sim_*`` is untracked, so it is checked when present and skipped in a
+    fresh clone.
+    """
+    paths = sorted(DATA_DIR.glob(pattern))
+    if not paths:
+        pytest.skip(f"no {pattern} in paper/data")
+    # Every file of a pattern, but at most 60 of a large stage directory.
+    for path in paths[:: max(1, len(paths) // 60)]:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for item in payload if isinstance(payload, list) else [payload]:
+            record = Record.from_dict(item)
+            assert record.provenance["git"]["commit"]
+            assert Record.from_dict(record.to_dict()) == record
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "zne_synthetic.json",
+        "zne_synthetic_001.json",
+        "sweep_ideal.json",
+        "resources_fits.json",
+    ],
+)
+def test_payload_files_written_with_the_old_list_still_parse(name):
+    """
+    These are payload dicts, not ``ResultRecord`` rows, and never loaded
+    through ``from_dict`` (it rejects them for missing ``instance`` etc.,
+    as it always did).  What their readers rely on is ``provenance.git``.
+    """
+    path = DATA_DIR / name
+    if not path.exists():
+        pytest.skip(f"{name} not in paper/data")
+    (loaded,) = _common.load_records(path)
+    assert loaded["provenance"]["git"]["short_commit"]
+    assert isinstance(loaded["provenance"]["git"]["dirty"], bool)
 
 
 # ---------------------------------------------------------------------------
