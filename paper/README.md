@@ -15,6 +15,7 @@ the *experiments*: what was run, on what, with which numbers coming out.
 | `instances/` | Frozen random instance families (the exact items/targets the paper reports).                   | yes            |
 | `hardware/`  | Account facts, device notes, job ledgers — anything about the real machines.                    | yes (`*.json`, `*.md`) |
 | `tex/`       | The manuscript source.                                                                          | yes            |
+| `cloud/`     | The VM that runs the WP5 campaign of record: pinned environment, startup script, commands.      | yes            |
 
 ## Rules
 
