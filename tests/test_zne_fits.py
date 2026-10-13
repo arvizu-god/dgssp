@@ -14,7 +14,10 @@ import pytest
 
 from dgssp.metrics import total_variation, uniform_distribution
 from dgssp.mitigation.zne import (
+    ZNE_METHODS,
+    ZNEItemRun,
     ZNESamplingConfig,
+    analyse_zne_item,
     clip_renormalise,
     depolarised_probability,
     extrapolate_distribution,
@@ -25,11 +28,95 @@ from dgssp.mitigation.zne import (
     pathology_diagnostic,
     plan_scales,
     project_to_simplex,
+    required_scales,
     resolved_scales_mask,
     richardson_weights,
     simplex_renormalise,
     zne_bootstrap,
 )
+
+# ---------------------------------------------------------------------------
+# How many scales each method needs, and a model comparison on too few
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("asymptote", [None, 0.25])
+@pytest.mark.parametrize("method", ZNE_METHODS)
+def test_required_scales_is_what_the_fitter_accepts(method, asymptote):
+    """``required_scales`` and ``fit_scalar_series`` must agree, method by method."""
+    cfg = ZNESamplingConfig(method=method, asymptote=asymptote)
+    need = required_scales(method, asymptote if method == "exponential" else None)
+
+    def fit(n: int) -> dict:
+        scales = [1.0 + 0.5 * k for k in range(n)]
+        values = [0.25 + 0.6 * 0.7**s for s in scales]
+        return fit_scalar_series(scales, values, [8192] * n, cfg, p_uniform=0.25)
+
+    assert fit(need)["n_params"] <= need
+    if method != "richardson":  # exact interpolation: it never refuses
+        with pytest.raises(ValueError, match="needs >="):
+            fit(need - 1)
+
+
+def _two_scale_run() -> ZNEItemRun:
+    """What the planned grid gave P-n4-M2-03 in the cloud run: lambda = 1, 1.25."""
+    rng = np.random.default_rng(7)
+    counts = {}
+    for scale, p_good in ((1.0, 0.60), (1.25, 0.55)):
+        good = int(rng.binomial(8192, p_good))
+        counts[scale] = {"0101": good // 2, "1010": good - good // 2, "0000": 8192 - good}
+    return ZNEItemRun(
+        name="two-scale",
+        nominal_scales=[1.0, 1.25],
+        realised_scales=[1.0, 1.25],
+        realised_scales_exact=[(1, 1), (5, 4)],
+        realised_scales_1q=[1.0, 1.25],
+        counts_per_scale=counts,
+    )
+
+
+def test_a_two_scale_grid_does_not_stop_the_model_comparison():
+    """
+    Regression: the cloud campaign's planned-grid stage died on its 161st
+    instance with ``Method 'quadratic' needs >= 3 scales, got 2`` -- the
+    planner had given it two scales, and the comparison tried every model.
+    The quadratic is now recorded as not applicable; the rest are fitted.
+    """
+    cfg = ZNESamplingConfig(
+        scales=[1.0, 1.25], method="exponential", asymptote="p_uniform", n_bootstrap=20
+    )
+    analysis = analyse_zne_item(
+        _two_scale_run(),
+        cfg,
+        solution_bitstrings=["0101", "1010"],
+        p_uniform=2 / 16,
+        methods=ZNE_METHODS,
+    )
+    fits = analysis["scalars"]
+    assert set(fits) == set(ZNE_METHODS)
+
+    quadratic = fits["quadratic"]
+    assert quadratic["applicable"] is False
+    assert quadratic["reason"] == "needs >= 3 scales, got 2"
+    assert np.isnan(quadratic["value"]) and quadratic["identifiable"] is False
+    assert quadratic["reported_source"] == "min_scale"
+
+    for name in ("linear", "richardson", "exponential"):
+        assert fits[name]["applicable"] is True, name
+        assert np.isfinite(fits[name]["value"]), name
+        # Every entry, fitted or not, describes the same observations.
+        assert fits[name]["observed"] == quadratic["observed"]
+        assert fits[name]["scales"] == quadratic["scales"]
+    assert analysis["scalar"] is fits["exponential"]
+
+
+def test_the_reported_estimator_is_never_skipped_quietly():
+    """Too few scales for ``cfg.method`` itself is still an error."""
+    cfg = ZNESamplingConfig(scales=[1.0, 1.25], method="quadratic", n_bootstrap=20)
+    with pytest.raises(ValueError, match="needs >= 3 scales"):
+        analyse_zne_item(
+            _two_scale_run(), cfg, solution_bitstrings=["0101", "1010"], p_uniform=2 / 16
+        )
 
 # ---------------------------------------------------------------------------
 # Scalar fits

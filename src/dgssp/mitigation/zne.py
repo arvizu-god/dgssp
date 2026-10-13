@@ -753,6 +753,44 @@ def _fit_exponential_free(
     return np.asarray(popt, dtype=float), cov
 
 
+def required_scales(method: str, asymptote: float | None = None) -> int:
+    """
+    The fewest noise scales a method can be fitted to.
+
+    ``linear`` 2, ``quadratic`` 3, ``exponential`` 2 with a fixed asymptote and
+    3 with a free one -- one scale per free parameter, the counts
+    :func:`_fit_series` refuses to go below.  ``richardson`` interpolates
+    exactly through however many scales it is given, so it never refuses; 2 is
+    the fewest that extrapolate at all (one point is just the observation).
+    ``tests/test_zne_fits.py`` pins these numbers to the fitter itself.
+
+    Parameters
+    ----------
+    method:
+        One of :data:`ZNE_METHODS`.
+    asymptote:
+        The exponential's fixed asymptote (:func:`resolve_asymptote`), or
+        ``None`` for a free one; ignored by the other methods.
+
+    Returns
+    -------
+    int
+        The minimum number of distinct scales.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is unknown.
+    """
+    if method not in ZNE_METHODS:
+        raise ValueError(f"Unknown method '{method}'. Use one of {', '.join(ZNE_METHODS)}.")
+    if method in _POLYNOMIAL_DEGREE:
+        return _POLYNOMIAL_DEGREE[method] + 1
+    if method == "richardson":
+        return 2
+    return 2 if asymptote is not None else 3
+
+
 def _fit_series(
     method: str,
     x: np.ndarray,
@@ -2322,6 +2360,7 @@ def _scalar_block(
     block = dict(boot["fit"])
     block.update(
         {
+            "applicable": True,
             "ci": [boot["lo"], boot["hi"]],
             "bootstrap_se": boot["se"],
             "n_failed": boot["n_failed"],
@@ -2334,6 +2373,61 @@ def _scalar_block(
         }
     )
     return block
+
+
+def _not_applicable_block(
+    run: ZNEItemRun,
+    method: str,
+    needed: int,
+    observable_fn: Callable[[Mapping[str, int]], float],
+    p_uniform: float,
+) -> dict[str, Any]:
+    """
+    The model-comparison entry for a method this item has too few scales for.
+
+    It carries the same observations every fitted method does -- so a table of
+    methods still lines up row by row -- and no fit: ``value`` is NaN (strict
+    JSON ``null``), ``identifiable`` is ``False`` so every reader that
+    conditions on identification already excludes it, and ``applicable`` /
+    ``reason`` say why.
+
+    Parameters
+    ----------
+    run:
+        The item's counts.
+    method:
+        The method that cannot be fitted.
+    needed:
+        :func:`required_scales` for it.
+    observable_fn, p_uniform:
+        As for :func:`_scalar_block`.
+
+    Returns
+    -------
+    dict
+        The not-applicable block.
+    """
+    scales, values, shots = _observed_series(run.counts_per_scale, observable_fn)
+    return {
+        "method": method,
+        "applicable": False,
+        "reason": f"needs >= {needed} scales, got {scales.size}",
+        "value": float("nan"),
+        "value_se": None,
+        "fit_ok": False,
+        "n_params": needed,
+        "scales": scales.tolist(),
+        "observed": values.tolist(),
+        "shots": shots.astype(int).tolist(),
+        "null_value": p_uniform,
+        "resolved": None,
+        "identifiable": False,
+        "value_at_min_scale": float(values[0]),
+        "reported_value": float(values[0]),
+        "reported_source": "min_scale",
+        "ci": [float("nan"), float("nan")],
+        "nominal_scales": list(run.nominal_scales),
+    }
 
 
 def analyse_zne_item(
@@ -2367,7 +2461,12 @@ def analyse_zne_item(
         Extrapolation methods to fit, all from the *same* counts -- nothing is
         re-sampled, so model comparison costs no shots.  ``None`` fits only
         ``cfg.method``.  ``cfg.method`` is always fitted, whether or not it
-        appears here.
+        appears here.  A comparison method the item has too few scales for
+        (:func:`required_scales`; a planned grid can have two, and the
+        quadratic needs three) gets a not-applicable entry instead of a fit,
+        rather than stopping the analysis -- and with it a whole campaign
+        stage.  ``cfg.method`` gets no such pass: the reported estimator
+        either fits or raises.
 
     Returns
     -------
@@ -2386,7 +2485,8 @@ def analyse_zne_item(
     Raises
     ------
     ValueError
-        If ``methods`` names an unknown extrapolation method.
+        If ``methods`` names an unknown extrapolation method, or the item has
+        too few scales for ``cfg.method`` itself.
     """
     sols = list(solution_bitstrings)
 
@@ -2397,11 +2497,16 @@ def analyse_zne_item(
     for name in wanted:
         if name not in ZNE_METHODS:
             raise ValueError(f"Unknown method '{name}'. Use one of {', '.join(ZNE_METHODS)}.")
+    n_scales = len(run.counts_per_scale)
+    scalars: dict[str, dict[str, Any]] = {}
     # dict.fromkeys de-duplicates while keeping cfg.method first.
-    scalars = {
-        name: _scalar_block(run, replace(cfg, method=name), p_sol, p_uniform)  # type: ignore[arg-type]
-        for name in dict.fromkeys(wanted)
-    }
+    for name in dict.fromkeys(wanted):
+        method_cfg = replace(cfg, method=name)  # type: ignore[arg-type]
+        needed = required_scales(name, resolve_asymptote(method_cfg, p_uniform))
+        if name != cfg.method and n_scales < needed:
+            scalars[name] = _not_applicable_block(run, name, needed, p_sol, p_uniform)
+        else:
+            scalars[name] = _scalar_block(run, method_cfg, p_sol, p_uniform)
     scalar = scalars[cfg.method]
 
     pointwise: dict[str, Any] = {}
@@ -2592,6 +2697,7 @@ __all__ = [
     "richardson_weights",
     "zne_fit_single_value",
     "resolve_asymptote",
+    "required_scales",
     "is_resolved",
     "informative_scales_mask",
     "resolved_scales_mask",
