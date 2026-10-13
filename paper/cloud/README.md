@@ -31,7 +31,9 @@ Move-Item paper\data\sim_ideal, paper\data\sim_noisy_fake, paper\data\sim_zne_fa
 git status --porcelain
 ```
 
-Expect `git status --porcelain` to print **nothing**.
+Expect `git status --porcelain` to print **nothing**. Anything it lists makes
+the tree dirty and `run_campaign.py` refuses to start. An editor's own files
+belong in `.gitignore`, as `.vscode/` now is.
 
 ```powershell
 & $Py -m pytest
@@ -44,7 +46,7 @@ Expect `git status --porcelain` to print **nothing**.
 
 Expect:
 
-- `721 passed, 5 skipped`, in about 2 minutes;
+- `720 passed, 6 skipped`, in about 2 minutes. From PowerShell, where `bash` is the WSL stub, it is `716 passed, 10 skipped`: the four `bash -n` checks of the VM scripts skip there (they run under Git Bash and in CI);
 - `All checks passed!`;
 - `Success: no issues found in 20 source files`;
 - `environment matches requirements-lock.txt and requirements-cloud.txt (71 distributions, python 3.11.16, mitiq importable)`;

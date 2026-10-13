@@ -364,8 +364,9 @@ def preflight(
         problems.append("git: not a git checkout -- no record could name its commit")
     elif git["dirty"] and not args.allow_dirty:
         problems.append(
-            f"git: the tree is dirty ({git['dirty_files'][:4]}); commit or stash -- "
-            "dirty records are not reproducible and verify_campaign.py rejects them"
+            f"git: the tree is dirty ({git['dirty_files'][:4]}); commit, stash, or "
+            "(for an untracked file that is not code) add it to .gitignore -- dirty "
+            "records are not reproducible and verify_campaign.py rejects them"
         )
     else:
         passed.append(
