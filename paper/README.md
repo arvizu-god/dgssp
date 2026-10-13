@@ -136,16 +136,19 @@ differs from the pinned files, without Mitiq when a ZNE stage is planned, or on
 top of records from another commit or environment; it stops the run if the
 ideal gate fails. Underneath, it runs these commands, one stage each, on
 `fake_marrakesh` (the frozen twin) or on `--noise live --backend <device>` once
-the real device is known. Durations are measured on this laptop; the script
-prints its own measured ETA after the first chunk.
+the real device is known. Durations were measured on the 32-vCPU cloud VM (run 1,
+2026-10-13); the 16-thread laptop takes about the same, because the
+expensive instances barely use more cores. The script prints its own ETA, but it
+is an average over the chunks so far and badly underestimates once the slow
+instances arrive: a single chunk can take 20 minutes.
 
 ```
-python paper/scripts/sim_campaign.py --stage ideal --family all     #  ~1.5 min
-python paper/scripts/sim_campaign.py --stage noisy --family all     #    ~5 min
+python paper/scripts/sim_campaign.py --stage ideal --family all     #    ~1 min
+python paper/scripts/sim_campaign.py --stage noisy --family all     #    ~1 h
 python paper/scripts/sim_campaign.py --stage zne   --family all --grid both
-                                                                    #  ~140 min
+                                                                    #  ~7 h (odd 4.3 h + planned ~3 h)
 python paper/scripts/sim_campaign.py --stage zne   --family P --grid odd7
-                                                                    #   ~20 min
+                                                                    #  ~26 min
 python paper/scripts/sim_campaign.py --stage sweep                  #    ~1 min
 python paper/scripts/aggregate.py                                   #   <1 min
 python paper/scripts/make_figures.py --set sim                      #   <1 min

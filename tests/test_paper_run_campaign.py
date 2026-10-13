@@ -310,6 +310,38 @@ def test_upload_happens_first_after_every_stage_and_last(tmp_path, clean, monkey
     assert all(s["upload"]["status"] == "ok" for s in log["runs"][0]["stages"])
 
 
+def test_a_long_stage_is_also_synced_while_it_runs(tmp_path, clean, monkeypatch):
+    """
+    zne-odd ran 4.3 h on the cloud VM; a sync only between stages would let a
+    preemption take all of it.  While a stage runs, the bucket is synced
+    every --upload-every minutes as well.
+    """
+    import time as _time
+
+    monkeypatch.setattr(run_campaign.shutil, "which", lambda name: "gcloud")
+    data = tmp_path / "data"
+    inner = FakeLauncher(data)
+
+    def slow(command):
+        _time.sleep(0.5)
+        return inner(command)
+
+    uploader = FakeUploader()
+    code, _, log = _run(
+        tmp_path, "--upload", "gs://bucket-x/wp5", "--upload-every", "0.002",
+        "--stages", "ideal", launcher=slow, uploader=uploader,
+    )  # fmt: skip
+    assert code == run_campaign.OK
+    (stage,) = log["runs"][0]["stages"]
+    assert stage["periodic_uploads"]["count"] >= 2
+    assert stage["periodic_uploads"]["failed"] == 0
+    assert uploader.calls == 1 + stage["periodic_uploads"]["count"] + 1 + 1  # first, periodic, after, last
+
+    # Without --upload there is nothing to sync and no thread.
+    _, _, log = _run(tmp_path / "plain", "--stages", "ideal")
+    assert "periodic_uploads" not in log["runs"][0]["stages"][0]
+
+
 def test_an_unwritable_bucket_stops_the_run_before_any_compute(tmp_path, clean, monkeypatch):
     monkeypatch.setattr(run_campaign.shutil, "which", lambda name: "gcloud")
     code, launcher, log = _run(

@@ -80,6 +80,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -616,6 +617,31 @@ def launch(command: list[str], *, cwd: Path = REPO_ROOT) -> int:
         return process.wait()
 
 
+def _sync_periodically(
+    uploader: Callable[[Path, str], dict[str, Any]],
+    data_dir: Path,
+    url: str,
+    every_s: float,
+    stop: threading.Event,
+    results: list[dict[str, Any]],
+) -> None:
+    """
+    Sync every ``every_s`` seconds until ``stop`` is set (a stage in flight).
+
+    A stage can run for hours -- ``zne-odd`` took 4.3 on the cloud VM -- and
+    a sync only between stages would let a preemption take all of it.  This is
+    safe while records are being written: ``save_record`` renames a finished
+    record into place and the sync skips ``*.tmp``, so the bucket only ever
+    holds whole records, and a resumed stage re-runs whole every chunk with a
+    record missing.
+    """
+    while not stop.wait(every_s):
+        result = uploader(data_dir, url)
+        results.append(result)
+        say(f"  periodic sync: {result['status']} in {result['seconds']}s"
+            + (f" -- {result['error']}" if result["error"] else ""))
+
+
 def _raise_interrupt(signum: int, frame: Any) -> None:
     """SIGTERM (a VM shutting down) takes the same path as Ctrl-C."""
     raise KeyboardInterrupt(f"signal {signum}")
@@ -678,11 +704,29 @@ def run_stages(
         say(f"{header}: {len(missing)} to run, {len(present)} on disk")
         say(f"  {' '.join(command[1:])}")
         started = time.time()
+        stop = threading.Event()
+        syncs: list[dict[str, Any]] = []
+        syncer = None
+        if args.upload and args.upload_every > 0:
+            syncer = threading.Thread(
+                target=_sync_periodically,
+                args=(uploader, args.data_dir, args.upload, args.upload_every * 60.0, stop, syncs),
+                daemon=True,
+            )
+            syncer.start()
         try:
             exit_code = launcher(command)
         except KeyboardInterrupt:
             entry.update(status="interrupted", wall_s=round(time.time() - started, 1))
             raise
+        finally:
+            stop.set()
+            if syncer is not None:
+                syncer.join()
+                entry["periodic_uploads"] = {
+                    "count": len(syncs),
+                    "failed": sum(1 for s in syncs if s["status"] != "ok"),
+                }
 
         missing_after, present_after, duplicated = stage.status()
         if exit_code != 0:
@@ -769,6 +813,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-mitiq", action="store_true")
     parser.add_argument("--upload", default=None, metavar="gs://BUCKET/PATH",
                         help="Sync the campaign outputs here before and after every stage.")
+    parser.add_argument("--upload-every", type=float, default=15.0, metavar="MINUTES",
+                        help="With --upload, also sync this often while a stage runs "
+                        "(0 disables).")
     parser.add_argument("--keep-going", action="store_true",
                         help="Continue past a failed stage (never past the ideal gate).")
     parser.add_argument("--allow-dirty", action="store_true",
@@ -873,6 +920,7 @@ def main(
                 "limit": args.limit,
                 "mitiq": not args.no_mitiq,
                 "upload": args.upload,
+                "upload_every_min": args.upload_every if args.upload else None,
                 "keep_going": args.keep_going,
             },
             "plan": [

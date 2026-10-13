@@ -139,6 +139,8 @@ def test_the_launch_command_is_the_planned_shape():
         "--machine-type=c2d-highcpu-32",
         "--provisioning-model=SPOT",
         "--instance-termination-action=DELETE",
+        "--max-run-duration=14h",  # a full run measured ~9-10 h; 8 h would cut it
+        '$Prefix = "$Bucket/wp5-run2"',  # run 1's folder holds data from another commit
         "--image-family=debian-12",
         "--image-project=debian-cloud",
         "--boot-disk-size=50GB",

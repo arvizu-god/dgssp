@@ -133,19 +133,26 @@ Expect:
 
 ## 3. Launch
 
+**Run 1 and run 2.** Run 1 (commit `ceeb4f3`, bucket folder `wp5/`) ran
+2026-10-13 from 04:45 to 10:43 UTC. It stopped inside the `zne-planned` stage
+on an analysis bug: the model comparison tried a 3-parameter fit on a
+2-scale plan. That bug is fixed, and run 2 starts from zero in the bucket
+folder `wp5-run2/`. Run 1's data stays in `wp5/` only until run 2's counts have
+been compared with it; then it is deleted. Only run 2 is kept.
+
 ```powershell
 git status --porcelain
 git push origin main
 $Commit = git rev-parse HEAD
 git ls-remote origin main
 $Vm = "dgssp-wp5"
-$Prefix = "$Bucket/wp5"
+$Prefix = "$Bucket/wp5-run2"
 function Start-CampaignVm {
     $global:Zone = $null
     foreach ($z in "us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f") {
         gcloud compute instances create $Vm --zone=$z `
             --machine-type=c2d-highcpu-32 --provisioning-model=SPOT `
-            --instance-termination-action=DELETE --max-run-duration=8h `
+            --instance-termination-action=DELETE --max-run-duration=14h `
             --image-family=debian-12 --image-project=debian-cloud --boot-disk-size=50GB `
             --scopes=storage-rw `
             "--metadata=dgssp-commit=$Commit,dgssp-bucket=$Prefix" `
@@ -165,9 +172,9 @@ Expect:
 
 What the flags buy:
 
-- **Spot:** the campaign resumes per chunk, so a preemption costs at most the chunk in flight.
+- **Spot:** the campaign resumes per chunk, and it syncs to the bucket every 15 minutes, so a preemption costs at most about 15 minutes of work.
 - **`DELETE` on preemption:** nothing is left billing.
-- **`--max-run-duration=8h`:** caps a VM that hangs.
+- **`--max-run-duration=14h`:** caps a VM that hangs. The full run measures about 9–10 hours, so the cap leaves room for slower Spot hardware.
 - **`storage-rw` scope:** the VM can reach the bucket and nothing else.
 
 ## 4. Watch
@@ -180,13 +187,24 @@ gcloud storage cat "$Prefix/data/campaign_stdout.log" | Select-Object -Last 30
 
 The first two commands work at any time. The third works from the first sync on, which comes after the bootstrap and tests, about 6 minutes in.
 
+Times measured on run 1; the `zne-planned` time is an estimate, because run 1 stopped in it:
+
 | Elapsed | Serial log shows |
 |---|---|
 | ~1 min | `dgssp: boot on dgssp-wp5: commit=…`, `checked out …` |
-| ~4 min | `bootstrap: OK -- Python 3.11.2` (after `environment matches … (71 distributions, …, mitiq importable)`) |
-| ~7 min | `running the test suite` ends; `starting run_campaign.py`; pre-flight all `ok`; `initial sync … ok` |
-| then | `stage 1/6 ideal` … `OK (exit 0)`, an `upload: ok` after every stage, `stage 6/6 sweep` |
-| ~2 h | `campaign complete (exit 0)`, `PASS: one complete campaign …`, `finished with status 0`, `powering off` |
+| ~2 min | `bootstrap: OK -- Python 3.11.2` (it passed the exact-environment check) |
+| ~4 min | the test suite has passed; `starting run_campaign.py`; pre-flight all `ok`; `initial sync … ok` |
+| ~5 min | `stage 1/6 ideal` … `OK (exit 0)` (0.8 min) |
+| ~1 h | `stage 2/6 noisy` … `OK` (59 min) |
+| ~5.3 h | `stage 3/6 zne-odd` … `OK` (4.3 h) |
+| ~8–8.5 h | `stage 4/6 zne-planned` … `OK` (estimated 3 h) |
+| ~9–10 h | `zne-odd7` (26 min) and `sweep` (1 min); `campaign complete (exit 0)`, `PASS: one complete campaign …`, `finished with status 0`, `powering off` |
+
+A few instances cost 30–50 times more than their neighbours, and doubling the
+cores barely helps them. During such a chunk the log can show no new line for
+20–30 minutes while the CPU graph stays near 100%. That is normal. Between
+stages there is `upload: ok`, and during a stage a `periodic sync: ok` every
+15 minutes.
 
 Status goes `RUNNING` → `TERMINATED` when it finishes. Any `FAIL` line powers the VM off too: read the line, fix, then delete and relaunch (step 5). Status codes:
 
@@ -198,7 +216,7 @@ Status goes `RUNNING` → `TERMINATED` when it finishes. Any `FAIL` line powers 
 ## 5. If it was preempted
 
 When `describe` says the instance is **not found** while the campaign was
-running, it was preempted (or hit the 8-hour cap) and deleted. Relaunch with
+running, it was preempted (or hit the 14-hour cap) and deleted. Relaunch with
 the same commit; the new VM restores the bucket and continues:
 
 ```powershell
@@ -242,7 +260,7 @@ Expect:
 
 - `TERMINATED`.
 - The log's tail ends in `PASS` and `finished with status 0`.
-- `rsync` copies 6 `sim_*` directories (2055 records, about 33 MB projected) plus `campaign_log.json` and `campaign_stdout.log`, and nothing else.
+- `rsync` copies 6 `sim_*` directories (2055 records, about 25–30 MB; run 1 measured 23.6 MB for its 1752) plus `campaign_log.json` and `campaign_stdout.log`, and nothing else.
 - `verify_campaign.py` prints the six-stage table with `missing 0`, `dup 0` and `bad 0`, a single `commit` (= `$Commit`), `dirty 0`, `= requirements-lock.txt`, `python 3.11.2`, then `PASS`.
 - `git status --porcelain` shows only untracked `paper/data/` entries.
 - Deleting the stopped VM ends the disk's billing.
@@ -272,4 +290,4 @@ data-availability statement.
 
 ## Cost
 
-A `c2d-highcpu-32` Spot VM bills only while `RUNNING`. The console shows its hourly price on the create page; at Spot rates, about 2 hours of campaign plus 10 minutes of setup stays under the $5 the plan allows. `--max-run-duration=8h` bounds the worst case. The bucket holds about 40 MB.
+A `c2d-highcpu-32` Spot VM bills only while `RUNNING`. Run 1 ran for 6 hours. A full run is about 9–10 hours, and `--max-run-duration=14h` bounds the worst case. The actual cost per run is in the billing report (step 2c), which updates with a few hours' delay. The bucket holds about 25 MB per run.
