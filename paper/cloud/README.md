@@ -70,15 +70,47 @@ Expect:
 
 ## 2. Google Cloud, once
 
+Four parts, **in order, one at a time**. 2a and 2b are interactive, so don't
+paste them together with anything else.
+
+**2a. Install the Google Cloud CLI** (skip this if `gcloud version` already works):
+
 ```powershell
-gcloud version
-gcloud auth login
-gcloud config get-value project
+winget install --id Google.CloudSDK --exact
 ```
 
-If `gcloud version` fails, install the CLI from
-<https://cloud.google.com/sdk/docs/install> and open a new window. If the last
-line prints nothing, run `gcloud init` and pick (or create) the project.
+The installer may open its own window; accept its defaults. Then **close
+PowerShell and open a new window**, so it sees the new `gcloud` command, and
+check it:
+
+```powershell
+cd "C:\Users\Arturo Arvizu\python\dgssp"
+$Py = "C:/Users/Arturo Arvizu/.conda/envs/dgssp-paper/python.exe"
+gcloud version
+```
+
+Expect a version table starting with `Google Cloud SDK`. If `winget` is not
+available, use the installer from <https://cloud.google.com/sdk/docs/install>.
+
+**2b. Sign in and choose the project:**
+
+```powershell
+gcloud init
+```
+
+It opens the browser to sign in with your Google account, then asks you to
+pick a project or create a new one (any name, e.g. `dgssp-paper`). Answer
+`n` if it offers to set a default region and zone. Expect it to end with
+`Your Google Cloud SDK is configured and ready to use!`.
+
+**2c. Billing.** Compute Engine refuses to start any VM in a project without
+billing. Open <https://console.cloud.google.com/billing/linkedaccount> and
+make sure the project shows a linked billing account. If the account is a
+**free trial**, click **Activate full account** (or **Upgrade**). The trial
+allows at most 8 CPU cores running at once, and the campaign VM needs 32
+vCPUs. Upgrading keeps the remaining trial credit, which covers this run.
+
+**2d. Bucket, permissions, quota:**
 
 ```powershell
 $Project = gcloud config get-value project
@@ -94,9 +126,10 @@ gcloud compute project-info describe --flatten="quotas[]" --format="table(quotas
 
 Expect:
 
+- **Enabling the services** takes up to a minute. If it fails with a billing message, part 2c is not done yet.
 - **Bucket name taken:** if bucket creation fails with *already exists*, someone else owns that name. Set `$Bucket = "gs://$Project-dgssp-wp5"` and re-run the last five commands.
-- **Bucket access:** the IAM binding gives the VM's default service account read/write on this bucket only.
-- **Quota:** the limit minus usage must be **≥ 32** for `C2D_CPUS`, `CPUS` and `CPUS_ALL_REGIONS`. If it isn't, request an increase (Console → IAM & Admin → Quotas). Alternatively, replace `c2d-highcpu-32` with `c2d-highcpu-16` in step 3: it takes about twice as long and changes no count, because thread count doesn't enter the draws. A free-trial account is capped at 8 vCPUs and cannot run this shape.
+- **Bucket access:** the IAM binding gives the VM's default service account read/write on this bucket only. If it says the service account does not exist, Compute Engine is still being set up: wait a minute and run that line again.
+- **Quota:** the limit minus usage must be **≥ 32** for `C2D_CPUS`, `CPUS` and `CPUS_ALL_REGIONS`. If it isn't, request an increase (Console → IAM & Admin → Quotas). Alternatively, replace `c2d-highcpu-32` with `c2d-highcpu-16` in step 3: it takes about twice as long and changes no count, because thread count doesn't enter the draws.
 
 ## 3. Launch
 
