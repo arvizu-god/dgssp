@@ -52,6 +52,23 @@ def test_gitattributes_forces_lf_on_shell_scripts():
     assert re.search(r"^\*\.sh\s+text\s+eol=lf\s*$", text, re.MULTILINE)
 
 
+def test_the_campaign_data_is_committed_as_the_vm_wrote_it():
+    """
+    Decision F: the records go into git as they are.  Without ``eol=lf`` a
+    Windows checkout would rewrite every line ending, and the files here would
+    no longer be the VM's files byte for byte.
+    """
+    text = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
+    for pattern in (
+        "paper/data/sim_*/*.json",
+        "paper/data/campaign_log.json",
+        "paper/data/campaign_stdout.log",
+    ):
+        assert re.search(rf"^{re.escape(pattern)}\s+text\s+eol=lf\s*$", text, re.MULTILINE), pattern
+    readme = (CLOUD / "README.md").read_text(encoding="utf-8")
+    assert "git add paper/data/sim_* paper/data/campaign_log.json paper/data/campaign_stdout.log" in readme
+
+
 @pytest.mark.parametrize("script", SHELL_SCRIPTS, ids=lambda p: p.name)
 def test_shell_scripts_parse(script):
     """``bash -n``, where a working bash is available."""

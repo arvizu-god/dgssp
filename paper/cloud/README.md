@@ -22,18 +22,18 @@ variables, and the `Start-CampaignVm` definition if you need to relaunch.
 ```powershell
 cd "C:\Users\Arturo Arvizu\python\dgssp"
 $Py = "C:/Users/Arturo Arvizu/.conda/envs/dgssp-paper/python.exe"
-
-# The laptop's partial WP5 run (three commits, two thermal shutdowns) goes
-# outside the repository. It is never used, and run_campaign.py refuses to
-# resume on top of it.
-New-Item -ItemType Directory -Force ..\dgssp-wp5-laptop-partial | Out-Null
-Move-Item paper\data\sim_ideal, paper\data\sim_noisy_fake, paper\data\sim_zne_fake_odd ..\dgssp-wp5-laptop-partial\
 git status --porcelain
 ```
 
 Expect `git status --porcelain` to print **nothing**. Anything it lists makes
 the tree dirty and `run_campaign.py` refuses to start. An editor's own files
 belong in `.gitignore`, as `.vscode/` now is.
+
+The laptop's partial WP5 run (three commits, two thermal shutdowns) was
+discarded on 2026-10-12. Only the cloud run's results are kept. If any
+`paper/data/sim_*` directory exists before the launch, `run_campaign.py`
+refuses to resume on top of it unless it came from the same commit and
+environment.
 
 ```powershell
 & $Py -m pytest
@@ -214,9 +214,28 @@ Expect:
 - `git status --porcelain` shows only untracked `paper/data/` entries.
 - Deleting the stopped VM ends the disk's billing.
 
-**Do not commit `paper/data` yet**: how the campaign data is stored in git is decision F.
+## 7. Commit the data
 
-Keep the bucket until the data is committed. Only after that: `gcloud storage rm --recursive $Bucket`.
+Decision F: the campaign files go into git as they are, about 33 MB on disk
+and about 7 MB inside git, which compresses them. `.gitattributes` keeps them
+byte-for-byte as the VM wrote them. Only after `verify_campaign.py` printed
+`PASS`:
+
+```powershell
+git add paper/data/sim_* paper/data/campaign_log.json paper/data/campaign_stdout.log
+git status --porcelain
+git commit -m "WP5: simulation campaign data, cloud run at $Commit, verified"
+git status --porcelain
+```
+
+Expect:
+
+- after `git add`: `A` lines only, under `paper/data/sim_*/` (2055 files) plus the two log files;
+- after the commit: nothing.
+
+Keep the bucket until this commit exists. Only after that: `gcloud storage rm --recursive $Bucket`.
+At submission, deposit the same files on Zenodo for a DOI to cite in the
+data-availability statement.
 
 ## Cost
 

@@ -3,3 +3,10 @@
 # tree, where core.autocrlf would otherwise give them CRLF endings -- and bash
 # stops at the first "\r".
 *.sh text eol=lf
+
+# The WP5 campaign data (decision F: committed as-is).  Written on the Linux
+# VM with LF endings; this keeps every checkout byte-for-byte identical to the
+# VM's file, so a checksum taken here (for a Zenodo deposit, say) matches.
+paper/data/sim_*/*.json text eol=lf
+paper/data/campaign_log.json text eol=lf
+paper/data/campaign_stdout.log text eol=lf
