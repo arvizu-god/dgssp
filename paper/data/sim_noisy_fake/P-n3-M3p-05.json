@@ -1,0 +1,163 @@
+{
+  "instance": {
+    "items": [
+      2,
+      2,
+      2
+    ],
+    "target": 4,
+    "name": "P-n3-M3p-05"
+  },
+  "n_items": 3,
+  "n_sum": 4,
+  "iterations": 1,
+  "executor": "noisy",
+  "mitigation_mode": "none",
+  "backend": "aer_simulator_from(fake_marrakesh)",
+  "shots": 10000,
+  "counts": {
+    "1": {
+      "110": 2173,
+      "011": 2383,
+      "000": 672,
+      "101": 2299,
+      "100": 624,
+      "001": 562,
+      "111": 779,
+      "010": 508
+    }
+  },
+  "metrics": {
+    "solution_bitstrings": [
+      "011",
+      "101",
+      "110"
+    ],
+    "num_solutions": 3,
+    "p_uniform": 0.375,
+    "solution_probability": 0.6855,
+    "mitigated_solution_probability": null,
+    "mitiq_solution_probability": null,
+    "n_qubits": 7,
+    "elapsed_s": 0.39007642269134524,
+    "solution_probability_ci": [
+      0.6770475,
+      0.6953525
+    ],
+    "tv_to_reference": {
+      "point": 0.1582499999999984,
+      "lo": 0.1483974999999984,
+      "hi": 0.16670249999999837
+    },
+    "classical_fidelity": 0.9632611498214522,
+    "hellinger": 0.13616649835897135,
+    "reference_distribution": {
+      "000": 0.031249999999999847,
+      "001": 0.031249999999999847,
+      "010": 0.031249999999999847,
+      "011": 0.28124999999999867,
+      "100": 0.031249999999999847,
+      "101": 0.28124999999999867,
+      "110": 0.28124999999999867,
+      "111": 0.031249999999999847
+    },
+    "error_metrics": {
+      "total_error": 0.3969881478172618,
+      "two_qubit_error": 0.33172730484799345,
+      "single_qubit_error": 0.04792685859426839,
+      "readout_error": 0.017333984375,
+      "single_qubit_gate_count": 606,
+      "two_qubit_gate_count": 185,
+      "missing_calibration": 0
+    },
+    "campaign": {
+      "stage": "noisy",
+      "noise": "fake",
+      "grid": null,
+      "device": "fake_marrakesh",
+      "executor_backend": "aer_simulator_from(fake_marrakesh)",
+      "calibration_file": null,
+      "shots": 10000,
+      "seed_simulator": 20261020,
+      "max_parallel_threads": null,
+      "chunk_index": 2,
+      "chunk_circuits": 50,
+      "family": "P",
+      "m_class": "3+",
+      "position_in_chunk": 12,
+      "analytic_p_sol": 0.8437500000000002
+    }
+  },
+  "transpiled": {
+    "two_q_count": 185,
+    "depth": 478,
+    "two_q_depth": 135,
+    "physical_qubits": [
+      13,
+      12,
+      11,
+      18,
+      9,
+      14,
+      10
+    ],
+    "one_q_physical": 376,
+    "two_q_physical": 185,
+    "virtual_gate_count": 230,
+    "survival": 0.49797302578837105,
+    "best_seed": 0,
+    "seed_source": "fixed_seed"
+  },
+  "job_id": "841eb2b4-5b22-4267-8b3b-b043caaa5e51",
+  "provenance": {
+    "timestamp_utc": "2026-10-13T23:21:36Z",
+    "git": {
+      "commit": "21d0075a8d8ba6700b626c61574269202230ca43",
+      "short_commit": "21d0075",
+      "branch": "HEAD",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 465,
+      "untracked_outputs_by_dir": {
+        "paper/data": 465,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 0,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-13T23:20:52Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.2",
+      "implementation": "CPython",
+      "executable": "/opt/dgssp-venv/bin/python"
+    },
+    "platform": "Linux-6.1.0-53-cloud-amd64-x86_64-with-glibc2.36",
+    "host": "dgssp-wp5",
+    "user": "root",
+    "backend": {
+      "name": "fake_marrakesh",
+      "num_qubits": 156,
+      "processor_family": "heron",
+      "heavy_hex": true,
+      "calibration_timestamp": "2025-02-26T14:52:45-05:00"
+    }
+  },
+  "schema_version": 2,
+  "calibration_timestamp": "2025-02-26T14:52:45-05:00",
+  "zne_fit": null,
+  "pathology": null,
+  "mitiq": null,
+  "pointwise": null,
+  "renorm": null,
+  "fold_seed": null
+}

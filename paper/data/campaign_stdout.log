@@ -1,0 +1,312 @@
+campaign: 6 stage(s)  noise=fake  backend=fake_marrakesh  chunk=50  threads=all  cooldown=0s  limit=none  mitiq=on  upload=gs://dgssp-paper-2026-dgssp/wp5-run2/data
+data: /opt/dgssp/paper/data
+
+   #  stage        directory              expected  on disk  arguments
+   1  ideal        sim_ideal                   463        0  --stage ideal --family all
+   2  noisy        sim_noisy_fake              463        0  --stage noisy --family all
+   3  zne-odd      sim_zne_fake_odd            463        0  --stage zne --family all --grid odd
+   4  zne-planned  sim_zne_fake_planned        463        0  --stage zne --family all --grid planned
+   5  zne-odd7     sim_zne_fake_odd7           197        0  --stage zne --family P --grid odd7
+   6  sweep        sim_sweep_fake                6        0  --stage sweep
+      total                                   2055        0
+
+pre-flight:
+  ok    git: 21d0075 (HEAD), clean
+  ok    environment: matches requirements-lock.txt and requirements-cloud.txt
+  ok    mitiq: importable
+  ok    data: every record on disk could have come from this run
+  ok    upload: gs://dgssp-paper-2026-dgssp/wp5-run2/data (checked by the first sync)
+
+[2026-10-13T23:19:35Z] initial sync to gs://dgssp-paper-2026-dgssp/wp5-run2/data: ok in 2.0s
+[2026-10-13T23:19:35Z] stage 1/6 ideal -> sim_ideal: 463 to run, 0 on disk
+[2026-10-13T23:19:35Z]   /opt/dgssp/paper/scripts/sim_campaign.py --stage ideal --family all --noise fake --chunk 50 --cooldown 0 --data-dir /opt/dgssp/paper/data --instances-dir /opt/dgssp/paper/instances --hardware-dir /opt/dgssp/paper/hardware
+  23:19:36 | /opt/dgssp-venv/lib/python3.11/site-packages/qiskit_ibm_runtime/fake_provider/backends/nighthawk/fake_nighthawk.py:78: UserWarning: Properties of fake_nighthawk are not intended to represent typical nighthawk error values.
+  23:19:36 |   warnings.warn(
+  23:19:43 | stage=ideal family=all noise=fake backend=fake_marrakesh calibration=2025-02-26T14:52:45-05:00
+  23:19:43 |   threads=all (32)  cooldown=0s  budget=none  n=all
+  23:19:43 | 
+  23:19:43 | ideal -> sim_ideal: 463 to run, 0 already present
+  23:19:45 |   chunk 0: 50/463 circuits, 0.0 min elapsed, 0.04 s/circuit, ETA 0.3 min
+  23:19:47 |   chunk 1: 100/463 circuits, 0.1 min elapsed, 0.05 s/circuit, ETA 0.3 min
+  23:19:51 |   chunk 2: 150/463 circuits, 0.1 min elapsed, 0.06 s/circuit, ETA 0.3 min
+  23:19:55 |   chunk 3: 200/463 circuits, 0.2 min elapsed, 0.06 s/circuit, ETA 0.3 min
+  23:20:00 |   chunk 4: 250/463 circuits, 0.3 min elapsed, 0.07 s/circuit, ETA 0.3 min
+  23:20:08 |   chunk 5: 300/463 circuits, 0.4 min elapsed, 0.09 s/circuit, ETA 0.2 min
+  23:20:15 |   chunk 6: 350/463 circuits, 0.5 min elapsed, 0.09 s/circuit, ETA 0.2 min
+  23:20:18 |   chunk 7: 400/463 circuits, 0.6 min elapsed, 0.09 s/circuit, ETA 0.1 min
+  23:20:23 |   chunk 8: 450/463 circuits, 0.7 min elapsed, 0.09 s/circuit, ETA 0.0 min
+  23:20:24 |   chunk 9: 463/463 circuits, 0.7 min elapsed, 0.09 s/circuit, ETA 0.0 min
+  23:20:24 | 
+  23:20:24 | acceptance:
+  23:20:24 |   analytic: 347 comparisons, worst 2.71 sigma; 0 over the nominal 4 sigma (chance predicts 0.02, up to 1 is unremarkable); stop threshold 5.22 sigma
+  23:20:24 |   recorded: 347 comparisons, worst 3.08 sigma; 2 over the nominal 3 sigma (chance predicts 0.94, up to 5 is unremarkable); stop threshold 4.47 sigma
+  23:20:24 |       P-n5-M2-00: 0.95610 vs 0.96320 = 3.08 sigma
+  23:20:24 |       P-n4-M1-01: 0.95740 vs 0.96430 = 3.04 sigma
+  23:20:24 |   wrote 463 record(s)
+  23:20:24 | 
+  23:20:24 | OK
+[2026-10-13T23:20:25Z] stage 1/6 ideal -> sim_ideal: OK (exit 0) in 0.8 min, 463/463 records
+[2026-10-13T23:20:29Z]   upload: ok in 3.5s
+[2026-10-13T23:20:29Z] stage 2/6 noisy -> sim_noisy_fake: 463 to run, 0 on disk
+[2026-10-13T23:20:29Z]   /opt/dgssp/paper/scripts/sim_campaign.py --stage noisy --family all --noise fake --chunk 50 --cooldown 0 --data-dir /opt/dgssp/paper/data --instances-dir /opt/dgssp/paper/instances --hardware-dir /opt/dgssp/paper/hardware
+  23:20:30 | /opt/dgssp-venv/lib/python3.11/site-packages/qiskit_ibm_runtime/fake_provider/backends/nighthawk/fake_nighthawk.py:78: UserWarning: Properties of fake_nighthawk are not intended to represent typical nighthawk error values.
+  23:20:30 |   warnings.warn(
+  23:20:36 | stage=noisy family=all noise=fake backend=fake_marrakesh calibration=2025-02-26T14:52:45-05:00
+  23:20:36 |   threads=all (32)  cooldown=0s  budget=none  n=all
+  23:20:36 | 
+  23:20:36 | noisy -> sim_noisy_fake: 463 to run, 0 already present
+  23:20:53 |   chunk 0: 50/463 circuits, 0.3 min elapsed, 0.33 s/circuit, ETA 2.3 min
+  23:21:11 |   chunk 1: 100/463 circuits, 0.6 min elapsed, 0.35 s/circuit, ETA 2.1 min
+  23:21:36 |   chunk 2: 150/463 circuits, 1.0 min elapsed, 0.40 s/circuit, ETA 2.1 min
+  23:22:01 |   chunk 3: 200/463 circuits, 1.4 min elapsed, 0.42 s/circuit, ETA 1.9 min
+[2026-10-13T23:35:38Z]   periodic sync: ok in 9.5s
+  23:42:29 |   chunk 4: 250/463 circuits, 21.9 min elapsed, 5.25 s/circuit, ETA 18.6 min
+  23:50:01 |   chunk 5: 300/463 circuits, 29.4 min elapsed, 5.88 s/circuit, ETA 16.0 min
+[2026-10-13T23:50:45Z]   periodic sync: ok in 6.6s
+[2026-10-14T00:05:53Z]   periodic sync: ok in 8.4s
+  00:09:51 |   chunk 6: 350/463 circuits, 49.2 min elapsed, 8.44 s/circuit, ETA 15.9 min
+  00:10:12 |   chunk 7: 400/463 circuits, 49.6 min elapsed, 7.44 s/circuit, ETA 7.8 min
+  00:18:59 |   chunk 8: 450/463 circuits, 58.4 min elapsed, 7.79 s/circuit, ETA 1.7 min
+  00:19:14 |   chunk 9: 463/463 circuits, 58.6 min elapsed, 7.60 s/circuit, ETA 0.0 min
+  00:19:14 | 
+  00:19:14 | OK
+[2026-10-14T00:19:15Z] stage 2/6 noisy -> sim_noisy_fake: OK (exit 0) in 58.8 min, 463/463 records
+[2026-10-14T00:19:21Z]   upload: ok in 5.3s
+[2026-10-14T00:19:21Z] stage 3/6 zne-odd -> sim_zne_fake_odd: 463 to run, 0 on disk
+[2026-10-14T00:19:21Z]   /opt/dgssp/paper/scripts/sim_campaign.py --stage zne --family all --grid odd --noise fake --chunk 50 --cooldown 0 --data-dir /opt/dgssp/paper/data --instances-dir /opt/dgssp/paper/instances --hardware-dir /opt/dgssp/paper/hardware
+  00:19:23 | /opt/dgssp-venv/lib/python3.11/site-packages/qiskit_ibm_runtime/fake_provider/backends/nighthawk/fake_nighthawk.py:78: UserWarning: Properties of fake_nighthawk are not intended to represent typical nighthawk error values.
+  00:19:23 |   warnings.warn(
+  00:19:29 | stage=zne family=all noise=fake backend=fake_marrakesh calibration=2025-02-26T14:52:45-05:00
+  00:19:29 |   threads=all (32)  cooldown=0s  budget=none  n=all
+  00:19:29 |   grid=odd mitiq=on methods=['linear', 'quadratic', 'richardson', 'exponential']
+  00:19:29 | 
+  00:19:29 | zne [odd] -> sim_zne_fake_odd: 463 to run, 0 already present
+  00:19:29 |   transpiling 463 instance(s) (recorded seeds)
+  00:19:48 |   transpiled in 18.6s
+  00:20:28 |   chunk 0: 50/2315 circuits, 0.7 min elapsed, 0.80 s/circuit, ETA 30.1 min
+  00:21:09 |   chunk 1: 100/2315 circuits, 1.3 min elapsed, 0.81 s/circuit, ETA 29.9 min
+  00:21:56 |   chunk 2: 150/2315 circuits, 2.1 min elapsed, 0.86 s/circuit, ETA 30.9 min
+  00:22:44 |   chunk 3: 200/2315 circuits, 2.9 min elapsed, 0.88 s/circuit, ETA 31.0 min
+  00:23:29 |   chunk 4: 250/2315 circuits, 3.7 min elapsed, 0.89 s/circuit, ETA 30.5 min
+  00:24:17 |   chunk 5: 300/2315 circuits, 4.5 min elapsed, 0.90 s/circuit, ETA 30.2 min
+  00:24:57 |   chunk 6: 350/2315 circuits, 5.2 min elapsed, 0.88 s/circuit, ETA 29.0 min
+  00:25:53 |   chunk 7: 400/2315 circuits, 6.1 min elapsed, 0.91 s/circuit, ETA 29.1 min
+  00:26:42 |   chunk 8: 450/2315 circuits, 6.9 min elapsed, 0.92 s/circuit, ETA 28.6 min
+  00:27:09 |   chunk 9: 500/2315 circuits, 7.4 min elapsed, 0.88 s/circuit, ETA 26.7 min
+  00:27:38 |   chunk 10: 550/2315 circuits, 7.8 min elapsed, 0.85 s/circuit, ETA 25.2 min
+  00:28:20 |   chunk 11: 600/2315 circuits, 8.5 min elapsed, 0.85 s/circuit, ETA 24.4 min
+  00:29:33 |   chunk 12: 650/2315 circuits, 9.8 min elapsed, 0.90 s/circuit, ETA 25.0 min
+  00:30:45 |   chunk 13: 700/2315 circuits, 11.0 min elapsed, 0.94 s/circuit, ETA 25.3 min
+  00:31:53 |   chunk 14: 750/2315 circuits, 12.1 min elapsed, 0.97 s/circuit, ETA 25.2 min
+  00:32:54 |   chunk 15: 800/2315 circuits, 13.1 min elapsed, 0.98 s/circuit, ETA 24.8 min
+  00:33:39 |   chunk 16: 850/2315 circuits, 13.9 min elapsed, 0.98 s/circuit, ETA 23.9 min
+  00:34:19 |   chunk 17: 900/2315 circuits, 14.5 min elapsed, 0.97 s/circuit, ETA 22.8 min
+[2026-10-14T00:34:27Z]   periodic sync: ok in 6.1s
+  00:34:45 |   chunk 18: 950/2315 circuits, 15.0 min elapsed, 0.94 s/circuit, ETA 21.5 min
+[2026-10-14T00:49:39Z]   periodic sync: ok in 11.9s
+  00:49:47 |   chunk 19: 1000/2315 circuits, 30.0 min elapsed, 1.80 s/circuit, ETA 39.4 min
+  00:52:33 |   chunk 20: 1050/2315 circuits, 32.7 min elapsed, 1.87 s/circuit, ETA 39.5 min
+[2026-10-14T01:04:50Z]   periodic sync: ok in 11.4s
+  01:09:12 |   chunk 21: 1100/2315 circuits, 49.4 min elapsed, 2.69 s/circuit, ETA 54.6 min
+  01:11:55 |   chunk 22: 1150/2315 circuits, 52.1 min elapsed, 2.72 s/circuit, ETA 52.8 min
+  01:14:24 |   chunk 23: 1200/2315 circuits, 54.6 min elapsed, 2.73 s/circuit, ETA 50.7 min
+  01:16:27 |   chunk 24: 1250/2315 circuits, 56.6 min elapsed, 2.72 s/circuit, ETA 48.3 min
+  01:18:14 |   chunk 25: 1300/2315 circuits, 58.4 min elapsed, 2.70 s/circuit, ETA 45.6 min
+  01:19:30 |   chunk 26: 1350/2315 circuits, 59.7 min elapsed, 2.65 s/circuit, ETA 42.7 min
+[2026-10-14T01:19:56Z]   periodic sync: ok in 5.9s
+  01:23:08 |   chunk 27: 1400/2315 circuits, 63.3 min elapsed, 2.71 s/circuit, ETA 41.4 min
+[2026-10-14T01:35:08Z]   periodic sync: ok in 11.6s
+[2026-10-14T01:50:19Z]   periodic sync: ok in 11.5s
+[2026-10-14T02:05:31Z]   periodic sync: ok in 11.7s
+  02:18:56 |   chunk 28: 1450/2315 circuits, 119.1 min elapsed, 4.93 s/circuit, ETA 71.1 min
+[2026-10-14T02:20:37Z]   periodic sync: ok in 6.0s
+[2026-10-14T02:35:48Z]   periodic sync: ok in 10.8s
+[2026-10-14T02:50:59Z]   periodic sync: ok in 11.3s
+[2026-10-14T03:06:11Z]   periodic sync: ok in 11.8s
+  03:15:27 |   chunk 29: 1500/2315 circuits, 175.7 min elapsed, 7.03 s/circuit, ETA 95.4 min
+[2026-10-14T03:21:18Z]   periodic sync: ok in 7.7s
+  03:23:09 |   chunk 30: 1550/2315 circuits, 183.3 min elapsed, 7.10 s/circuit, ETA 90.5 min
+[2026-10-14T03:36:30Z]   periodic sync: ok in 11.7s
+[2026-10-14T03:51:42Z]   periodic sync: ok in 11.4s
+  04:00:59 |   chunk 31: 1600/2315 circuits, 221.2 min elapsed, 8.29 s/circuit, ETA 98.8 min
+  04:04:23 |   chunk 32: 1650/2315 circuits, 224.6 min elapsed, 8.17 s/circuit, ETA 90.5 min
+[2026-10-14T04:06:50Z]   periodic sync: ok in 8.0s
+  04:07:33 |   chunk 33: 1700/2315 circuits, 227.8 min elapsed, 8.04 s/circuit, ETA 82.4 min
+  04:08:45 |   chunk 34: 1750/2315 circuits, 229.0 min elapsed, 7.85 s/circuit, ETA 73.9 min
+  04:09:32 |   chunk 35: 1800/2315 circuits, 229.7 min elapsed, 7.66 s/circuit, ETA 65.7 min
+  04:10:13 |   chunk 36: 1850/2315 circuits, 230.4 min elapsed, 7.47 s/circuit, ETA 57.9 min
+  04:10:44 |   chunk 37: 1900/2315 circuits, 230.9 min elapsed, 7.29 s/circuit, ETA 50.4 min
+  04:11:40 |   chunk 38: 1950/2315 circuits, 231.9 min elapsed, 7.13 s/circuit, ETA 43.4 min
+  04:12:43 |   chunk 39: 2000/2315 circuits, 232.9 min elapsed, 6.99 s/circuit, ETA 36.7 min
+  04:13:37 |   chunk 40: 2050/2315 circuits, 233.8 min elapsed, 6.84 s/circuit, ETA 30.2 min
+  04:14:07 |   chunk 41: 2100/2315 circuits, 234.3 min elapsed, 6.70 s/circuit, ETA 24.0 min
+[2026-10-14T04:22:01Z]   periodic sync: ok in 12.0s
+  04:30:05 |   chunk 42: 2150/2315 circuits, 250.3 min elapsed, 6.98 s/circuit, ETA 19.2 min
+  04:32:38 |   chunk 43: 2200/2315 circuits, 252.8 min elapsed, 6.90 s/circuit, ETA 13.2 min
+  04:34:45 |   chunk 44: 2250/2315 circuits, 254.9 min elapsed, 6.80 s/circuit, ETA 7.4 min
+  04:36:08 |   chunk 45: 2300/2315 circuits, 256.3 min elapsed, 6.69 s/circuit, ETA 1.7 min
+  04:36:32 |   chunk 46: 2315/2315 circuits, 256.7 min elapsed, 6.65 s/circuit, ETA 0.0 min
+  04:36:32 | 
+  04:36:32 | OK
+[2026-10-14T04:36:34Z] stage 3/6 zne-odd -> sim_zne_fake_odd: OK (exit 0) in 257.2 min, 463/463 records
+[2026-10-14T04:36:39Z]   upload: ok in 5.8s
+[2026-10-14T04:36:39Z] stage 4/6 zne-planned -> sim_zne_fake_planned: 463 to run, 0 on disk
+[2026-10-14T04:36:39Z]   /opt/dgssp/paper/scripts/sim_campaign.py --stage zne --family all --grid planned --noise fake --chunk 50 --cooldown 0 --data-dir /opt/dgssp/paper/data --instances-dir /opt/dgssp/paper/instances --hardware-dir /opt/dgssp/paper/hardware
+  04:36:42 | /opt/dgssp-venv/lib/python3.11/site-packages/qiskit_ibm_runtime/fake_provider/backends/nighthawk/fake_nighthawk.py:78: UserWarning: Properties of fake_nighthawk are not intended to represent typical nighthawk error values.
+  04:36:42 |   warnings.warn(
+  04:36:48 | stage=zne family=all noise=fake backend=fake_marrakesh calibration=2025-02-26T14:52:45-05:00
+  04:36:48 |   threads=all (32)  cooldown=0s  budget=none  n=all
+  04:36:48 |   grid=planned mitiq=on methods=['linear', 'quadratic', 'richardson', 'exponential']
+  04:36:48 | 
+  04:36:48 | zne [planned] -> sim_zne_fake_planned: 463 to run, 0 already present
+  04:36:48 |   transpiling 463 instance(s) (recorded seeds)
+  04:37:07 |   transpiled in 18.6s
+  04:37:28 |   chunk 0: 50/2279 circuits, 0.4 min elapsed, 0.44 s/circuit, ETA 16.2 min
+  04:37:51 |   chunk 1: 100/2279 circuits, 0.7 min elapsed, 0.44 s/circuit, ETA 16.1 min
+  04:38:25 |   chunk 2: 150/2279 circuits, 1.3 min elapsed, 0.52 s/circuit, ETA 18.6 min
+  04:38:57 |   chunk 3: 200/2279 circuits, 1.8 min elapsed, 0.55 s/circuit, ETA 19.2 min
+  04:39:23 |   chunk 4: 250/2279 circuits, 2.3 min elapsed, 0.54 s/circuit, ETA 18.4 min
+  04:39:51 |   chunk 5: 300/2279 circuits, 2.7 min elapsed, 0.55 s/circuit, ETA 18.1 min
+  04:40:16 |   chunk 6: 350/2279 circuits, 3.2 min elapsed, 0.54 s/circuit, ETA 17.4 min
+  04:40:49 |   chunk 7: 400/2279 circuits, 3.7 min elapsed, 0.56 s/circuit, ETA 17.5 min
+  04:41:21 |   chunk 8: 450/2279 circuits, 4.2 min elapsed, 0.56 s/circuit, ETA 17.2 min
+  04:41:43 |   chunk 9: 500/2279 circuits, 4.6 min elapsed, 0.55 s/circuit, ETA 16.4 min
+  04:42:07 |   chunk 10: 550/2279 circuits, 5.0 min elapsed, 0.55 s/circuit, ETA 15.7 min
+  04:42:37 |   chunk 11: 600/2279 circuits, 5.5 min elapsed, 0.55 s/circuit, ETA 15.4 min
+  04:43:24 |   chunk 12: 650/2279 circuits, 6.3 min elapsed, 0.58 s/circuit, ETA 15.8 min
+  04:44:10 |   chunk 13: 700/2279 circuits, 7.1 min elapsed, 0.61 s/circuit, ETA 15.9 min
+  04:44:53 |   chunk 14: 750/2279 circuits, 7.8 min elapsed, 0.62 s/circuit, ETA 15.9 min
+  04:45:33 |   chunk 15: 800/2279 circuits, 8.4 min elapsed, 0.63 s/circuit, ETA 15.6 min
+  04:46:01 |   chunk 16: 850/2279 circuits, 8.9 min elapsed, 0.63 s/circuit, ETA 15.0 min
+  04:46:20 |   chunk 17: 896/2279 circuits, 9.2 min elapsed, 0.62 s/circuit, ETA 14.2 min
+  04:46:41 |   chunk 18: 946/2279 circuits, 9.6 min elapsed, 0.61 s/circuit, ETA 13.5 min
+[2026-10-14T04:51:52Z]   periodic sync: ok in 12.8s
+  05:01:18 |   chunk 19: 996/2279 circuits, 24.2 min elapsed, 1.46 s/circuit, ETA 31.2 min
+  05:03:17 |   chunk 20: 1046/2279 circuits, 26.2 min elapsed, 1.50 s/circuit, ETA 30.9 min
+[2026-10-14T05:07:05Z]   periodic sync: ok in 13.1s
+  05:18:23 |   chunk 21: 1096/2279 circuits, 41.3 min elapsed, 2.26 s/circuit, ETA 44.5 min
+  05:20:19 |   chunk 22: 1146/2279 circuits, 43.2 min elapsed, 2.26 s/circuit, ETA 42.7 min
+  05:21:56 |   chunk 23: 1196/2279 circuits, 44.8 min elapsed, 2.25 s/circuit, ETA 40.6 min
+[2026-10-14T05:22:12Z]   periodic sync: ok in 7.0s
+  05:23:25 |   chunk 24: 1246/2279 circuits, 46.3 min elapsed, 2.23 s/circuit, ETA 38.4 min
+  05:24:32 |   chunk 25: 1296/2279 circuits, 47.4 min elapsed, 2.20 s/circuit, ETA 36.0 min
+  05:25:26 |   chunk 26: 1346/2279 circuits, 48.3 min elapsed, 2.15 s/circuit, ETA 33.5 min
+  05:31:25 |   chunk 27: 1396/2279 circuits, 54.3 min elapsed, 2.33 s/circuit, ETA 34.4 min
+[2026-10-14T05:37:27Z]   periodic sync: ok in 14.3s
+[2026-10-14T05:52:40Z]   periodic sync: ok in 13.6s
+[2026-10-14T06:07:54Z]   periodic sync: ok in 13.3s
+  06:22:51 |   chunk 28: 1446/2279 circuits, 105.7 min elapsed, 4.39 s/circuit, ETA 60.9 min
+[2026-10-14T06:23:01Z]   periodic sync: ok in 7.0s
+[2026-10-14T06:38:15Z]   periodic sync: ok in 14.1s
+[2026-10-14T06:53:29Z]   periodic sync: ok in 14.2s
+[2026-10-14T07:08:43Z]   periodic sync: ok in 13.6s
+[2026-10-14T07:23:52Z]   periodic sync: ok in 9.8s
+[2026-10-14T07:39:02Z]   periodic sync: ok in 9.8s
+  07:46:29 |   chunk 29: 1496/2279 circuits, 189.4 min elapsed, 7.60 s/circuit, ETA 99.1 min
+  07:52:12 |   chunk 30: 1546/2279 circuits, 195.1 min elapsed, 7.57 s/circuit, ETA 92.5 min
+[2026-10-14T07:54:17Z]   periodic sync: ok in 14.3s
+[2026-10-14T08:09:30Z]   periodic sync: ok in 13.4s
+[2026-10-14T08:24:39Z]   periodic sync: ok in 9.5s
+  08:27:01 |   chunk 31: 1596/2279 circuits, 229.9 min elapsed, 8.64 s/circuit, ETA 98.4 min
+  08:28:53 |   chunk 32: 1646/2279 circuits, 231.8 min elapsed, 8.45 s/circuit, ETA 89.1 min
+  08:31:35 |   chunk 33: 1696/2279 circuits, 234.5 min elapsed, 8.30 s/circuit, ETA 80.6 min
+  08:32:01 |   chunk 34: 1746/2279 circuits, 234.9 min elapsed, 8.07 s/circuit, ETA 71.7 min
+  08:32:30 |   chunk 35: 1796/2279 circuits, 235.4 min elapsed, 7.86 s/circuit, ETA 63.3 min
+  08:33:00 |   chunk 36: 1846/2279 circuits, 235.9 min elapsed, 7.67 s/circuit, ETA 55.3 min
+  08:33:24 |   chunk 37: 1896/2279 circuits, 236.3 min elapsed, 7.48 s/circuit, ETA 47.7 min
+  08:34:08 |   chunk 38: 1946/2279 circuits, 237.0 min elapsed, 7.31 s/circuit, ETA 40.6 min
+  08:34:47 |   chunk 39: 1996/2279 circuits, 237.7 min elapsed, 7.14 s/circuit, ETA 33.7 min
+  08:35:11 |   chunk 40: 2044/2279 circuits, 238.1 min elapsed, 6.99 s/circuit, ETA 27.4 min
+  08:36:01 |   chunk 41: 2094/2279 circuits, 238.9 min elapsed, 6.85 s/circuit, ETA 21.1 min
+[2026-10-14T08:39:53Z]   periodic sync: ok in 14.1s
+  08:51:03 |   chunk 42: 2144/2279 circuits, 253.9 min elapsed, 7.11 s/circuit, ETA 16.0 min
+  08:52:39 |   chunk 43: 2194/2279 circuits, 255.5 min elapsed, 6.99 s/circuit, ETA 9.9 min
+  08:53:53 |   chunk 44: 2244/2279 circuits, 256.8 min elapsed, 6.87 s/circuit, ETA 4.0 min
+  08:54:34 |   chunk 45: 2279/2279 circuits, 257.5 min elapsed, 6.78 s/circuit, ETA 0.0 min
+  08:54:34 | 
+  08:54:34 | OK
+[2026-10-14T08:54:35Z] stage 4/6 zne-planned -> sim_zne_fake_planned: OK (exit 0) in 257.9 min, 463/463 records
+[2026-10-14T08:54:42Z]   upload: ok in 7.1s
+[2026-10-14T08:54:42Z] stage 5/6 zne-odd7 -> sim_zne_fake_odd7: 197 to run, 0 on disk
+[2026-10-14T08:54:42Z]   /opt/dgssp/paper/scripts/sim_campaign.py --stage zne --family P --grid odd7 --noise fake --chunk 50 --cooldown 0 --data-dir /opt/dgssp/paper/data --instances-dir /opt/dgssp/paper/instances --hardware-dir /opt/dgssp/paper/hardware
+  08:54:45 | /opt/dgssp-venv/lib/python3.11/site-packages/qiskit_ibm_runtime/fake_provider/backends/nighthawk/fake_nighthawk.py:78: UserWarning: Properties of fake_nighthawk are not intended to represent typical nighthawk error values.
+  08:54:45 |   warnings.warn(
+  08:54:51 | stage=zne family=P noise=fake backend=fake_marrakesh calibration=2025-02-26T14:52:45-05:00
+  08:54:51 |   threads=all (32)  cooldown=0s  budget=none  n=all
+  08:54:51 |   grid=odd7 mitiq=on methods=['linear', 'quadratic', 'richardson', 'exponential']
+  08:54:51 |   odd7 covers Family P, n <= 4: 197 instance(s)
+  08:54:51 | 
+  08:54:51 | zne [odd7] -> sim_zne_fake_odd7: 197 to run, 0 already present
+  08:54:51 |   transpiling 197 instance(s) (recorded seeds)
+  08:54:56 |   transpiled in 5.2s
+  08:55:42 |   chunk 0: 49/1379 circuits, 0.8 min elapsed, 0.93 s/circuit, ETA 20.7 min
+  08:56:51 |   chunk 1: 98/1379 circuits, 1.9 min elapsed, 1.18 s/circuit, ETA 25.1 min
+  08:57:22 |   chunk 2: 147/1379 circuits, 2.4 min elapsed, 0.99 s/circuit, ETA 20.4 min
+  08:58:29 |   chunk 3: 196/1379 circuits, 3.6 min elapsed, 1.09 s/circuit, ETA 21.4 min
+  08:59:29 |   chunk 4: 245/1379 circuits, 4.5 min elapsed, 1.11 s/circuit, ETA 21.0 min
+  09:00:28 |   chunk 5: 294/1379 circuits, 5.5 min elapsed, 1.13 s/circuit, ETA 20.4 min
+  09:01:20 |   chunk 6: 343/1379 circuits, 6.4 min elapsed, 1.12 s/circuit, ETA 19.3 min
+  09:02:23 |   chunk 7: 392/1379 circuits, 7.5 min elapsed, 1.14 s/circuit, ETA 18.8 min
+  09:03:10 |   chunk 8: 441/1379 circuits, 8.2 min elapsed, 1.12 s/circuit, ETA 17.5 min
+  09:03:58 |   chunk 9: 490/1379 circuits, 9.0 min elapsed, 1.11 s/circuit, ETA 16.4 min
+  09:05:09 |   chunk 10: 539/1379 circuits, 10.2 min elapsed, 1.14 s/circuit, ETA 15.9 min
+  09:06:19 |   chunk 11: 588/1379 circuits, 11.4 min elapsed, 1.16 s/circuit, ETA 15.3 min
+  09:07:04 |   chunk 12: 637/1379 circuits, 12.1 min elapsed, 1.14 s/circuit, ETA 14.1 min
+  09:07:35 |   chunk 13: 686/1379 circuits, 12.6 min elapsed, 1.11 s/circuit, ETA 12.8 min
+  09:08:13 |   chunk 14: 735/1379 circuits, 13.3 min elapsed, 1.08 s/circuit, ETA 11.6 min
+  09:08:42 |   chunk 15: 784/1379 circuits, 13.8 min elapsed, 1.05 s/circuit, ETA 10.4 min
+  09:09:33 |   chunk 16: 833/1379 circuits, 14.6 min elapsed, 1.05 s/circuit, ETA 9.6 min
+[2026-10-14T09:09:51Z]   periodic sync: ok in 8.6s
+  09:11:01 |   chunk 17: 882/1379 circuits, 16.1 min elapsed, 1.09 s/circuit, ETA 9.1 min
+  09:12:28 |   chunk 18: 931/1379 circuits, 17.5 min elapsed, 1.13 s/circuit, ETA 8.4 min
+  09:13:51 |   chunk 19: 980/1379 circuits, 18.9 min elapsed, 1.16 s/circuit, ETA 7.7 min
+  09:15:19 |   chunk 20: 1029/1379 circuits, 20.4 min elapsed, 1.19 s/circuit, ETA 6.9 min
+  09:16:36 |   chunk 21: 1078/1379 circuits, 21.7 min elapsed, 1.21 s/circuit, ETA 6.0 min
+  09:17:38 |   chunk 22: 1127/1379 circuits, 22.7 min elapsed, 1.21 s/circuit, ETA 5.1 min
+  09:18:31 |   chunk 23: 1176/1379 circuits, 23.6 min elapsed, 1.20 s/circuit, ETA 4.1 min
+  09:19:24 |   chunk 24: 1225/1379 circuits, 24.5 min elapsed, 1.20 s/circuit, ETA 3.1 min
+  09:19:58 |   chunk 25: 1274/1379 circuits, 25.0 min elapsed, 1.18 s/circuit, ETA 2.1 min
+  09:20:28 |   chunk 26: 1323/1379 circuits, 25.5 min elapsed, 1.16 s/circuit, ETA 1.1 min
+  09:20:58 |   chunk 27: 1372/1379 circuits, 26.0 min elapsed, 1.14 s/circuit, ETA 0.1 min
+  09:21:05 |   chunk 28: 1379/1379 circuits, 26.1 min elapsed, 1.14 s/circuit, ETA 0.0 min
+  09:21:05 | 
+  09:21:05 | OK
+[2026-10-14T09:21:06Z] stage 5/6 zne-odd7 -> sim_zne_fake_odd7: OK (exit 0) in 26.4 min, 197/197 records
+[2026-10-14T09:21:14Z]   upload: ok in 8.3s
+[2026-10-14T09:21:14Z] stage 6/6 sweep -> sim_sweep_fake: 6 to run, 0 on disk
+[2026-10-14T09:21:14Z]   /opt/dgssp/paper/scripts/sim_campaign.py --stage sweep --noise fake --chunk 50 --cooldown 0 --data-dir /opt/dgssp/paper/data --instances-dir /opt/dgssp/paper/instances --hardware-dir /opt/dgssp/paper/hardware
+  09:21:17 | /opt/dgssp-venv/lib/python3.11/site-packages/qiskit_ibm_runtime/fake_provider/backends/nighthawk/fake_nighthawk.py:78: UserWarning: Properties of fake_nighthawk are not intended to represent typical nighthawk error values.
+  09:21:17 |   warnings.warn(
+  09:21:23 | stage=sweep family=all noise=fake backend=fake_marrakesh calibration=2025-02-26T14:52:45-05:00
+  09:21:23 |   threads=all (32)  cooldown=0s  budget=none  n=all
+  09:21:23 |   P-n3-M1-17_ideal.json: 0.4s
+  09:21:29 |   P-n3-M1-17_noisy.json: 5.7s
+  09:21:41 |   P-n3-M1-17_zne.json: 12.3s
+  09:21:42 |   P-n4-M1-10_ideal.json: 0.5s
+  09:21:49 |   P-n4-M1-10_noisy.json: 7.3s
+  09:22:09 |   P-n4-M1-10_zne.json: 20.2s
+[2026-10-14T09:22:10Z] stage 6/6 sweep -> sim_sweep_fake: OK (exit 0) in 0.9 min, 6/6 records
+[2026-10-14T09:22:20Z]   upload: ok in 9.3s
+[2026-10-14T09:22:29Z] campaign complete (exit 0); log: /opt/dgssp/paper/data/campaign_log.json
+verify_campaign: /opt/dgssp/paper/data  noise=fake  stages=6  limit=none  mitiq=required
+
+  stage        directory              expected  present  missing  extra  dup  bad      size  KB/rec
+  ideal        sim_ideal                   463      463        0      0    0    0     1.9MB     4.1
+  noisy        sim_noisy_fake              463      463        0      0    0    0     2.3MB     4.9
+  zne-odd      sim_zne_fake_odd            463      463        0      0    0    0    11.6MB    25.1
+  zne-planned  sim_zne_fake_planned        463      463        0      0    0    0    11.6MB    25.0
+  zne-odd7     sim_zne_fake_odd7           197      197        0      0    0    0     4.4MB    22.5
+  sweep        sim_sweep_fake                6        6        0      0    0    0     0.1MB    23.9
+  total                                   2055     2055        0      0    0    0    32.0MB    15.6
+
+dataset:
+  commit    21d0075a8d8ba6700b626c61574269202230ca43 (2055/2055 records)
+  dirty     0 record(s)
+  packages  matplotlib 3.11.1, mitiq 1.1.0, numpy 2.2.6, qiskit 2.5.2, qiskit-aer 0.17.2, qiskit-ibm-runtime 0.49.0, scipy 1.17.1 (2055/2055)
+            = requirements-lock.txt
+  python    3.11.2 x2055
+  hosts     dgssp-wp5 x2055
+  written   2026-10-13T23:20:24Z .. 2026-10-14T09:22:09Z
+  log       1 run(s), last 'complete', 602.1 min of stage wall clock
+
+PASS: one complete campaign, one commit, one environment.

@@ -1,0 +1,883 @@
+{
+  "instance": {
+    "items": [
+      6,
+      6
+    ],
+    "target": 12,
+    "name": "P-n2-M1-05"
+  },
+  "n_items": 2,
+  "n_sum": 5,
+  "iterations": 1,
+  "executor": "optimized",
+  "mitigation_mode": "zne_scalar",
+  "backend": "fake_marrakesh",
+  "shots": 8192,
+  "counts": {
+    "1": {
+      "11": 4363,
+      "10": 1263,
+      "01": 1251,
+      "00": 1315
+    },
+    "3": {
+      "00": 1963,
+      "10": 1890,
+      "11": 2549,
+      "01": 1790
+    },
+    "5": {
+      "11": 2051,
+      "01": 1971,
+      "00": 2094,
+      "10": 2076
+    }
+  },
+  "metrics": {
+    "solution_bitstrings": [
+      "11"
+    ],
+    "num_solutions": 1,
+    "p_uniform": 0.25,
+    "solution_probability": 0.5325927734375,
+    "mitigated_solution_probability": 0.8852907567173327,
+    "mitiq_solution_probability": 0.9393845471018202,
+    "n_qubits": 7,
+    "elapsed_s": 0.009086847305297852,
+    "solution_probability_ci": [
+      0.522332763671875,
+      0.54248046875
+    ],
+    "tv_to_reference": {
+      "point": 0.46740722656249445,
+      "lo": 0.45751953124999445,
+      "hi": 0.47766723632811947
+    },
+    "classical_fidelity": 0.5325927734374967,
+    "hellinger": 0.5198177175608828,
+    "mitigated_solution_probability_ci": [
+      0.8289075130292518,
+      0.9468692596321916
+    ],
+    "mitiq_solution_probability_ci": [
+      0.8421117402392648,
+      1.049515971928494
+    ],
+    "reference_distribution": {
+      "00": 2.1535312216841902e-31,
+      "01": 4.229199052058455e-30,
+      "10": 4.230016975237785e-30,
+      "11": 0.9999999999999889
+    },
+    "error_metrics": {
+      "total_error": 0.9523974010552477,
+      "two_qubit_error": 0.7649146174997178,
+      "single_qubit_error": 0.13694567418052997,
+      "readout_error": 0.050537109375,
+      "single_qubit_gate_count": 926,
+      "two_qubit_gate_count": 291,
+      "missing_calibration": 0
+    },
+    "mitigated_distribution": {
+      "00": 0.0,
+      "01": 0.07931241315304167,
+      "10": 0.02223825476904175,
+      "11": 0.8984493320779166
+    },
+    "zne_fits": {
+      "exponential": {
+        "method": "exponential",
+        "value": 0.8852907567173327,
+        "value_se": 0.032142911137338526,
+        "params": [
+          0.6352907567173327,
+          0.8080757768126992
+        ],
+        "param_names": [
+          "amplitude",
+          "rate"
+        ],
+        "cov": [
+          [
+            0.0010331667363828408,
+            0.0012749338062399695
+          ],
+          [
+            0.0012749338062399695,
+            0.0018321280222578851
+          ]
+        ],
+        "fitted": [
+          0.5331585538973799,
+          0.3062527792218071,
+          0.26117527663078893
+        ],
+        "residuals": [
+          -0.0005657804598798721,
+          0.004904447340692897,
+          -0.010809065693288933
+        ],
+        "n_params": 2,
+        "dof": 1,
+        "chi2": 6.029072508652108,
+        "chi2_red": 6.029072508652108,
+        "fit_ok": true,
+        "rate_at_bound": false,
+        "scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "observed": [
+          0.5325927734375,
+          0.3111572265625,
+          0.2503662109375
+        ],
+        "sigma": [
+          0.005512525359786598,
+          0.005115214454668614,
+          0.0047866873531501155
+        ],
+        "shots": [
+          8192,
+          8192,
+          8192
+        ],
+        "asymptote": 0.25,
+        "null_value": 0.25,
+        "resolved": false,
+        "resolved_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_resolved_scales": 2,
+        "informative_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_informative_scales": 2,
+        "identifiable": true,
+        "resolvability_k": 2.0,
+        "exp_rate_max": 10.0,
+        "value_at_min_scale": 0.5325927734375,
+        "reported_value": 0.5325927734375,
+        "reported_source": "min_scale",
+        "applicable": true,
+        "ci": [
+          0.8289075130292518,
+          0.9468692596321916
+        ],
+        "bootstrap_se": 0.030014132184217765,
+        "n_failed": 0,
+        "B": 500,
+        "bootstrap_seed": 0,
+        "nominal_scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "realised_scales_exact": [
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            1
+          ],
+          [
+            5,
+            1
+          ]
+        ],
+        "realised_scales_1q": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "fold_seed": 0
+      },
+      "linear": {
+        "method": "linear",
+        "value": 0.5703447959659458,
+        "value_se": 0.00650585333685348,
+        "params": [
+          -0.06865601273274861,
+          0.5703447959659458
+        ],
+        "param_names": [
+          "slope",
+          "intercept"
+        ],
+        "cov": [
+          [
+            3.3091581472587926e-06,
+            -1.0546614410247206e-05
+          ],
+          [
+            -1.0546614410247204e-05,
+            4.232612764064756e-05
+          ]
+        ],
+        "fitted": [
+          0.5016887832331972,
+          0.36437675776769995,
+          0.2270647323022027
+        ],
+        "residuals": [
+          0.03090399020430279,
+          -0.053219531205199955,
+          0.0233014786352973
+        ],
+        "n_params": 2,
+        "dof": 1,
+        "chi2": 163.3726307008887,
+        "chi2_red": 163.3726307008887,
+        "fit_ok": true,
+        "rate_at_bound": null,
+        "scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "observed": [
+          0.5325927734375,
+          0.3111572265625,
+          0.2503662109375
+        ],
+        "sigma": [
+          0.005512525359786598,
+          0.005115214454668614,
+          0.0047866873531501155
+        ],
+        "shots": [
+          8192,
+          8192,
+          8192
+        ],
+        "asymptote": null,
+        "null_value": 0.25,
+        "resolved": false,
+        "resolved_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_resolved_scales": 2,
+        "informative_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_informative_scales": 2,
+        "identifiable": true,
+        "resolvability_k": 2.0,
+        "exp_rate_max": null,
+        "value_at_min_scale": 0.5325927734375,
+        "reported_value": 0.5325927734375,
+        "reported_source": "min_scale",
+        "applicable": true,
+        "ci": [
+          0.5563801864691418,
+          0.5826846499735253
+        ],
+        "bootstrap_se": 0.006612107616301553,
+        "n_failed": 0,
+        "B": 500,
+        "bootstrap_seed": 0,
+        "nominal_scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "realised_scales_exact": [
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            1
+          ],
+          [
+            5,
+            1
+          ]
+        ],
+        "realised_scales_1q": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "fold_seed": 0
+      },
+      "quadratic": {
+        "method": "quadratic",
+        "value": 0.7035522460937484,
+        "value_se": 0.012285687072890723,
+        "params": [
+          0.02008056640624978,
+          -0.1910400390624986,
+          0.7035522460937484
+        ],
+        "param_names": [
+          "curvature",
+          "slope",
+          "intercept"
+        ],
+        "cov": [
+          [
+            2.4681560520015574e-06,
+            -1.5042547562805687e-05,
+            1.6372883491090405e-05
+          ],
+          [
+            -1.504254756280569e-05,
+            9.49882223603058e-05,
+            -0.00011033361063979035
+          ],
+          [
+            1.6372883491090405e-05,
+            -0.00011033361063979035,
+            0.00015093810685299424
+          ]
+        ],
+        "fitted": [
+          0.5325927734374996,
+          0.3111572265625007,
+          0.2503662109374999
+        ],
+        "residuals": [
+          4.440892098500626e-16,
+          -7.216449660063518e-16,
+          1.1102230246251565e-16
+        ],
+        "n_params": 3,
+        "dof": 0,
+        "chi2": 2.693092187849984e-26,
+        "chi2_red": null,
+        "fit_ok": true,
+        "rate_at_bound": null,
+        "scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "observed": [
+          0.5325927734375,
+          0.3111572265625,
+          0.2503662109375
+        ],
+        "sigma": [
+          0.005512525359786598,
+          0.005115214454668614,
+          0.0047866873531501155
+        ],
+        "shots": [
+          8192,
+          8192,
+          8192
+        ],
+        "asymptote": null,
+        "null_value": 0.25,
+        "resolved": false,
+        "resolved_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_resolved_scales": 2,
+        "informative_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_informative_scales": 2,
+        "identifiable": false,
+        "resolvability_k": 2.0,
+        "exp_rate_max": null,
+        "value_at_min_scale": 0.5325927734375,
+        "reported_value": 0.5325927734375,
+        "reported_source": "min_scale",
+        "applicable": true,
+        "ci": [
+          0.6792415618896446,
+          0.7248107910156256
+        ],
+        "bootstrap_se": 0.011811500374731831,
+        "n_failed": 0,
+        "B": 500,
+        "bootstrap_seed": 0,
+        "nominal_scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "realised_scales_exact": [
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            1
+          ],
+          [
+            5,
+            1
+          ]
+        ],
+        "realised_scales_1q": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "fold_seed": 0
+      },
+      "richardson": {
+        "method": "richardson",
+        "value": 0.70355224609375,
+        "value_se": 0.012285687072890747,
+        "params": [
+          0.020080566406249986,
+          -0.19104003906249992,
+          0.7035522460937499
+        ],
+        "param_names": [
+          "c2",
+          "c1",
+          "c0"
+        ],
+        "cov": [
+          [
+            2.46815605200157e-06,
+            -1.5042547562805767e-05,
+            1.6372883491090486e-05
+          ],
+          [
+            -1.5042547562805765e-05,
+            9.498822236030627e-05,
+            -0.00011033361063979084
+          ],
+          [
+            1.6372883491090486e-05,
+            -0.00011033361063979084,
+            0.00015093810685299475
+          ]
+        ],
+        "fitted": [
+          0.5325927734375,
+          0.3111572265625,
+          0.2503662109375
+        ],
+        "residuals": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "n_params": 3,
+        "dof": 0,
+        "chi2": 0.0,
+        "chi2_red": null,
+        "fit_ok": true,
+        "rate_at_bound": null,
+        "scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "observed": [
+          0.5325927734375,
+          0.3111572265625,
+          0.2503662109375
+        ],
+        "sigma": [
+          0.005512525359786598,
+          0.005115214454668614,
+          0.0047866873531501155
+        ],
+        "shots": [
+          8192,
+          8192,
+          8192
+        ],
+        "asymptote": null,
+        "null_value": 0.25,
+        "resolved": false,
+        "resolved_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_resolved_scales": 2,
+        "informative_scales": [
+          true,
+          true,
+          false
+        ],
+        "n_informative_scales": 2,
+        "identifiable": false,
+        "resolvability_k": 2.0,
+        "exp_rate_max": null,
+        "value_at_min_scale": 0.5325927734375,
+        "reported_value": 0.5325927734375,
+        "reported_source": "min_scale",
+        "applicable": true,
+        "ci": [
+          0.6792415618896485,
+          0.724810791015625
+        ],
+        "bootstrap_se": 0.011811500374731847,
+        "n_failed": 0,
+        "B": 500,
+        "bootstrap_seed": 0,
+        "nominal_scales": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "realised_scales_exact": [
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            1
+          ],
+          [
+            5,
+            1
+          ]
+        ],
+        "realised_scales_1q": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "fold_seed": 0
+      }
+    },
+    "campaign": {
+      "stage": "zne",
+      "noise": "fake",
+      "grid": "odd",
+      "device": "fake_marrakesh",
+      "executor_backend": "aer_simulator_from(fake_marrakesh)",
+      "calibration_file": null,
+      "shots": 8192,
+      "seed_simulator": 20261020,
+      "max_parallel_threads": null,
+      "chunk_index": 2,
+      "chunk_circuits": 50,
+      "family": "P",
+      "m_class": "1",
+      "grid_source": "odd",
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "seed_source": "hardware_subset",
+      "methods": [
+        "linear",
+        "quadratic",
+        "richardson",
+        "exponential"
+      ],
+      "include_mitiq": true,
+      "analytic_p_sol": 1.0
+    }
+  },
+  "transpiled": {
+    "two_q_count": 291,
+    "depth": 729,
+    "two_q_depth": 227,
+    "physical_qubits": [
+      69,
+      78,
+      89,
+      87,
+      86,
+      90,
+      88
+    ],
+    "one_q_physical": 599,
+    "two_q_physical": 291,
+    "virtual_gate_count": 327,
+    "survival": 0.33339254003392554,
+    "best_seed": 14,
+    "seed_source": "hardware_subset"
+  },
+  "job_id": "62cd4c91-7af7-4ec7-a330-5ad92af3b119",
+  "provenance": {
+    "timestamp_utc": "2026-10-14T00:21:55Z",
+    "git": {
+      "commit": "21d0075a8d8ba6700b626c61574269202230ca43",
+      "short_commit": "21d0075",
+      "branch": "HEAD",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 928,
+      "untracked_outputs_by_dir": {
+        "paper/data": 928,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 0,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-14T00:20:26Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.2",
+      "implementation": "CPython",
+      "executable": "/opt/dgssp-venv/bin/python"
+    },
+    "platform": "Linux-6.1.0-53-cloud-amd64-x86_64-with-glibc2.36",
+    "host": "dgssp-wp5",
+    "user": "root",
+    "backend": {
+      "name": "fake_marrakesh",
+      "num_qubits": 156,
+      "processor_family": "heron",
+      "heavy_hex": true,
+      "calibration_timestamp": "2025-02-26T14:52:45-05:00"
+    }
+  },
+  "schema_version": 2,
+  "calibration_timestamp": "2025-02-26T14:52:45-05:00",
+  "zne_fit": {
+    "method": "exponential",
+    "value": 0.8852907567173327,
+    "value_se": 0.032142911137338526,
+    "params": [
+      0.6352907567173327,
+      0.8080757768126992
+    ],
+    "param_names": [
+      "amplitude",
+      "rate"
+    ],
+    "cov": [
+      [
+        0.0010331667363828408,
+        0.0012749338062399695
+      ],
+      [
+        0.0012749338062399695,
+        0.0018321280222578851
+      ]
+    ],
+    "fitted": [
+      0.5331585538973799,
+      0.3062527792218071,
+      0.26117527663078893
+    ],
+    "residuals": [
+      -0.0005657804598798721,
+      0.004904447340692897,
+      -0.010809065693288933
+    ],
+    "n_params": 2,
+    "dof": 1,
+    "chi2": 6.029072508652108,
+    "chi2_red": 6.029072508652108,
+    "fit_ok": true,
+    "rate_at_bound": false,
+    "scales": [
+      1.0,
+      3.0,
+      5.0
+    ],
+    "observed": [
+      0.5325927734375,
+      0.3111572265625,
+      0.2503662109375
+    ],
+    "sigma": [
+      0.005512525359786598,
+      0.005115214454668614,
+      0.0047866873531501155
+    ],
+    "shots": [
+      8192,
+      8192,
+      8192
+    ],
+    "asymptote": 0.25,
+    "null_value": 0.25,
+    "resolved": false,
+    "resolved_scales": [
+      true,
+      true,
+      false
+    ],
+    "n_resolved_scales": 2,
+    "informative_scales": [
+      true,
+      true,
+      false
+    ],
+    "n_informative_scales": 2,
+    "identifiable": true,
+    "resolvability_k": 2.0,
+    "exp_rate_max": 10.0,
+    "value_at_min_scale": 0.5325927734375,
+    "reported_value": 0.5325927734375,
+    "reported_source": "min_scale",
+    "applicable": true,
+    "ci": [
+      0.8289075130292518,
+      0.9468692596321916
+    ],
+    "bootstrap_se": 0.030014132184217765,
+    "n_failed": 0,
+    "B": 500,
+    "bootstrap_seed": 0,
+    "nominal_scales": [
+      1.0,
+      3.0,
+      5.0
+    ],
+    "realised_scales_exact": [
+      [
+        1,
+        1
+      ],
+      [
+        3,
+        1
+      ],
+      [
+        5,
+        1
+      ]
+    ],
+    "realised_scales_1q": [
+      1.0,
+      3.0,
+      5.0
+    ],
+    "fold_seed": 0
+  },
+  "pathology": {
+    "method": "exponential",
+    "scales": [
+      1.0,
+      3.0,
+      5.0
+    ],
+    "n_bitstrings": 4,
+    "fraction_positive_slope": 0.75,
+    "raw_total_mass": 0.9502488350167968,
+    "clip_mass_removed": 0.031585551800175415,
+    "clip_mass_moved": 0.04975116498320312,
+    "simplex_mass_moved": 0.04975116498320312,
+    "tv_raw_min_scale": 0.46740722656249445,
+    "tv_pointwise_clip": 0.10155066792207788,
+    "tv_pointwise_simplex": 0.11181634655881233,
+    "clip_worse_than_raw": false,
+    "simplex_worse_than_raw": false,
+    "reference_is_uniform": false,
+    "raw_distribution": {
+      "00": -0.031585551800175415,
+      "01": 0.07787165453509104,
+      "10": 0.021834283235041718,
+      "11": 0.8821284490468395
+    }
+  },
+  "mitiq": {
+    "method": "exponential",
+    "asymptote": 0.25,
+    "scales": [
+      1.0,
+      3.0,
+      5.0
+    ],
+    "values": [
+      0.5325927734375,
+      0.2940673828125,
+      0.259033203125
+    ],
+    "value": 0.9393845471018202,
+    "lo": 0.8421117402392648,
+    "hi": 1.049515971928494,
+    "se": 0.05546982615468421,
+    "n_failed": 0,
+    "B": 500,
+    "seed": 0,
+    "realised_scales": [
+      1.0,
+      3.0,
+      5.0
+    ],
+    "fold_seed": 0
+  },
+  "pointwise": {
+    "clip": {
+      "distribution": {
+        "00": 0.0,
+        "01": 0.07931241315304167,
+        "10": 0.02223825476904175,
+        "11": 0.8984493320779166
+      },
+      "solution_probability": 0.8984493320779166
+    },
+    "simplex": {
+      "distribution": {
+        "00": 0.0,
+        "01": 0.08392685892943359,
+        "10": 0.027889487629384275,
+        "11": 0.8881836534411821
+      },
+      "solution_probability": 0.8881836534411821
+    },
+    "bootstrap": {
+      "renorm": "clip",
+      "intervals": {
+        "00": [
+          0.0,
+          0.04808096010720848
+        ],
+        "01": [
+          0.04430729994302127,
+          0.10471599238378872
+        ],
+        "10": [
+          0.0,
+          0.06656187939720942
+        ],
+        "11": [
+          0.8399625856009747,
+          0.9307570127303533
+        ]
+      },
+      "tv": {
+        "point": 0.10155066792207788,
+        "lo": 0.06924298726964107,
+        "hi": 0.16003741439901972
+      },
+      "solution_probability": {
+        "point": 0.8984493320779166,
+        "lo": 0.8399625856009747,
+        "hi": 0.9307570127303533
+      },
+      "B": 500,
+      "seed": 0
+    }
+  },
+  "renorm": "clip",
+  "fold_seed": 0
+}

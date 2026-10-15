@@ -1,0 +1,163 @@
+{
+  "instance": {
+    "items": [
+      5,
+      2,
+      5
+    ],
+    "target": 7,
+    "name": "P-n3-M2-06"
+  },
+  "n_items": 3,
+  "n_sum": 5,
+  "iterations": 1,
+  "executor": "noisy",
+  "mitigation_mode": "none",
+  "backend": "aer_simulator_from(fake_marrakesh)",
+  "shots": 10000,
+  "counts": {
+    "1": {
+      "010": 709,
+      "111": 696,
+      "110": 3109,
+      "001": 630,
+      "011": 3110,
+      "100": 623,
+      "101": 591,
+      "000": 532
+    }
+  },
+  "metrics": {
+    "solution_bitstrings": [
+      "011",
+      "110"
+    ],
+    "num_solutions": 2,
+    "p_uniform": 0.25,
+    "solution_probability": 0.6219,
+    "mitigated_solution_probability": null,
+    "mitiq_solution_probability": null,
+    "n_qubits": 8,
+    "elapsed_s": 0.2783747863769531,
+    "solution_probability_ci": [
+      0.612395,
+      0.6319
+    ],
+    "tv_to_reference": {
+      "point": 0.3780999999999942,
+      "lo": 0.3680999999999942,
+      "hi": 0.3876049999999942
+    },
+    "classical_fidelity": 0.6218999959800597,
+    "hellinger": 0.4597756375266825,
+    "reference_distribution": {
+      "000": 9.083562973261853e-30,
+      "001": 4.321903172065447e-32,
+      "010": 1.9462638952609634e-30,
+      "011": 0.4999999999999943,
+      "100": 4.906037647602842e-32,
+      "101": 8.350755626998636e-30,
+      "110": 0.4999999999999941,
+      "111": 5.268716578376722e-29
+    },
+    "error_metrics": {
+      "total_error": 0.6321660357399287,
+      "two_qubit_error": 0.5126245562742824,
+      "single_qubit_error": 0.10001022946564635,
+      "readout_error": 0.01953125,
+      "single_qubit_gate_count": 1142,
+      "two_qubit_gate_count": 354,
+      "missing_calibration": 0
+    },
+    "campaign": {
+      "stage": "noisy",
+      "noise": "fake",
+      "grid": null,
+      "device": "fake_marrakesh",
+      "executor_backend": "aer_simulator_from(fake_marrakesh)",
+      "calibration_file": null,
+      "shots": 10000,
+      "seed_simulator": 20261020,
+      "max_parallel_threads": null,
+      "chunk_index": 1,
+      "chunk_circuits": 50,
+      "family": "P",
+      "m_class": "2",
+      "position_in_chunk": 43,
+      "analytic_p_sol": 1.0
+    }
+  },
+  "transpiled": {
+    "two_q_count": 354,
+    "depth": 779,
+    "two_q_depth": 244,
+    "physical_qubits": [
+      11,
+      10,
+      18,
+      14,
+      19,
+      12,
+      13,
+      15
+    ],
+    "one_q_physical": 745,
+    "two_q_physical": 354,
+    "virtual_gate_count": 397,
+    "survival": 0.261845134460766,
+    "best_seed": 0,
+    "seed_source": "fixed_seed"
+  },
+  "job_id": "1f4ed76e-83aa-4ac8-9eda-ca2fab24a59a",
+  "provenance": {
+    "timestamp_utc": "2026-10-13T23:21:11Z",
+    "git": {
+      "commit": "21d0075a8d8ba6700b626c61574269202230ca43",
+      "short_commit": "21d0075",
+      "branch": "HEAD",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 465,
+      "untracked_outputs_by_dir": {
+        "paper/data": 465,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 0,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-13T23:20:52Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.2",
+      "implementation": "CPython",
+      "executable": "/opt/dgssp-venv/bin/python"
+    },
+    "platform": "Linux-6.1.0-53-cloud-amd64-x86_64-with-glibc2.36",
+    "host": "dgssp-wp5",
+    "user": "root",
+    "backend": {
+      "name": "fake_marrakesh",
+      "num_qubits": 156,
+      "processor_family": "heron",
+      "heavy_hex": true,
+      "calibration_timestamp": "2025-02-26T14:52:45-05:00"
+    }
+  },
+  "schema_version": 2,
+  "calibration_timestamp": "2025-02-26T14:52:45-05:00",
+  "zne_fit": null,
+  "pathology": null,
+  "mitiq": null,
+  "pointwise": null,
+  "renorm": null,
+  "fold_seed": null
+}

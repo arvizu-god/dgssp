@@ -1,0 +1,152 @@
+{
+  "instance": {
+    "items": [
+      6,
+      6
+    ],
+    "target": 12,
+    "name": "P-n2-M1-05"
+  },
+  "n_items": 2,
+  "n_sum": 5,
+  "iterations": 1,
+  "executor": "noisy",
+  "mitigation_mode": "none",
+  "backend": "aer_simulator_from(fake_marrakesh)",
+  "shots": 10000,
+  "counts": {
+    "1": {
+      "00": 1522,
+      "11": 5707,
+      "10": 1432,
+      "01": 1339
+    }
+  },
+  "metrics": {
+    "solution_bitstrings": [
+      "11"
+    ],
+    "num_solutions": 1,
+    "p_uniform": 0.25,
+    "solution_probability": 0.5707,
+    "mitigated_solution_probability": null,
+    "mitiq_solution_probability": null,
+    "n_qubits": 7,
+    "elapsed_s": 0.27605453491210935,
+    "solution_probability_ci": [
+      0.5613,
+      0.5796
+    ],
+    "tv_to_reference": {
+      "point": 0.42929999999999446,
+      "lo": 0.42039999999999444,
+      "hi": 0.4386999999999944
+    },
+    "classical_fidelity": 0.5706999999999961,
+    "hellinger": 0.4945231161328676,
+    "reference_distribution": {
+      "00": 2.1535312216841902e-31,
+      "01": 4.229199052058455e-30,
+      "10": 4.230016975237785e-30,
+      "11": 0.9999999999999889
+    },
+    "error_metrics": {
+      "total_error": 0.8761385457670829,
+      "two_qubit_error": 0.7298734982665762,
+      "single_qubit_error": 0.13576700062550678,
+      "readout_error": 0.010498046875,
+      "single_qubit_gate_count": 873,
+      "two_qubit_gate_count": 286,
+      "missing_calibration": 0
+    },
+    "campaign": {
+      "stage": "noisy",
+      "noise": "fake",
+      "grid": null,
+      "device": "fake_marrakesh",
+      "executor_backend": "aer_simulator_from(fake_marrakesh)",
+      "calibration_file": null,
+      "shots": 10000,
+      "seed_simulator": 20261020,
+      "max_parallel_threads": null,
+      "chunk_index": 0,
+      "chunk_circuits": 50,
+      "family": "P",
+      "m_class": "1",
+      "position_in_chunk": 25,
+      "analytic_p_sol": 1.0
+    }
+  },
+  "transpiled": {
+    "two_q_count": 286,
+    "depth": 754,
+    "two_q_depth": 239,
+    "physical_qubits": [
+      97,
+      87,
+      78,
+      90,
+      86,
+      88,
+      89
+    ],
+    "one_q_physical": 570,
+    "two_q_physical": 286,
+    "virtual_gate_count": 303,
+    "survival": 0.34121285599974466,
+    "best_seed": 0,
+    "seed_source": "fixed_seed"
+  },
+  "job_id": "87f84ae7-56ca-41b0-a6a6-4b20face1f48",
+  "provenance": {
+    "timestamp_utc": "2026-10-13T23:20:52Z",
+    "git": {
+      "commit": "21d0075a8d8ba6700b626c61574269202230ca43",
+      "short_commit": "21d0075",
+      "branch": "HEAD",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 465,
+      "untracked_outputs_by_dir": {
+        "paper/data": 465,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 0,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-13T23:20:52Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.2",
+      "implementation": "CPython",
+      "executable": "/opt/dgssp-venv/bin/python"
+    },
+    "platform": "Linux-6.1.0-53-cloud-amd64-x86_64-with-glibc2.36",
+    "host": "dgssp-wp5",
+    "user": "root",
+    "backend": {
+      "name": "fake_marrakesh",
+      "num_qubits": 156,
+      "processor_family": "heron",
+      "heavy_hex": true,
+      "calibration_timestamp": "2025-02-26T14:52:45-05:00"
+    }
+  },
+  "schema_version": 2,
+  "calibration_timestamp": "2025-02-26T14:52:45-05:00",
+  "zne_fit": null,
+  "pathology": null,
+  "mitiq": null,
+  "pointwise": null,
+  "renorm": null,
+  "fold_seed": null
+}
