@@ -275,6 +275,8 @@ def instance_row(
     for method in METHODS:
         block = _get(zne, "metrics", "zne_fits", method) or {}
         row[f"fit_{method}"] = block.get("value")
+        # Records written before the not-applicable entry existed lack the key.
+        row[f"fit_{method}_applicable"] = block.get("applicable", True if block else None)
         row[f"fit_{method}_identifiable"] = block.get("identifiable")
         row[f"fit_{method}_resolved"] = block.get("resolved")
         row[f"fit_{method}_reported"] = block.get("reported_value")
@@ -587,10 +589,13 @@ def build_model_comparison(
     out: list[dict[str, Any]] = []
     for method in METHODS:
         errors: list[float] = []
-        excluded = {"no_ideal": 0, "not_identifiable": 0, "not_finite": 0}
+        excluded = {"no_ideal": 0, "not_applicable": 0, "not_identifiable": 0, "not_finite": 0}
         for row in members:
             if row["ideal"] is None:
                 excluded["no_ideal"] += 1
+                continue
+            if row.get(f"fit_{method}_applicable") is False:
+                excluded["not_applicable"] += 1
                 continue
             if row.get(f"fit_{method}_identifiable") is not True:
                 excluded["not_identifiable"] += 1

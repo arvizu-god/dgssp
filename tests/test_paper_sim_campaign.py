@@ -476,6 +476,25 @@ def test_model_comparison_counts_what_it_excluded():
     assert out["exponential"]["median_abs_error"] == pytest.approx(0.01)
 
 
+def test_model_comparison_separates_not_applicable_from_not_identifiable():
+    """A quadratic on a 2-scale grid was never fitted; it is not a failed identification."""
+    rows = [
+        {
+            "grid": "planned",
+            "M": 1,
+            "ideal": 1.0,
+            "fit_quadratic": None,
+            "fit_quadratic_applicable": False,
+            "fit_quadratic_identifiable": False,
+        }
+    ]
+    out = {row["method"]: row for row in aggregate.build_model_comparison(rows, "planned")}
+    assert out["quadratic"]["excluded_not_applicable"] == 1
+    assert out["quadratic"]["excluded_not_identifiable"] == 0
+    # Older rows without the flag are not counted as not applicable.
+    assert out["linear"]["excluded_not_applicable"] == 0
+
+
 def test_notes_placeholders_mark_what_has_not_been_run(tmp_path):
     """An un-run stage reads as ``??``, never as a measured zero."""
     template = tmp_path / "t.md"
