@@ -43,8 +43,8 @@ Suggested wording: *"Re-running the campaign from scratch on a fresh VM
 reproduced all 31.3 million sampled shots of the 1752 records the two runs
 share bit-for-bit."*
 
-Run 1's data are still in `gs://dgssp-paper-2026-dgssp/wp5/` and on no other
-machine. They can be deleted on Arturo's OK.
+Run 1's data (`gs://dgssp-paper-2026-dgssp/wp5/`) were deleted on 2026-10-14,
+after this comparison, on Arturo's OK. Only run 2 is kept.
 
 ## Aggregation and figures
 
@@ -83,8 +83,8 @@ Headline numbers (full set in `sim_results.md`):
    (`bias_zne_scalar_value` vs `bias_zne_scalar_reported`).
 3. Hardware: fill `paper/hardware/account_facts.md`, pick the device, run the
    hardware subset within the Open-plan budget.
-4. Cleanup on Arturo's OK: delete `gs://…/wp5/` (run 1), later the bucket
-   (after the Zenodo deposit).
+4. Cleanup on Arturo's OK: delete the bucket (it now holds only `wp5-run2/`)
+   after the Zenodo deposit.
 
 ## Known, not fixed
 
