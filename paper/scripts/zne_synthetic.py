@@ -55,6 +55,7 @@ import argparse
 import json
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +113,7 @@ POINTWISE_GRIDS: dict[str, tuple[float, ...]] = {
 POINTWISE_METHODS: tuple[str, ...] = ("linear", "richardson")
 
 
-def _observable(counts: dict[str, int]) -> float:
+def _observable(counts: Mapping[str, int]) -> float:
     return solution_probability(counts, ["1"])
 
 

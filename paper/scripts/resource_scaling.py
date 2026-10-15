@@ -510,7 +510,7 @@ def measure_transpiled(
     )
     elapsed = time.time() - started
 
-    metrics = dict(transpiled_metrics(best.circuit))
+    metrics: dict[str, Any] = dict(transpiled_metrics(best.circuit))
     counts = {name: int(count) for name, count in best.circuit.count_ops().items()}
     one_q = sum(
         1
@@ -984,8 +984,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.figure_only:
         path = newest_resources_file()
-        records = json.loads(path.read_text(encoding="utf-8"))
-        written = make_figure(rows_from_records(records), family=args.family)
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        written = make_figure(rows_from_records(stored), family=args.family)
         print(f"read  {path}")
         for item in written:
             print(f"wrote {item}")

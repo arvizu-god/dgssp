@@ -191,7 +191,7 @@ def evaluate(
     )
     transpile_seconds = time.time() - started
 
-    metrics = dict(transpiled_metrics(best.circuit))
+    metrics: dict[str, Any] = dict(transpiled_metrics(best.circuit))
     one_q = sum(
         1
         for instruction in best.circuit.data
@@ -319,7 +319,7 @@ def select_cells(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ]
             if not cell:
                 continue
-            winner = dict(min(cell, key=rank_key))
+            winner = min(cell, key=rank_key).copy()
             winner["selected_for"] = f"cell n={n_items} M={m_class}"
             winner["cell_size"] = len(cell)
             winner["cell_rank"] = 1
@@ -359,7 +359,7 @@ def select_shallowest_signed(rows: list[dict[str, Any]]) -> dict[str, Any] | Non
     ]
     if not signed:
         return None
-    row = dict(min(signed, key=rank_key))
+    row = min(signed, key=rank_key).copy()
     row["selected_for"] = "shallowest signed instance (--include-signed)"
     return row
 
@@ -392,7 +392,7 @@ def select_edge(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     ]
     if not eligible:
         return None
-    edge = dict(max(eligible, key=size_key))
+    edge = max(eligible, key=size_key).copy()
     edge["selected_for"] = (
         f"edge (P_est >= {EDGE_FACTOR:g} * P_uniform, r_opt >= {EDGE_MIN_R_OPT})"
     )
