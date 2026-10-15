@@ -174,7 +174,7 @@ What the flags buy:
 
 - **Spot:** the campaign resumes per chunk, and it syncs to the bucket every 15 minutes, so a preemption costs at most about 15 minutes of work.
 - **`DELETE` on preemption:** nothing is left billing.
-- **`--max-run-duration=14h`:** caps a VM that hangs. The full run measures about 9–10 hours, so the cap leaves room for slower Spot hardware.
+- **`--max-run-duration=14h`:** caps a VM that hangs. The full run measured 10.1 hours (run 2), so the cap leaves room for slower Spot hardware.
 - **`storage-rw` scope:** the VM can reach the bucket and nothing else.
 
 ## 4. Watch
@@ -187,7 +187,7 @@ gcloud storage cat "$Prefix/data/campaign_stdout.log" | Select-Object -Last 30
 
 The first two commands work at any time. The third works from the first sync on, which comes after the bootstrap and tests, about 6 minutes in.
 
-Times measured on run 1; the `zne-planned` time is an estimate, because run 1 stopped in it:
+Times measured on run 2 (2026-10-13 23:15 to 2026-10-14 09:22 UTC, 10.1 h):
 
 | Elapsed | Serial log shows |
 |---|---|
@@ -197,8 +197,8 @@ Times measured on run 1; the `zne-planned` time is an estimate, because run 1 st
 | ~5 min | `stage 1/6 ideal` … `OK (exit 0)` (0.8 min) |
 | ~1 h | `stage 2/6 noisy` … `OK` (59 min) |
 | ~5.3 h | `stage 3/6 zne-odd` … `OK` (4.3 h) |
-| ~8–8.5 h | `stage 4/6 zne-planned` … `OK` (estimated 3 h) |
-| ~9–10 h | `zne-odd7` (26 min) and `sweep` (1 min); `campaign complete (exit 0)`, `PASS: one complete campaign …`, `finished with status 0`, `powering off` |
+| ~9.6 h | `stage 4/6 zne-planned` … `OK` (4.3 h) |
+| ~10 h | `zne-odd7` (26 min) and `sweep` (1 min); `campaign complete (exit 0)`, `PASS: one complete campaign …`, `finished with status 0`, `powering off` |
 
 A few instances cost 30–50 times more than their neighbours, and doubling the
 cores barely helps them. During such a chunk the log can show no new line for
@@ -260,7 +260,7 @@ Expect:
 
 - `TERMINATED`.
 - The log's tail ends in `PASS` and `finished with status 0`.
-- `rsync` copies 6 `sim_*` directories (2055 records, about 25–30 MB; run 1 measured 23.6 MB for its 1752) plus `campaign_log.json` and `campaign_stdout.log`, and nothing else.
+- `rsync` copies 6 `sim_*` directories (2055 records, 32.0 MB in run 2) plus `campaign_log.json` and `campaign_stdout.log`, and nothing else.
 - `verify_campaign.py` prints the six-stage table with `missing 0`, `dup 0` and `bad 0`, a single `commit` (= `$Commit`), `dirty 0`, `= requirements-lock.txt`, `python 3.11.2`, then `PASS`.
 - `git status --porcelain` shows only untracked `paper/data/` entries.
 - Deleting the stopped VM ends the disk's billing.
@@ -290,4 +290,4 @@ data-availability statement.
 
 ## Cost
 
-A `c2d-highcpu-32` Spot VM bills only while `RUNNING`. Run 1 ran for 6 hours. A full run is about 9–10 hours, and `--max-run-duration=14h` bounds the worst case. The actual cost per run is in the billing report (step 2c), which updates with a few hours' delay. The bucket holds about 25 MB per run.
+A `c2d-highcpu-32` Spot VM bills only while `RUNNING`. Run 1 ran for 6 hours. A full run is about 10 hours (run 2: 10.1 h), and `--max-run-duration=14h` bounds the worst case. The actual cost per run is in the billing report (step 2c), which updates with a few hours' delay. The bucket holds about 32 MB per run.
