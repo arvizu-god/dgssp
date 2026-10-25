@@ -2242,6 +2242,10 @@ def run_collect(args: argparse.Namespace, paths: Paths) -> int:
     from qiskit_ibm_runtime.json import RuntimeEncoder
 
     jobs_path = Path(args.jobs)
+    if not jobs_path.exists():
+        print(f"{jobs_path} not found. A dry-run jobs file is written by --dry-run, a "
+              "hardware one by --submit.")
+        return 2
     jobs_doc = json.loads(jobs_path.read_text(encoding="utf-8"))
     if jobs_doc.get("schema") != JOBS_SCHEMA:
         print(f"{jobs_path} is not a {JOBS_SCHEMA} file.")

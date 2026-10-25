@@ -166,8 +166,10 @@ def test_opaque_device_instructions_survive_a_snapshot():
 
     device = FakeBoston()
     payload = json.loads(json.dumps(calibration_payload(device)))
-    assert payload["opaque_instructions"]["reset_2"] == {"num_qubits": 1, "num_clbits": 0}
-    assert payload["opaque_instructions"]["measure_2"] == {"num_qubits": 1, "num_clbits": 1}
+    assert payload["opaque_instructions"]["reset_2"] == {
+        "kind": "instruction", "num_qubits": 1, "num_clbits": 0, "params": []}
+    assert payload["opaque_instructions"]["measure_2"] == {
+        "kind": "instruction", "num_qubits": 1, "num_clbits": 1, "params": []}
 
     rebuilt = backend_from_calibration(payload, name="fake_boston")
     assert sorted(rebuilt.target.operation_names) == sorted(device.target.operation_names)
@@ -177,13 +179,62 @@ def test_opaque_device_instructions_survive_a_snapshot():
     )
 
 
-def test_an_instruction_with_meaning_beyond_its_name_is_still_refused(device):
-    """A non-standard gate with parameters cannot be rebuilt from its name."""
-    from qiskit.circuit import Gate, Parameter
+def test_a_device_gate_like_xslow_survives_a_snapshot(device):
+    """
+    ibm_fez advertises ``xslow`` (a post-selection X pulse) as a bare ``Gate``.
+    The snapshot keeps it; the noise model, Aer and transpilation are unchanged.
+    """
+    import copy
+
+    from qiskit.circuit import Gate, Instruction, Parameter
+    from qiskit.transpiler import InstructionProperties
+    from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+    from qiskit_aer import AerSimulator
+    from qiskit_aer.noise import NoiseModel
+
+    from dgssp.backends import CalibrationSnapshotBackend
+
+    target = copy.deepcopy(device.target)
+    target.add_instruction(
+        Gate("xslow", 1, []),
+        {q: InstructionProperties(duration=p.duration * 4, error=p.error)
+         for q, p in target["x"].items()},
+    )
+    target.add_instruction(Instruction("probe_p", 1, 0, [Parameter("theta")]), {(0,): None})
+    fez_like = CalibrationSnapshotBackend(target, name="fez_like")
+
+    payload = json.loads(json.dumps(calibration_payload(fez_like)))
+    assert payload["opaque_instructions"]["xslow"]["kind"] == "gate"
+    assert payload["opaque_instructions"]["probe_p"]["params"] == ["theta"]
+    rebuilt = backend_from_calibration(payload, name="fez_like")
+    assert json.loads(json.dumps(calibration_payload(rebuilt))) == payload
+    assert "xslow" in NoiseModel.from_backend(rebuilt).noise_instructions
+    AerSimulator.from_backend(rebuilt)
+
+    circuit = DGSSPSolver(DGConfig(iterations=1)).build_circuit(
+        SubsetSumInstance(items=[2, 1], target=3, name="xslow")
+    )
+    with_it = generate_preset_pass_manager(
+        backend=rebuilt, optimization_level=3, seed_transpiler=6).run(circuit)
+    without = generate_preset_pass_manager(
+        backend=device, optimization_level=3, seed_transpiler=6).run(circuit)
+    assert "xslow" not in with_it.count_ops()
+    assert with_it == without
+
+
+@pytest.mark.parametrize("kind", ["bound_parameter", "subclass"])
+def test_an_instruction_with_meaning_beyond_its_name_is_still_refused(kind):
+    """A non-standard gate with a bound angle, or a custom class, cannot be rebuilt from its name."""
+    from qiskit.circuit import Gate
     from qiskit.transpiler import Target
 
+    class Mystery(Gate):
+        def __init__(self) -> None:
+            super().__init__("mystery", 1, [])
+
     target = Target(num_qubits=1)
-    target.add_instruction(Gate("mystery", 1, [Parameter("t")]), {(0,): None})
+    op = Gate("mystery", 1, [0.5]) if kind == "bound_parameter" else Mystery()
+    target.add_instruction(op, {(0,): None})
 
     class Device:
         name = "toy"

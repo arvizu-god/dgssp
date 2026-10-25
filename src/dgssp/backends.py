@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, TypeAlias
 
 from qiskit import QuantumCircuit
-from qiskit.circuit import Instruction
+from qiskit.circuit import Gate, Instruction, Parameter
 from qiskit.circuit.controlflow import (
     BreakLoopOp,
     ContinueLoopOp,
@@ -1116,20 +1116,21 @@ def calibration_payload(backend: BackendLike) -> dict[str, Any]:
     known = get_standard_gate_name_mapping()
     instructions: dict[str, list[dict[str, Any]]] = {}
     control_flow: list[str] = []
-    opaque: dict[str, dict[str, int]] = {}
+    opaque: dict[str, dict[str, Any]] = {}
     for name in target.operation_names:
         if name in _CONTROL_FLOW_OPS:
             control_flow.append(name)
             continue
         if name not in known:
             op = target.operation_from_name(name)
-            if not _is_opaque(op):
+            signature = _opaque_signature(op)
+            if signature is None:
                 raise ValueError(
                     f"Instruction {name!r} of backend {backend_name(backend)!r} has no "
                     "standard definition in this Qiskit release, so a snapshot could "
                     "not rebuild it. Keep the live backend for this device."
                 )
-            opaque[name] = {"num_qubits": op.num_qubits, "num_clbits": op.num_clbits}
+            opaque[name] = signature
         instructions[name] = [
             {
                 "qubits": list(qargs) if qargs is not None else None,
@@ -1155,23 +1156,50 @@ def calibration_payload(backend: BackendLike) -> dict[str, Any]:
     }
 
 
-def _is_opaque(op: Any) -> bool:
-    """
-    Whether ``op`` is a bare named instruction: no definition, no parameters.
+#: The two bare classes ``qiskit_ibm_runtime``'s backend converter uses for
+#: device-specific operations: ``Instruction`` for ``instruction_signatures``
+#: (``measure_2``, ``reset_2``) and ``Gate`` for gate configs (``xslow``).
+_OPAQUE_KINDS: dict[str, type[Instruction]] = {"instruction": Instruction, "gate": Gate}
 
-    IBM targets advertise device-specific instructions this way, e.g. the
-    mid-circuit ``measure_2`` / ``reset_2`` (``qiskit_ibm_runtime``'s backend
-    converter builds them as plain ``Instruction(name, n_qubits, n_clbits,
-    [])``).  Name and arity are all there is to them, so a snapshot can rebuild
-    them exactly.  Anything with a definition or parameters is not opaque: its
-    meaning is not captured by its name, and rebuilding it could change
-    transpilation.
+
+def _opaque_signature(op: Any) -> dict[str, Any] | None:
     """
-    return (
-        type(op) is Instruction
-        and not op.params
-        and op.definition is None
-    )
+    How to rebuild a bare device-specific operation, or ``None`` if it is not one.
+
+    IBM targets advertise device-specific operations -- the mid-circuit
+    ``measure_2`` / ``reset_2``, the post-selection pulse ``xslow`` -- as a
+    plain ``Instruction`` or ``Gate`` carrying a name, an arity and, at most,
+    free parameters, with no definition.  That is all the live target knows of
+    them too, so a snapshot that records exactly those fields rebuilds the same
+    target (the transpiler never uses such an operation: it has no equivalence
+    to translate into).  A subclass, a definition or a bound parameter means
+    the operation has meaning beyond its name, and it is refused.
+
+    Returns
+    -------
+    dict | None
+        ``{"kind", "num_qubits", "num_clbits", "params"}`` (parameter names),
+        or ``None``.
+    """
+    kind = next((k for k, cls in _OPAQUE_KINDS.items() if type(op) is cls), None)
+    if kind is None or op.definition is not None:
+        return None
+    if not all(isinstance(p, Parameter) for p in op.params):
+        return None
+    return {
+        "kind": kind,
+        "num_qubits": op.num_qubits,
+        "num_clbits": op.num_clbits,
+        "params": [p.name for p in op.params],
+    }
+
+
+def _rebuild_opaque(name: str, signature: Mapping[str, Any]) -> Instruction:
+    """The operation :func:`_opaque_signature` described."""
+    params = [Parameter(p) for p in signature.get("params") or []]
+    if signature.get("kind", "instruction") == "gate":
+        return Gate(name, signature["num_qubits"], params)
+    return Instruction(name, signature["num_qubits"], signature["num_clbits"], params)
 
 
 def backend_from_calibration(
@@ -1223,8 +1251,7 @@ def backend_from_calibration(
                     duration=row["duration"], error=row["error"]
                 )
         operation = (
-            Instruction(inst_name, opaque[inst_name]["num_qubits"],
-                        opaque[inst_name]["num_clbits"], [])
+            _rebuild_opaque(inst_name, opaque[inst_name])
             if inst_name in opaque
             else known[inst_name]
         )
