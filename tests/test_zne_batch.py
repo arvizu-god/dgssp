@@ -261,3 +261,28 @@ def test_iteration_sweep_on_the_ideal_simulator_is_one_job(monkeypatch):
         sigma = proportion_sigma(analytic, shots)
         assert abs(row["p_sol"] - analytic) <= 4 * sigma, row
         assert row["p_sol_ci"][0] <= row["p_sol"] <= row["p_sol_ci"][1]
+
+
+def test_plan_then_map_counts_equals_run_zne_batch(device_pair, small_items):
+    """Splitting fold-and-plan from sampling changes nothing a batch produces."""
+    from dgssp.mitigation.zne import plan_zne_batch, zne_runs_from_counts
+    from dgssp.runtime import sample_counts
+
+    _, noisy = device_pair
+    items = [
+        ZNEItem(name=r["name"], circuit=tqc, scales=[1, 3, 5],
+                solution_bitstrings=r["solution_bitstrings"])
+        for r, tqc in small_items
+    ]
+    cfg = ZNESamplingConfig(shots_per_scale=512, seed_simulator=17, fold_seed=0)
+    batch = run_zne_batch(items, noisy, cfg)
+
+    circuits, plans = plan_zne_batch(items, noisy, cfg)
+    counts = sample_counts(noisy, circuits, shots=512, seed_simulator=17, run_log=None)
+    runs = zne_runs_from_counts(plans, counts, fold_seed=0)
+
+    assert len(circuits) == batch.n_circuits
+    for direct, split in zip(batch.items, runs, strict=True):
+        assert direct.realised_scales_exact == split.realised_scales_exact
+        assert direct.counts_per_scale == split.counts_per_scale
+        assert direct.pub_indices == split.pub_indices

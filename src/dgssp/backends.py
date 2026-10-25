@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, TypeAlias
 
 from qiskit import QuantumCircuit
+from qiskit.circuit import Instruction
 from qiskit.circuit.controlflow import (
     BreakLoopOp,
     ContinueLoopOp,
@@ -1115,16 +1116,20 @@ def calibration_payload(backend: BackendLike) -> dict[str, Any]:
     known = get_standard_gate_name_mapping()
     instructions: dict[str, list[dict[str, Any]]] = {}
     control_flow: list[str] = []
+    opaque: dict[str, dict[str, int]] = {}
     for name in target.operation_names:
         if name in _CONTROL_FLOW_OPS:
             control_flow.append(name)
             continue
         if name not in known:
-            raise ValueError(
-                f"Instruction {name!r} of backend {backend_name(backend)!r} has no "
-                "standard definition in this Qiskit release, so a snapshot could "
-                "not rebuild it. Keep the live backend for this device."
-            )
+            op = target.operation_from_name(name)
+            if not _is_opaque(op):
+                raise ValueError(
+                    f"Instruction {name!r} of backend {backend_name(backend)!r} has no "
+                    "standard definition in this Qiskit release, so a snapshot could "
+                    "not rebuild it. Keep the live backend for this device."
+                )
+            opaque[name] = {"num_qubits": op.num_qubits, "num_clbits": op.num_clbits}
         instructions[name] = [
             {
                 "qubits": list(qargs) if qargs is not None else None,
@@ -1145,8 +1150,28 @@ def calibration_payload(backend: BackendLike) -> dict[str, Any]:
         "granularity": target.granularity,
         "instructions": instructions,
         "control_flow": control_flow,
+        "opaque_instructions": opaque,
         "qubit_properties": qubit_properties,
     }
+
+
+def _is_opaque(op: Any) -> bool:
+    """
+    Whether ``op`` is a bare named instruction: no definition, no parameters.
+
+    IBM targets advertise device-specific instructions this way, e.g. the
+    mid-circuit ``measure_2`` / ``reset_2`` (``qiskit_ibm_runtime``'s backend
+    converter builds them as plain ``Instruction(name, n_qubits, n_clbits,
+    [])``).  Name and arity are all there is to them, so a snapshot can rebuild
+    them exactly.  Anything with a definition or parameters is not opaque: its
+    meaning is not captured by its name, and rebuilding it could change
+    transpilation.
+    """
+    return (
+        type(op) is Instruction
+        and not op.params
+        and op.definition is None
+    )
 
 
 def backend_from_calibration(
@@ -1186,6 +1211,7 @@ def backend_from_calibration(
         granularity=payload.get("granularity", 1),
         qubit_properties=qubit_properties or None,
     )
+    opaque = payload.get("opaque_instructions") or {}
     for inst_name, rows in payload["instructions"].items():
         mapped: dict[Any, InstructionProperties | None] = {}
         for row in rows:
@@ -1196,7 +1222,13 @@ def backend_from_calibration(
                 mapped[qargs] = InstructionProperties(
                     duration=row["duration"], error=row["error"]
                 )
-        target.add_instruction(known[inst_name], mapped, name=inst_name)
+        operation = (
+            Instruction(inst_name, opaque[inst_name]["num_qubits"],
+                        opaque[inst_name]["num_clbits"], [])
+            if inst_name in opaque
+            else known[inst_name]
+        )
+        target.add_instruction(operation, mapped, name=inst_name)
     for inst_name in payload.get("control_flow") or []:
         target.add_instruction(_CONTROL_FLOW_OPS[inst_name], name=inst_name)
 
@@ -1283,6 +1315,7 @@ def save_noise_model(
     backend: BackendLike,
     *,
     overwrite: bool = False,
+    raw_properties: Mapping[str, Any] | None = None,
 ) -> Path:
     """
     Freeze a live device's noise to a JSON file that reloads without the service.
@@ -1311,6 +1344,11 @@ def save_noise_model(
     overwrite:
         Replace an existing file.  Off by default: a calibration snapshot is
         evidence for a hardware run -- deleted deliberately, never clobbered.
+    raw_properties:
+        The device's own ``properties().to_dict()``, archived verbatim under
+        ``"raw_properties"`` (JSON types only).  Not read back: the target is
+        what rebuilds the noise model.  It keeps what the target drops, such as
+        asymmetric readout errors (``prob_meas0_prep1``).
 
     Returns
     -------
@@ -1351,6 +1389,8 @@ def save_noise_model(
         "noise_model_summary": summary,
         "calibration": calibration_payload(backend),
     }
+    if raw_properties is not None:
+        payload["raw_properties"] = dict(raw_properties)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

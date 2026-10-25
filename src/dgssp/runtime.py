@@ -24,11 +24,12 @@ The legacy ``ibm_quantum`` channel has been retired by IBM; this module uses
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import pathlib
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any, Literal
 
@@ -401,6 +402,99 @@ class CountsList(list):  # type: ignore[type-arg]
     job_id: str | None = None
 
 
+def _sampler_options(
+    options: Mapping[str, Any] | None, seed_simulator: int | None
+) -> dict[str, Any] | None:
+    """``options`` as a fresh dict, with the simulator seed merged in."""
+    merged: dict[str, Any] = copy.deepcopy(dict(options)) if options else {}
+    if seed_simulator is not None:
+        simulator = dict(merged.get("simulator") or {})
+        simulator["seed_simulator"] = int(seed_simulator)
+        merged["simulator"] = simulator
+    return merged or None
+
+
+def submit_sampler_job(
+    mode_or_backend: Any,
+    circuits: QuantumCircuit | Sequence[QuantumCircuit],
+    *,
+    shots: int = 10_000,
+    options: Mapping[str, Any] | None = None,
+    seed_simulator: int | None = None,
+    run_log: str | None = DEFAULT_RUN_LOG,
+    meta: dict[str, Any] | None = None,
+) -> Any:
+    """
+    Submit one or many circuits as ONE ``SamplerV2`` job, and return the job.
+
+    This is the only place the library constructs a ``SamplerV2``.
+    :func:`sample_counts` is this plus waiting for the result; a hardware
+    submission that must not block (``paper/scripts/hardware_batch.py
+    --submit``) calls this directly and exits, and the counts are read back
+    later with :func:`fetch_result` and :func:`counts_from_result`.  A
+    simulator dry run goes through :func:`sample_counts`, so both build the
+    same PUBs from the same options.
+
+    Parameters
+    ----------
+    mode_or_backend:
+        A backend, ``Session`` or ``Batch`` (see :func:`execution_mode`).
+    circuits:
+        A single already-transpiled circuit, or a sequence of them.  Each
+        becomes its own pub.
+    shots:
+        Shots per circuit.
+    options:
+        ``SamplerOptions`` fields as a nested dict (``{"twirling": {...},
+        "dynamical_decoupling": {...}}``).  A dict rather than an options
+        object so the exact value can be written to a manifest.  Options the
+        local simulator path does not implement are ignored there with a
+        ``UserWarning`` from ``qiskit-ibm-runtime``.
+    seed_simulator:
+        Seed forwarded to simulator backends; merged into ``options``.
+    run_log:
+        Path of the JSON-lines job ledger, or ``None`` to skip logging.
+    meta:
+        Extra fields to record in the ledger entry.
+
+    Returns
+    -------
+    RuntimeJobV2
+        The submitted job (a local job object on simulators).
+    """
+    from qiskit_ibm_runtime import SamplerV2
+
+    sampler = SamplerV2(mode=mode_or_backend, options=_sampler_options(options, seed_simulator))
+
+    pubs = list(circuits) if isinstance(circuits, (list, tuple)) else [circuits]
+    job = sampler.run(pubs, shots=shots)
+
+    log_job(job, {"n_pubs": len(pubs), "shots": shots, **(meta or {})}, run_log=run_log)
+    return job
+
+
+def counts_from_result(result: Any) -> CountsList:
+    """
+    One counts dictionary per pub of a ``SamplerV2`` result, in pub order.
+
+    The single decoder for sampler results, shared by :func:`sample_counts`
+    and by results fetched back later with :func:`fetch_result`.  Bitstrings
+    are Qiskit's (index-register bit 0 rightmost); translating them to subsets
+    is :mod:`dgssp.decoding`'s job.
+
+    Parameters
+    ----------
+    result:
+        A ``PrimitiveResult`` of sampler pub results.
+
+    Returns
+    -------
+    CountsList
+        Counts per pub; ``job_id`` is left ``None`` for the caller to set.
+    """
+    return CountsList(pub.join_data().get_counts() for pub in result)
+
+
 def sample_counts(
     mode_or_backend: Any,
     circuits: QuantumCircuit | Sequence[QuantumCircuit],
@@ -409,6 +503,7 @@ def sample_counts(
     seed_simulator: int | None = None,
     run_log: str | None = DEFAULT_RUN_LOG,
     meta: dict[str, Any] | None = None,
+    options: Mapping[str, Any] | None = None,
 ) -> list[dict[str, int]]:
     """
     Run one or many circuits through ``SamplerV2`` and return counts.
@@ -434,6 +529,8 @@ def sample_counts(
         Path of the JSON-lines job ledger, or ``None`` to skip logging.
     meta:
         Extra fields to record in the ledger entry (e.g. instance names).
+    options:
+        ``SamplerOptions`` as a nested dict (see :func:`submit_sampler_job`).
 
     Returns
     -------
@@ -441,31 +538,211 @@ def sample_counts(
         One counts dictionary per input circuit, in input order.  It is a
         ``list``; its ``job_id`` attribute carries the job id.
     """
-    from qiskit_ibm_runtime import SamplerV2
-
-    opts = (
-        {"simulator": {"seed_simulator": int(seed_simulator)}}
-        if seed_simulator is not None
-        else None
+    job = submit_sampler_job(
+        mode_or_backend,
+        circuits,
+        shots=shots,
+        options=options,
+        seed_simulator=seed_simulator,
+        run_log=run_log,
+        meta=meta,
     )
-    sampler = SamplerV2(mode=mode_or_backend, options=opts)
-
-    pubs = list(circuits) if isinstance(circuits, (list, tuple)) else [circuits]
-    job = sampler.run(pubs, shots=shots)
-
-    job_id = log_job(
-        job, {"n_pubs": len(pubs), "shots": shots, **(meta or {})}, run_log=run_log
-    )
-
-    result = job.result()
-    out = CountsList(pub.join_data().get_counts() for pub in result)
-    out.job_id = job_id
+    out = counts_from_result(job.result())
+    out.job_id = _job_id(job)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight
+# ---------------------------------------------------------------------------
+
+#: Directives the device never executes, so the target does not list them.
+_DIRECTIVES = frozenset({"barrier"})
+
+
+def _unsupported_instructions(circuit: QuantumCircuit, target: Any) -> list[str]:
+    """Every ``(name, physical qubits)`` of ``circuit`` the target lacks."""
+    index = {qubit: i for i, qubit in enumerate(circuit.qubits)}
+    missing: list[str] = []
+    for instruction in circuit.data:
+        name = instruction.operation.name
+        if name in _DIRECTIVES:
+            continue
+        qargs = tuple(index[q] for q in instruction.qubits)
+        if not target.instruction_supported(name, qargs):
+            missing.append(f"{name}{list(qargs)}")
+    return missing
+
+
+def preflight_sampler_job(
+    backend: Any,
+    circuits: Sequence[QuantumCircuit],
+    *,
+    shots: int,
+    options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Run every check ``SamplerV2.run`` would run, without submitting anything.
+
+    The pinned ``qiskit-ibm-runtime`` (0.49.0) exposes no server-side dry run,
+    so this replays the client-side validation of ``BasePrimitiveV2._run``:
+    options parsing, classical-register, dynamic-circuit-with-DD and ``rzz``
+    checks, the ISA check against ``backend.target`` and, on an
+    ``IBMBackend``, the faulty-qubit check.  An independent check asserts that
+    every instruction of every circuit, on its physical qubits, is in the
+    target.  Server-side checks (plan entitlements, twirling support) are
+    *not* covered: nothing short of a submission exercises them.
+
+    Parameters
+    ----------
+    backend:
+        The device the job is for.
+    circuits:
+        The circuits, in submission order.
+    shots:
+        Shots per circuit.
+    options:
+        ``SamplerOptions`` as a nested dict.
+
+    Returns
+    -------
+    dict
+        ``{"passed", "checks", "program_inputs", "n_pubs", "shots"}``.
+        ``checks`` maps each check name to ``"ok"`` or its error message;
+        ``program_inputs`` is what the client would send as primitive options.
+    """
+    from dataclasses import asdict
+
+    from qiskit.primitives.containers.sampler_pub import SamplerPub
+    from qiskit_ibm_runtime.options import SamplerOptions
+    from qiskit_ibm_runtime.options.utils import merge_options_v2
+    from qiskit_ibm_runtime.utils import (
+        validate_classical_registers,
+        validate_isa_circuits,
+        validate_no_dd_with_dynamic_circuits,
+        validate_rzz_pubs,
+    )
+
+    checks: dict[str, str] = {}
+    program_inputs: Any = None
+
+    def _check(name: str, fn: Any) -> Any:
+        try:
+            value = fn()
+        except Exception as exc:
+            checks[name] = f"{type(exc).__name__}: {exc}"
+            return None
+        checks[name] = "ok"
+        return value
+
+    opts = _check(
+        "options",
+        lambda: SamplerOptions(
+            **merge_options_v2(SamplerOptions(), _sampler_options(options, None) or {})
+        ),
+    )
+    if opts is not None:
+        # VERIFY: private classmethod; it is what BasePrimitiveV2._run calls
+        # to build the primitive inputs in 0.49.0.
+        program_inputs = _check(
+            "program_inputs",
+            lambda: SamplerOptions._get_program_inputs(asdict(opts)),
+        )
+
+    pubs = _check("coerce_pubs", lambda: [SamplerPub.coerce(c, shots) for c in circuits])
+    if pubs is not None:
+        _check("classical_registers", lambda: validate_classical_registers(pubs))
+        _check("rzz_angles", lambda: validate_rzz_pubs(pubs))
+        if opts is not None:
+            _check(
+                "dd_with_dynamic_circuits",
+                lambda: validate_no_dd_with_dynamic_circuits(
+                    [p.circuit for p in pubs], opts
+                ),
+            )
+
+    target = getattr(backend, "target", None)
+    if target is None:
+        checks["isa"] = "backend exposes no target"
+        checks["instructions_in_target"] = "backend exposes no target"
+    else:
+        _check("isa", lambda: validate_isa_circuits(list(circuits), target))
+        missing = {
+            i: bad for i, c in enumerate(circuits) if (bad := _unsupported_instructions(c, target))
+        }
+        checks["instructions_in_target"] = (
+            "ok"
+            if not missing
+            else "; ".join(f"pub {i}: {', '.join(bad[:5])}" for i, bad in missing.items())
+        )
+
+    check_faulty = getattr(backend, "check_faulty", None)
+    if callable(check_faulty):
+        _check("faulty_qubits", lambda: [check_faulty(c) for c in circuits])
+
+    return {
+        "passed": all(v == "ok" for v in checks.values()),
+        "checks": checks,
+        "program_inputs": program_inputs,
+        "n_pubs": len(circuits),
+        "shots": int(shots),
+    }
 
 
 # ---------------------------------------------------------------------------
 # Job bookkeeping
 # ---------------------------------------------------------------------------
+
+
+def _job_id(job: Any) -> str | None:
+    """A job's id, or ``None`` if it exposes none."""
+    try:
+        return job.job_id() if callable(getattr(job, "job_id", None)) else None
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+def job_usage(job: Any) -> dict[str, Any]:
+    """
+    Everything a runtime job reports about the QPU time it was charged.
+
+    In the pinned ``qiskit-ibm-runtime`` (0.49.0) ``job.usage()`` returns
+    ``metrics()["usage"]["qpu_charge_time_seconds"]`` once usage is final (``0``
+    while pending), ``job.metrics()`` returns the job's metadata (with
+    ``timestamps`` and ``usage``), and ``job.usage_estimation`` the
+    pre-execution estimate ``{"quantum_seconds": ...}``.  Each is probed
+    separately and an unavailable one is reported as ``{"error": ...}``.
+
+    Parameters
+    ----------
+    job:
+        A ``RuntimeJobV2`` (e.g. from ``service.job(job_id)``).
+
+    Returns
+    -------
+    dict
+        ``{"job_id", "status", "usage_seconds", "usage_estimation", "metrics"}``.
+
+    Notes
+    -----
+    What ``qpu_charge_time_seconds`` counts is set by the platform, not the
+    client: see https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time
+    """
+
+    def _probe(fn: Any) -> Any:
+        try:
+            return fn()
+        except Exception as exc:  # pragma: no cover - network / plan dependent
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
+    status = _probe(lambda: job.status())
+    return {
+        "job_id": _job_id(job),
+        "status": getattr(status, "name", status),
+        "usage_seconds": _probe(lambda: job.usage()),
+        "usage_estimation": _probe(lambda: job.usage_estimation),
+        "metrics": _probe(lambda: job.metrics()),
+    }
 
 
 def log_job(
@@ -489,10 +766,7 @@ def log_job(
     str | None
         The job id, or ``None`` if the object did not expose one.
     """
-    try:
-        job_id = job.job_id() if callable(getattr(job, "job_id", None)) else None
-    except Exception:  # pragma: no cover - defensive
-        job_id = None
+    job_id = _job_id(job)
 
     record = {"job_id": job_id, "ts": time.time(), **meta}
     logger.info("submitted job %s (%s)", job_id, meta)
@@ -560,7 +834,11 @@ __all__ = [
     "backend_name",
     "execution_mode",
     "CountsList",
+    "submit_sampler_job",
+    "counts_from_result",
     "sample_counts",
+    "preflight_sampler_job",
+    "job_usage",
     "log_job",
     "fetch_result",
     "read_job_log",

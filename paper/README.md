@@ -99,6 +99,7 @@ grow with every record a campaign writes. The git probe runs once per process.
 | `aggregate.py` | `data/sim_*.csv`, `data/sim_summary.json`, `tex/sim_table_<grid>.tex`, `notes/sim_results.md` | WP5: every table the text quotes |
 | `make_figures.py` | `figures/fig_sim_*.pdf` | WP5: the five simulation figures, from `data/` alone |
 | `qpu_budget.py` | stdout, optional `hardware/qpu_budget.json` | QPU minutes a job shape would cost, offline from the device's calibrated durations |
+| `hardware_batch.py` | `hardware/{manifest,circuits,calibration,jobs}_<date>.*`, `data/hw[_dryrun]_<date>/`, `hardware/usage.md` | WP6: the single hardware job: `--plan`, `--dry-run`, `--probe` / `--probe-report` (2-PUB timing job), `--submit` (checklist-gated), `--collect` |
 
 `resource_scaling.py` is the C1 measurement: it checks every closed form in
 `notes/resource_model.md` against the circuit the solver builds (144 asserts),

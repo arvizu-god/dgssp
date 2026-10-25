@@ -45,6 +45,7 @@ from .zne import (
     is_resolved,
     pathology_diagnostic,
     plan_scales,
+    plan_zne_batch,
     project_to_simplex,
     realised_scale,
     rebase_to_backend,
@@ -56,6 +57,7 @@ from .zne import (
     zne_bootstrap,
     zne_fit_single_value,
     zne_mitigated_distribution,
+    zne_runs_from_counts,
 )
 
 __all__ = [
@@ -85,6 +87,8 @@ __all__ = [
     "ZNEItemRun",
     "ZNEBatchRun",
     "run_zne_batch",
+    "plan_zne_batch",
+    "zne_runs_from_counts",
     "analyse_zne_item",
     "zne_mitigated_distribution",
     "dgssp_zne_mitigated_distribution",

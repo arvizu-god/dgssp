@@ -107,3 +107,60 @@ def test_importing_dgssp_has_no_side_effects():
         importlib.import_module("dgssp")
         save.assert_not_called()
         init.assert_not_called()
+
+
+def test_submit_then_decode_equals_sample_counts(circuits):
+    """The non-blocking path and the blocking one give the same counts."""
+    from dgssp.runtime import counts_from_result, submit_sampler_job
+
+    backend, built = circuits
+    job = submit_sampler_job(backend, built, shots=256, seed_simulator=11, run_log=None)
+    split = counts_from_result(job.result())
+    joined = sample_counts(backend, built, shots=256, seed_simulator=11, run_log=None)
+    assert list(split) == list(joined)
+
+
+def test_options_dict_reaches_the_sampler_and_keeps_the_seed(circuits):
+    """Server-side options are accepted locally (with a warning) and the seed survives."""
+    backend, built = circuits
+    options = {
+        "twirling": {"enable_gates": True, "num_randomizations": 4,
+                     "shots_per_randomization": 64},
+        "dynamical_decoupling": {"enable": True, "sequence_type": "XX"},
+    }
+    with pytest.warns(UserWarning, match="no effect in local testing mode"):
+        with_options = sample_counts(
+            backend, built, shots=256, seed_simulator=5, run_log=None, options=options
+        )
+    plain = sample_counts(backend, built, shots=256, seed_simulator=5, run_log=None)
+    assert list(with_options) == list(plain)
+    assert "simulator" not in options  # the caller's dict is not mutated
+
+
+def test_preflight_accepts_isa_and_rejects_logical_circuits():
+    """The ISA and instruction-in-target checks catch an untranspiled circuit."""
+    pytest.importorskip("qiskit_ibm_runtime")
+    from qiskit_ibm_runtime.fake_provider import FakeManilaV2
+
+    from dgssp.runtime import preflight_sampler_job
+
+    device = FakeManilaV2()
+    logical = DGSSPSolver(DGConfig(iterations=1)).build_circuit(
+        SubsetSumInstance(items=[1, 1], target=1)
+    )
+    isa = generate_preset_pass_manager(
+        backend=device, optimization_level=1, seed_transpiler=0
+    ).run(logical)
+
+    good = preflight_sampler_job(device, [isa], shots=128, options={"twirling": {"enable_gates": True}})
+    assert good["passed"], good["checks"]
+    assert good["program_inputs"] is not None
+
+    bad = preflight_sampler_job(device, [logical], shots=128)
+    assert not bad["passed"]
+    assert bad["checks"]["isa"] != "ok"
+    assert bad["checks"]["instructions_in_target"] != "ok"
+
+    wrong = preflight_sampler_job(device, [isa], shots=128,
+                                  options={"twirling": {"num_randomizations": 0}})
+    assert wrong["checks"]["options"] != "ok"

@@ -149,3 +149,47 @@ def test_rebuild_names_the_source_device(device):
     assert rebuilt.name == "twin"
     assert rebuilt.source_name == device.name
     assert rebuilt.num_qubits == device.num_qubits
+
+
+def test_opaque_device_instructions_survive_a_snapshot():
+    """
+    Current IBM targets (ibm_fez, fake_boston) advertise ``measure_2`` /
+    ``reset_2`` as bare named instructions.  The snapshot keeps them by name and
+    arity, so the rebuilt target and its noise model match the device's.
+    """
+    pytest.importorskip("qiskit_ibm_runtime")
+    try:
+        from qiskit_ibm_runtime.fake_provider import FakeBoston
+    except Exception:  # pragma: no cover - provider data varies by release
+        pytest.skip("FakeBoston unavailable")
+    from qiskit_aer.noise import NoiseModel
+
+    device = FakeBoston()
+    payload = json.loads(json.dumps(calibration_payload(device)))
+    assert payload["opaque_instructions"]["reset_2"] == {"num_qubits": 1, "num_clbits": 0}
+    assert payload["opaque_instructions"]["measure_2"] == {"num_qubits": 1, "num_clbits": 1}
+
+    rebuilt = backend_from_calibration(payload, name="fake_boston")
+    assert sorted(rebuilt.target.operation_names) == sorted(device.target.operation_names)
+    assert json.loads(json.dumps(calibration_payload(rebuilt))) == payload
+    assert sorted(NoiseModel.from_backend(rebuilt).noise_instructions) == sorted(
+        NoiseModel.from_backend(device).noise_instructions
+    )
+
+
+def test_an_instruction_with_meaning_beyond_its_name_is_still_refused(device):
+    """A non-standard gate with parameters cannot be rebuilt from its name."""
+    from qiskit.circuit import Gate, Parameter
+    from qiskit.transpiler import Target
+
+    target = Target(num_qubits=1)
+    target.add_instruction(Gate("mystery", 1, [Parameter("t")]), {(0,): None})
+
+    class Device:
+        name = "toy"
+
+        def __init__(self) -> None:
+            self.target = target
+
+    with pytest.raises(ValueError, match="no standard definition"):
+        calibration_payload(Device())

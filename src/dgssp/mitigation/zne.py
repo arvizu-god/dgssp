@@ -2205,6 +2205,66 @@ def run_zne_batch(
     if not items:
         raise ValueError("run_zne_batch needs at least one item.")
 
+    circuits, plans = plan_zne_batch(items, backend, cfg, include_mitiq=include_mitiq)
+
+    seed = cfg.seed_simulator if is_simulator(backend) else None
+    with execution_mode(backend, mode=mode) as exec_mode:  # type: ignore[arg-type]
+        counts_list = sample_counts(
+            exec_mode,
+            circuits,
+            shots=cfg.shots_per_scale,
+            seed_simulator=seed,
+            meta={
+                "stage": "zne_batch",
+                "items": [p["item"].name for p in plans],
+                "include_mitiq": include_mitiq,
+            },
+        )
+
+    return ZNEBatchRun(
+        items=zne_runs_from_counts(plans, counts_list, fold_seed=cfg.fold_seed),
+        job_id=getattr(counts_list, "job_id", None),
+        backend_name=backend_name(backend),
+        n_circuits=len(circuits),
+        shots=cfg.shots_per_scale,
+    )
+
+
+def plan_zne_batch(
+    items: Sequence[ZNEItem],
+    backend: BackendLike,
+    cfg: ZNESamplingConfig,
+    *,
+    include_mitiq: bool = False,
+) -> tuple[list[QuantumCircuit], list[dict[str, Any]]]:
+    """
+    Every circuit :func:`run_zne_batch` would submit, without submitting it.
+
+    The folding half of :func:`run_zne_batch`, split out so a hardware job can
+    be built, frozen to disk and validated long before it is sampled.
+
+    Parameters
+    ----------
+    items, backend, cfg, include_mitiq:
+        As for :func:`run_zne_batch`.
+
+    Returns
+    -------
+    tuple[list[QuantumCircuit], list[dict]]
+        The rebased circuits in submission order, and one plan per item:
+        ``{"item", "nominal", "folds" (FoldResult per scale), "dgssp_idx",
+        "mitiq_idx", "mitiq_scales", "mitiq_realised", "one_q_realised"}``,
+        which :func:`zne_runs_from_counts` maps counts back through.
+
+    Raises
+    ------
+    ValueError
+        If there are no items, an item's scales are invalid, or two of its
+        nominal scales realise to the same scale.
+    """
+    if not items:
+        raise ValueError("plan_zne_batch needs at least one item.")
+
     virtual = _virtual_gates(backend)
     if include_mitiq:
         from .mitiq_baseline import mitiq_fold_isa
@@ -2261,20 +2321,32 @@ def run_zne_batch(
                 circuits.append(mitiq_circuit)
         plans.append(plan)
 
-    seed = cfg.seed_simulator if is_simulator(backend) else None
-    with execution_mode(backend, mode=mode) as exec_mode:  # type: ignore[arg-type]
-        counts_list = sample_counts(
-            exec_mode,
-            circuits,
-            shots=cfg.shots_per_scale,
-            seed_simulator=seed,
-            meta={
-                "stage": "zne_batch",
-                "items": [p["item"].name for p in plans],
-                "include_mitiq": include_mitiq,
-            },
-        )
+    return circuits, plans
 
+
+def zne_runs_from_counts(
+    plans: Sequence[Mapping[str, Any]],
+    counts_list: Sequence[dict[str, int]],
+    *,
+    fold_seed: int,
+) -> list[ZNEItemRun]:
+    """
+    Map one job's counts back onto the items of :func:`plan_zne_batch`.
+
+    Parameters
+    ----------
+    plans:
+        The plans :func:`plan_zne_batch` returned.
+    counts_list:
+        Counts per submitted circuit, in submission order.
+    fold_seed:
+        The folding seed, recorded on every run.
+
+    Returns
+    -------
+    list[ZNEItemRun]
+        One per plan, in order.
+    """
     runs: list[ZNEItemRun] = []
     for plan in plans:
         folds = plan["folds"]
@@ -2298,21 +2370,14 @@ def run_zne_batch(
                 mitiq_scales=plan["mitiq_scales"],
                 mitiq_realised_scales=plan["mitiq_realised"],
                 mitiq_counts_per_scale=mitiq_counts,
-                fold_seed=cfg.fold_seed,
+                fold_seed=fold_seed,
                 pub_indices={
                     "dgssp": list(plan["dgssp_idx"]),
                     "mitiq": [i for i in plan["mitiq_idx"] if i is not None],
                 },
             )
         )
-
-    return ZNEBatchRun(
-        items=runs,
-        job_id=getattr(counts_list, "job_id", None),
-        backend_name=backend_name(backend),
-        n_circuits=len(circuits),
-        shots=cfg.shots_per_scale,
-    )
+    return runs
 
 
 def _physical_one_q(circuit: QuantumCircuit, virtual: Sequence[str]) -> int:
@@ -2720,6 +2785,8 @@ __all__ = [
     "ZNEItemRun",
     "ZNEBatchRun",
     "run_zne_batch",
+    "plan_zne_batch",
+    "zne_runs_from_counts",
     "analyse_zne_item",
     "depolarised_probability",
     "synthetic_depolarising_counts",

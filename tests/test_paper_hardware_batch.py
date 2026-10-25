@@ -1,0 +1,447 @@
+"""
+Tests for ``paper/scripts/hardware_batch.py`` (WP6).
+
+The hardware job runs once, so what can be pinned offline is pinned here: the
+plan builds the circuits the manifest describes, the dry run and the collect
+step produce identical records from the same counts, collect is idempotent, a
+changed circuit file is caught, and ``--submit`` refuses everything it should
+refuse without touching the network.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = REPO_ROOT / "paper" / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+pytest.importorskip("scipy")
+pytest.importorskip("qiskit_ibm_runtime")
+hb = pytest.importorskip("hardware_batch")
+
+#: Two n = 2 instances (one informative, one M = N/2) and the n = 3 sweep
+#: instance, whose r = 1 and r = 3 variants join the job.
+ONLY = ["P-n2-M1-11", "P-n2-M2-03", "P-n3-M1-17"]
+DATE = "2099-03-03"
+SHOTS = 256
+
+
+@pytest.fixture(scope="module")
+def rehearsal(tmp_path_factory):
+    """One offline plan + dry run + collect, shared by the tests below."""
+    root = tmp_path_factory.mktemp("wp6")
+    common = ["--hardware-dir", str(root / "hw"), "--data-dir", str(root / "data")]
+    plan = hb.main(["--plan", "--offline-backend", "fake_marrakesh", "--only", *ONLY,
+                    "--seed-max", "2", "--shots", str(SHOTS), "--date", DATE, *common])
+    dry = hb.main(["--dry-run", "--date", DATE, *common])
+    paths = hb.Paths(DATE, root / "hw", root / "data")
+    collect = hb.main(["--collect", "--jobs", str(paths.jobs_dryrun), *common])
+    manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+    return {"root": root, "common": common, "paths": paths, "manifest": manifest,
+            "status": (plan, dry, collect)}
+
+
+def test_plan_dry_run_and_collect_succeed(rehearsal):
+    """All three offline modes exit 0; collect reports the records identical."""
+    assert rehearsal["status"] == (0, 0, 0)
+
+
+def test_manifest_shape(rehearsal):
+    """3 instances + 2 sweep variants at 3 scales, plus 2 drift repeats, last."""
+    manifest = rehearsal["manifest"]
+    rows = manifest["circuits"]
+    assert manifest["totals"]["circuits"] == len(rows) == 3 * 3 + 2 * 3 + 2
+    assert manifest["totals"]["shots"] == SHOTS * len(rows)
+    assert [r["pub_index"] for r in rows] == list(range(len(rows)))
+    assert {r["role"] for r in rows[-2:]} == {"drift_repeat"}
+    assert all(r["shots"] == SHOTS for r in rows)
+    assert {r["nominal_scale"] for r in rows if r["role"] != "drift_repeat"} == {1.0, 3.0, 5.0}
+    assert manifest["backend"]["source"] == "fake"
+    # The job is capped server-side at the budget line (offline: half of 600 s).
+    assert manifest["sampler"]["options"]["max_execution_time"] == 300
+    # Error suppression is gate twirling only; DD is off unless asked for.
+    assert manifest["sampler"]["options"]["dynamical_decoupling"] == {"enable": False}
+    assert manifest["sampler"]["options"]["twirling"]["enable_gates"] is True
+    assert manifest["preflight"]["passed"]
+    assert manifest["backend"]["snapshot_matches_live_target"]
+
+
+def test_drift_instances_are_informative(rehearsal):
+    """M = N/2 sits at P_uniform with or without noise, so it is never a drift probe."""
+    drift = [r for r in rehearsal["manifest"]["records"] if r["kind"] == "drift"]
+    assert len(drift) == 2
+    assert "P-n2-M2-03" not in {r["instance"] for r in drift}
+
+
+def test_drift_repeat_is_the_same_circuit(rehearsal):
+    """The repeat PUB is a copy of the instance's scale-1 circuit."""
+    _, _, circuits = hb.load_manifest(rehearsal["paths"].manifest)
+    for row in rehearsal["manifest"]["records"]:
+        if row["kind"] == "drift":
+            assert circuits[row["pub_indices"][0]] == circuits[row["repeat_of_pub"]]
+
+
+def test_sweep_variants_keep_the_layout(rehearsal):
+    """Every r of the sweep instance starts on the same physical qubits."""
+    layouts = {
+        tuple(r["initial_layout"])
+        for r in rehearsal["manifest"]["records"]
+        if r["instance"] == "P-n3-M1-17"
+    }
+    iterations = {
+        r["iterations"] for r in rehearsal["manifest"]["records"]
+        if r["instance"] == "P-n3-M1-17"
+    }
+    assert len(layouts) == 1
+    assert iterations == {1, 2, 3}
+
+
+def test_estimate_follows_the_stated_formula(rehearsal):
+    """(shots x per-shot + circuits x overhead) x 2, with the defaults recorded."""
+    est = rehearsal["manifest"]["estimate"]
+    expected = (est["total_shots"] * est["per_shot_time_s"]
+                + est["n_circuits"] * est["per_circuit_overhead_s"]) * est["safety_factor"]
+    assert est["estimated_seconds"] == pytest.approx(expected)
+    assert est["safety_factor"] == 2.0
+    assert est["floor_seconds"] is not None and est["floor_seconds"] < est["estimated_seconds"]
+
+
+def test_dry_run_records(rehearsal):
+    """Records carry the prediction label, all scales, every model and the source."""
+    directory = rehearsal["paths"].dryrun_dir
+    record = json.loads((directory / "P-n2-M1-11.json").read_text(encoding="utf-8"))
+    assert record["executor"] == "noise_model_prediction"
+    assert set(record["counts"]) == {"1", "3", "5"}
+    assert sum(record["counts"]["1"].values()) == SHOTS
+    assert set(record["metrics"]["zne_fits"]) == set(hb.ZNE_METHODS)
+    assert set(record["pointwise"]) >= {"clip", "simplex"}
+    assert record["metrics"]["hardware"]["source"] == "dryrun"
+    assert record["metrics"]["hardware"]["ignored_options"]
+
+    drift = json.loads((directory / "P-n2-M1-11_drift.json").read_text(encoding="utf-8"))
+    assert set(drift["counts"]) == {"1"}
+    assert "z" in drift["metrics"]["hardware"]["drift"]
+
+
+def test_collect_is_idempotent(rehearsal):
+    """A second collect writes nothing and still passes the comparison."""
+    before = {p.name: p.read_bytes() for p in rehearsal["paths"].dryrun_collect_dir.glob("*.json")}
+    status = hb.main(["--collect", "--jobs", str(rehearsal["paths"].jobs_dryrun),
+                      *rehearsal["common"]])
+    after = {p.name: p.read_bytes() for p in rehearsal["paths"].dryrun_collect_dir.glob("*.json")}
+    assert status == 0
+    assert before == after
+
+
+def test_a_changed_circuit_file_is_caught(rehearsal, tmp_path):
+    """The manifest pins the QPY file by hash."""
+    paths = rehearsal["paths"]
+    original = paths.circuits.read_bytes()
+    try:
+        paths.circuits.write_bytes(original + b"\0")
+        with pytest.raises(SystemExit, match="changed since --plan"):
+            hb.load_manifest(paths.manifest)
+    finally:
+        paths.circuits.write_bytes(original)
+
+
+def test_submit_refuses_a_rehearsal_manifest(rehearsal, monkeypatch):
+    """A fake-device manifest is never submitted, and no service is built."""
+    monkeypatch.setattr(hb, "get_service", lambda **_: pytest.fail("service built"))
+    status = hb.main(["--submit", "--date", DATE, *rehearsal["common"]])
+    assert status == 1
+
+
+def test_plan_refuses_to_overwrite(rehearsal):
+    """A second plan for the same date needs --force."""
+    status = hb.main(["--plan", "--offline-backend", "fake_marrakesh", "--only", *ONLY,
+                      "--date", DATE, *rehearsal["common"]])
+    assert status == 1
+
+
+# ---------------------------------------------------------------------------
+# Units
+# ---------------------------------------------------------------------------
+
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _filled_checklist() -> str:
+    """The template with every blank filled and every box ticked."""
+    text = (REPO_ROOT / "paper" / "hardware" / "CHECKLIST_template.md").read_text(encoding="utf-8")
+    body = text.split("## Before `--submit`", 1)[1].split("## After", 1)[0]
+    lines = []
+    for line in body.splitlines():
+        if line.startswith("- [ ]"):
+            line = line.replace("- [ ]", "- [x]")
+            line = line.replace("<hash>", HEAD[:10]).replace("<date>", DATE)
+            line = line.replace("<instance 1>", "P-n2-M1-11").replace("<instance 2>", "P-n3-M2-17")
+            if line.startswith("- [x] Estimated QPU time"):
+                line = "- [x] Estimated QPU time <= 50% of remaining allowance: estimate 250 s, remaining 600 s"
+            line = line.replace("____", "1")
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_checklist_template_passes_when_filled(tmp_path):
+    """The shipped template, filled in, is accepted."""
+    path = tmp_path / "CHECKLIST.md"
+    path.write_text(_filled_checklist(), encoding="utf-8")
+    assert hb.check_checklist(path, head=HEAD, dirty=False, estimate_seconds=240.0) == []
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda t: t.replace("- [x] Token", "- [ ] Token", 1), "not ticked"),
+        (lambda t: t.replace("P-n3-M2-17", "<instance 2>", 1), "placeholder"),
+        (lambda t: t.replace(HEAD[:10], "deadbee", 1), "does not name HEAD"),
+        (lambda t: t.replace("estimate 250 s", "estimate 400 s", 1), "exceeds"),
+        (lambda t: t.replace("estimate 250 s", "estimate 100 s", 1), "below the manifest"),
+        (lambda t: "\n".join(x for x in t.splitlines() if "Job log" not in x), "check-boxes"),
+    ],
+)
+def test_checklist_problems_are_reported(tmp_path, edit, message):
+    """Each way of skipping a step is caught."""
+    path = tmp_path / "CHECKLIST.md"
+    path.write_text(edit(_filled_checklist()), encoding="utf-8")
+    problems = hb.check_checklist(path, head=HEAD, dirty=False, estimate_seconds=240.0)
+    assert any(message in p for p in problems), problems
+
+
+def test_checklist_requires_a_clean_tree_and_the_file(tmp_path):
+    """A dirty tree or a missing checklist refuses."""
+    path = tmp_path / "CHECKLIST.md"
+    assert hb.check_checklist(path, head=HEAD, dirty=False, estimate_seconds=1.0)
+    path.write_text(_filled_checklist(), encoding="utf-8")
+    problems = hb.check_checklist(path, head=HEAD, dirty=True, estimate_seconds=240.0)
+    assert any("dirty" in p for p in problems)
+
+
+def test_sampler_options_are_fixed_and_exact():
+    """Twirled shots multiply back to the requested shots; odd shots are refused."""
+    options = hb.sampler_options(4096, twirling=True, dd=True, date=DATE)
+    twirl = options["twirling"]
+    assert twirl["num_randomizations"] * twirl["shots_per_randomization"] == 4096
+    assert twirl["enable_measure"] is False
+    assert options["dynamical_decoupling"]["sequence_type"] == hb.DD_SEQUENCE
+    with pytest.raises(ValueError, match="multiple"):
+        hb.sampler_options(4100, twirling=True, dd=True, date=DATE)
+
+
+def test_drift_metrics():
+    """No change gives z = 0; a large change is significant."""
+    same = hb.drift_metrics({"1": 50, "0": 50}, {"1": 50, "0": 50}, ["1"])
+    assert same["z"] == 0 and same["tv_between"] == 0
+    moved = hb.drift_metrics({"1": 900, "0": 100}, {"1": 500, "0": 500}, ["1"])
+    assert moved["p_value"] < 1e-6 and moved["tv_between"] == pytest.approx(0.4)
+
+
+# ---------------------------------------------------------------------------
+# Probe
+# ---------------------------------------------------------------------------
+
+
+def _span(start_s: float, stop_s: float, shots_by_pub: dict[int, int]):
+    """A synthetic execution span over whole PUBs."""
+    from datetime import datetime, timedelta, timezone
+
+    from qiskit_ibm_runtime.execution_span import DoubleSliceSpan
+
+    t0 = datetime(2026, 10, 25, tzinfo=timezone.utc)
+    return DoubleSliceSpan(
+        t0 + timedelta(seconds=start_s),
+        t0 + timedelta(seconds=stop_s),
+        {i: ((n,), slice(0, 1), slice(0, n)) for i, n in shots_by_pub.items()},
+    )
+
+
+ESTIMATE = {"total_shots": 47 * 4096, "n_circuits": 47, "budget_cap_seconds": 300.0}
+PUBS = [{"duration_s": 10e-6}, {"duration_s": 460e-6}]
+
+
+def test_measure_probe_from_spans():
+    """per-shot = span time / shots; overhead = (usage - span time) / PUBs."""
+    spans = [_span(0, 1.0, {0: 4096}), _span(1.0, 4.0, {1: 4096})]
+    out = hb.measure_probe(PUBS, shots=4096, usage_seconds=8.0, spans=spans,
+                           rep_delay=250e-6, manifest_estimate=ESTIMATE)
+    assert out["per_shot_source"] == "execution spans"
+    assert out["per_shot_seconds"] == pytest.approx([1.0 / 4096, 3.0 / 4096])
+    assert out["fixed_seconds"] == pytest.approx(4.0)
+    rec = out["recommendation"]
+    assert rec["per_shot_time_s"] == pytest.approx(3.0 / 4096)
+    assert rec["overhead_s"] == pytest.approx(2.0)
+    expected = 47 * 4096 * 3.0 / 4096 + 47 * 2.0
+    assert out["main_job"]["expected_seconds"] == pytest.approx(expected)
+    assert out["main_job"]["estimated_seconds"] == pytest.approx(2 * expected)
+    assert out["main_job"]["within_budget"] is (2 * expected <= 300.0)
+
+
+def test_shared_span_is_split_by_shots_and_overlaps_count_once():
+    """One span over both PUBs is split by shot share; overlapping windows are not double-counted."""
+    spans = [_span(0, 2.0, {0: 1024, 1: 3072}), _span(1.5, 2.0, {1: 1024})]
+    per_pub = hb.span_seconds_per_pub(spans, 2)
+    assert per_pub == pytest.approx([0.5, 1.5 + 0.5])
+    assert hb.spans_union_seconds(spans) == pytest.approx(2.0)
+
+
+def test_measure_probe_without_spans_or_final_usage():
+    """No spans: the schedule model is used and flagged.  usage 0: no recommendation yet."""
+    out = hb.measure_probe(PUBS, shots=4096, usage_seconds=5.0, spans=None,
+                           rep_delay=250e-6, manifest_estimate=ESTIMATE)
+    assert out["per_shot_source"].startswith("schedule model")
+    assert out["recommendation"]["per_shot_time_s"] == pytest.approx(710e-6)
+    pending = hb.measure_probe(PUBS, shots=4096, usage_seconds=0, spans=None,
+                               rep_delay=250e-6, manifest_estimate=ESTIMATE)
+    assert pending["recommendation"] is None
+
+
+def test_probe_picks_the_shortest_and_longest_circuit(rehearsal):
+    """The longest circuit is the one the auto per-shot estimate charges every shot."""
+    rows = [r for r in rehearsal["manifest"]["circuits"] if r["role"] != "drift_repeat"]
+    short, long_ = hb.probe_pubs(rehearsal["manifest"])
+    assert short["duration_s"] == min(r["duration_s"] for r in rows)
+    assert long_["duration_s"] == max(r["duration_s"] for r in rows)
+    assert short["nominal_scale"] == 1.0
+
+
+@pytest.fixture
+def live_copy(rehearsal, tmp_path, monkeypatch):
+    """The rehearsal's files, relabelled live, with the service replaced by the fake device."""
+    import shutil
+
+    from qiskit_ibm_runtime.fake_provider import FakeMarrakesh
+
+    hw, data = tmp_path / "hw", tmp_path / "data"
+    shutil.copytree(rehearsal["paths"].hardware_dir, hw)
+    shutil.copytree(rehearsal["paths"].data_dir, data)
+    manifest_path = hw / f"manifest_{DATE}.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["backend"]["source"] = "live"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    device = FakeMarrakesh()
+    monkeypatch.setattr(hb, "connect", lambda *a, **k: (None, device, "live"))
+    monkeypatch.setattr(hb, "RUN_LOG", tmp_path / "runs" / "jobs.jsonl")
+    return ["--hardware-dir", str(hw), "--data-dir", str(data)], hw, tmp_path
+
+
+def test_probe_submits_two_pubs_and_reports(live_copy, monkeypatch):
+    """--probe sends 2 PUBs with the manifest's options and a 60 s cap; --probe-report measures."""
+    common, hw, tmp = live_copy
+    submitted = {}
+    real_submit = hb.submit_sampler_job
+
+    def spy(mode, circuits, **kwargs):
+        job = real_submit(mode, circuits, **kwargs)
+        submitted.update(job=job, n=len(circuits), options=kwargs["options"])
+        return job
+
+    monkeypatch.setattr(hb, "submit_sampler_job", spy)
+    with pytest.warns(UserWarning, match="no effect in local testing mode"):
+        assert hb.main(["--probe", "--date", DATE, *common]) == 0
+    assert submitted["n"] == 2
+    assert submitted["options"]["max_execution_time"] == hb.PROBE_CAP_SECONDS
+    assert submitted["options"]["twirling"]["enable_gates"] is True
+    assert (tmp / "runs" / "jobs.jsonl").exists()
+    assert hb.main(["--probe", "--date", DATE, *common]) == 1  # never twice
+
+    class Status:
+        name = "DONE"
+
+    class Job:
+        def __init__(self, job):
+            self._job = job
+
+        def job_id(self):
+            return self._job.job_id()
+
+        def status(self):
+            return Status()
+
+        def result(self):
+            return self._job.result()
+
+        def usage(self):
+            return 9.0
+
+        usage_estimation = {"quantum_seconds": 8.0}
+
+        def metrics(self):
+            return {"usage": {"quantum_seconds": 9.0}}
+
+    class Service:
+        def job(self, job_id):
+            return Job(submitted["job"])
+
+    monkeypatch.setenv(hb.TOKEN_ENV, "test-token")
+    monkeypatch.setattr(hb, "get_service", lambda **_: Service())
+    assert hb.main(["--probe-report", "--date", DATE, *common]) == 0
+    doc = json.loads((hw / f"probe_{DATE}.json").read_text(encoding="utf-8"))
+    assert doc["measured"]["options_accepted"] is True
+    assert doc["measured"]["recommendation"]["overhead_s"] >= 0
+    assert "probe" in (hw / "usage.md").read_text(encoding="utf-8")
+
+
+def test_submit_refuses_a_stale_dry_run(live_copy, monkeypatch, capsys):
+    """A dry run of an older manifest does not count."""
+    common, hw, _ = live_copy
+    jobs = hw / f"jobs_dryrun_{DATE}.json"
+    doc = json.loads(jobs.read_text(encoding="utf-8"))
+    doc["manifest_sha256"] = "0" * 64
+    jobs.write_text(json.dumps(doc), encoding="utf-8")
+    manifest_path = hw / f"manifest_{DATE}.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["estimate"]["within_budget"] = True
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(hb, "connect", lambda *a, **k: pytest.fail("service reached"))
+    assert hb.main(["--submit", "--date", DATE, *common]) == 1
+    assert "older plan" in capsys.readouterr().out
+
+
+def test_a_failed_plan_leaves_nothing_that_blocks_the_next(tmp_path, monkeypatch):
+    """A crash while freezing removes this run's files; an orphan without a manifest is replaced."""
+    common = ["--hardware-dir", str(tmp_path / "hw"), "--data-dir", str(tmp_path / "data")]
+    args = ["--plan", "--offline-backend", "fake_marrakesh", "--only", "P-n2-M1-11",
+            "--no-sweep", "--seed-max", "1", "--shots", str(SHOTS), "--date", DATE, *common]
+    paths = hb.Paths(DATE, tmp_path / "hw", tmp_path / "data")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("calibration fetch failed")
+
+    monkeypatch.setattr(hb, "save_noise_model", boom)
+    with pytest.raises(RuntimeError, match="calibration fetch failed"):
+        hb.main(args)
+    assert not paths.circuits.exists() and not paths.calibration.exists()
+    monkeypatch.undo()
+
+    paths.circuits.parent.mkdir(parents=True, exist_ok=True)
+    paths.circuits.write_bytes(b"left over")
+    assert hb.main(args) == 0
+    assert paths.manifest.exists()
+    assert hb.load_manifest(paths.manifest)[2]  # the orphan was replaced by real circuits
+
+
+def test_hardware_records_carry_an_offline_mitiq_block(rehearsal):
+    """Mitiq extrapolates the dgssp-folded counts; the block says so."""
+    from dgssp.mitigation import mitiq_is_available
+
+    if not mitiq_is_available():
+        pytest.skip("Mitiq not installed")
+    record = json.loads(
+        (rehearsal["paths"].dryrun_dir / "P-n2-M1-11.json").read_text(encoding="utf-8")
+    )
+    mitiq = record["mitiq"]
+    assert mitiq["fold_source"] == hb.MITIQ_FOLD_SOURCE
+    assert mitiq["scales"] == [1.0, 3.0, 5.0]  # the dgssp realised scales, not Mitiq's
+    assert mitiq["method"] == record["zne_fit"]["method"]
+    assert record["metrics"]["mitiq_solution_probability"] == mitiq["value"]
+    assert record["metrics"]["hardware"]["mitiq"] == hb.MITIQ_FOLD_SOURCE
+    # Same counts, so Mitiq's observed points are dgssp's observed points.
+    assert mitiq["values"] == pytest.approx(record["zne_fit"]["observed"])
