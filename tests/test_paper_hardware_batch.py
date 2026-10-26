@@ -262,43 +262,80 @@ def _span(start_s: float, stop_s: float, shots_by_pub: dict[int, int]):
     )
 
 
-ESTIMATE = {"total_shots": 47 * 4096, "n_circuits": 47, "budget_cap_seconds": 300.0}
-PUBS = [{"duration_s": 10e-6}, {"duration_s": 460e-6}]
+def _twirled_span(start_s: float, stop_s: float, pubs: list[int], shots: int = 4096):
+    """A TwirledSliceSpanV2 like the one ibm_fez returned: 32 x 128 per PUB."""
+    from datetime import datetime, timedelta, timezone
+
+    from qiskit_ibm_runtime.execution_span import TwirledSliceSpanV2
+
+    t0 = datetime(2026, 10, 26, tzinfo=timezone.utc)
+    rand = 32
+    return TwirledSliceSpanV2(
+        t0 + timedelta(seconds=start_s),
+        t0 + timedelta(seconds=stop_s),
+        {i: ((rand, shots // rand), True, slice(0, rand), slice(0, shots // rand), shots)
+         for i in pubs},
+    )
 
 
-def test_measure_probe_from_spans():
-    """per-shot = span time / shots; overhead = (usage - span time) / PUBs."""
-    spans = [_span(0, 1.0, {0: 4096}), _span(1.0, 4.0, {1: 4096})]
+#: The live plan's numbers (ibm_fez, 2026-10-25): 47 circuits, 65.9 s floor.
+ESTIMATE = {"total_shots": 47 * 4096, "n_circuits": 47, "floor_seconds": 65.9,
+            "budget_cap_seconds": 300.0}
+#: The live probe's PUBs: shortest and longest circuit.
+PUBS = [{"duration_s": 8.568e-06}, {"duration_s": 453.48e-06}]
+REP = 250e-6
+MODEL = 4096 * (8.568e-06 + REP) + 4096 * (453.48e-06 + REP)
+
+
+def test_twirled_spans_are_read_without_the_broken_filter_by_pub():
+    """qiskit-ibm-runtime 0.49.0's TwirledSliceSpanV2.filter_by_pub raises; masks do not."""
+    span = _twirled_span(0, 6.235, [0, 1])
+    with pytest.raises(IndexError):
+        span.filter_by_pub(0)  # the library bug this code works around
+    assert hb.span_shots_per_pub(span, 2) == {0: 4096, 1: 4096}
+
+
+def test_measure_probe_on_the_live_probe_shape():
+    """One span shared by both PUBs, 6.235 s: both readings projected, the larger kept."""
+    spans = [_twirled_span(0, 6.235, [0, 1])]
     out = hb.measure_probe(PUBS, shots=4096, usage_seconds=8.0, spans=spans,
-                           rep_delay=250e-6, manifest_estimate=ESTIMATE)
-    assert out["per_shot_source"] == "execution spans"
-    assert out["per_shot_seconds"] == pytest.approx([1.0 / 4096, 3.0 / 4096])
-    assert out["fixed_seconds"] == pytest.approx(4.0)
+                           rep_delay=REP, manifest_estimate=ESTIMATE)
+    assert out["spans_shared_by_pubs"] is True
+    assert out["per_pub_seconds"] is None
+    k = 6.235 / MODEL
+    c = (6.235 - MODEL) / 2
+    assert out["measured_over_model"] == pytest.approx(k)
+    main = out["main_job"]
+    assert main["in_span_if_per_shot_s"] == pytest.approx(k * 65.9)
+    assert main["in_span_if_per_pub_s"] == pytest.approx(65.9 + 47 * c)
+    fixed = 8.0 - 6.235
+    in_span = max(k * 65.9, 65.9 + 47 * c)
+    assert main["expected_conservative_s"] == pytest.approx(in_span + 47 * fixed / 2)
+    assert main["expected_optimistic_s"] == pytest.approx(k * 65.9 + fixed)
+    assert main["estimated_seconds"] == pytest.approx(2 * (in_span + 47 * fixed / 2))
+    # The flags reproduce the estimate through --plan's own formula.
     rec = out["recommendation"]
-    assert rec["per_shot_time_s"] == pytest.approx(3.0 / 4096)
-    assert rec["overhead_s"] == pytest.approx(2.0)
-    expected = 47 * 4096 * 3.0 / 4096 + 47 * 2.0
-    assert out["main_job"]["expected_seconds"] == pytest.approx(expected)
-    assert out["main_job"]["estimated_seconds"] == pytest.approx(2 * expected)
-    assert out["main_job"]["within_budget"] is (2 * expected <= 300.0)
+    replanned = (ESTIMATE["total_shots"] * rec["per_shot_time_s"] + 47 * rec["overhead_s"]) * 2
+    assert replanned == pytest.approx(main["estimated_seconds"])
 
 
-def test_shared_span_is_split_by_shots_and_overlaps_count_once():
-    """One span over both PUBs is split by shot share; overlapping windows are not double-counted."""
-    spans = [_span(0, 2.0, {0: 1024, 1: 3072}), _span(1.5, 2.0, {1: 1024})]
-    per_pub = hb.span_seconds_per_pub(spans, 2)
-    assert per_pub == pytest.approx([0.5, 1.5 + 0.5])
-    assert hb.spans_union_seconds(spans) == pytest.approx(2.0)
+def test_exclusive_spans_give_per_pub_times_and_overlaps_count_once():
+    """Spans that each cover one PUB are attributed; overlapping windows are not double-counted."""
+    spans = [_span(0, 1.0, {0: 4096}), _span(0.5, 4.0, {1: 4096})]
+    assert hb.span_seconds_per_pub(spans, 2) == pytest.approx([1.0, 3.5])
+    assert hb.spans_union_seconds(spans) == pytest.approx(4.0)
+    shared = [_span(0, 2.0, {0: 1024, 1: 3072})]
+    assert hb.span_seconds_per_pub(shared, 2) is None
 
 
 def test_measure_probe_without_spans_or_final_usage():
-    """No spans: the schedule model is used and flagged.  usage 0: no recommendation yet."""
+    """No spans: the schedule model stands in and is flagged.  usage 0: no recommendation yet."""
     out = hb.measure_probe(PUBS, shots=4096, usage_seconds=5.0, spans=None,
-                           rep_delay=250e-6, manifest_estimate=ESTIMATE)
-    assert out["per_shot_source"].startswith("schedule model")
-    assert out["recommendation"]["per_shot_time_s"] == pytest.approx(710e-6)
+                           rep_delay=REP, manifest_estimate=ESTIMATE)
+    assert out["executed_source"].startswith("schedule model")
+    assert out["measured_over_model"] == pytest.approx(1.0)
     pending = hb.measure_probe(PUBS, shots=4096, usage_seconds=0, spans=None,
-                               rep_delay=250e-6, manifest_estimate=ESTIMATE)
+                               rep_delay=REP, manifest_estimate=ESTIMATE)
     assert pending["recommendation"] is None
 
 
@@ -385,6 +422,7 @@ def test_probe_submits_two_pubs_and_reports(live_copy, monkeypatch):
     assert hb.main(["--probe-report", "--date", DATE, *common]) == 0
     doc = json.loads((hw / f"probe_{DATE}.json").read_text(encoding="utf-8"))
     assert doc["measured"]["options_accepted"] is True
+    assert doc["measured"]["twirling_applied"] is False  # local mode never twirls
     assert doc["measured"]["recommendation"]["overhead_s"] >= 0
     assert "probe" in (hw / "usage.md").read_text(encoding="utf-8")
 

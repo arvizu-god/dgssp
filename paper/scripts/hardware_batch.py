@@ -1872,13 +1872,27 @@ def probe_pubs(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [shortest, longest]
 
 
+def span_shots_per_pub(span: Any, n_pubs: int) -> dict[int, int]:
+    """
+    Shots of each PUB that depend on one execution span.
+
+    Counted from ``span.mask(idx)``.  ``span.filter_by_pub`` is avoided: in
+    qiskit-ibm-runtime 0.49.0 it is broken for ``TwirledSliceSpanV2`` (the span
+    type twirled sampler jobs return) -- it rebuilds the span from 4-field
+    slice tuples where the constructor needs 5 and raises ``IndexError``.
+    """
+    return {
+        idx: int(span.mask(idx).sum()) for idx in span.pub_idxs if 0 <= idx < n_pubs
+    }
+
+
 def span_seconds_per_pub(spans: Any, n_pubs: int) -> list[float] | None:
     """
-    QPU seconds attributable to each PUB, from the result's execution spans.
+    QPU seconds of each PUB, when every span covers a single PUB.
 
-    A span covering several PUBs is split by each PUB's share of its shots.
-    Spans are documented as possibly loose (they may overlap), so these are
-    upper bounds on execution time.
+    A span shared by several PUBs says how long they took together, not each:
+    splitting it by shot share would invent a per-PUB timing.  So this
+    returns ``None`` unless every span is exclusive to one PUB.
 
     Parameters
     ----------
@@ -1890,21 +1904,19 @@ def span_seconds_per_pub(spans: Any, n_pubs: int) -> list[float] | None:
     Returns
     -------
     list[float] | None
-        Seconds per PUB, or ``None`` when the result carries no spans
-        (local simulators, or a platform that stops sending them).
+        Seconds per PUB, or ``None`` (no spans, or spans shared by PUBs).
     """
     if spans is None:
         return None
     seconds = [0.0] * n_pubs
     seen = False
     for span in spans:
-        total = int(span.size)
-        if total <= 0:
-            continue
-        for idx in span.pub_idxs:
-            if 0 <= idx < n_pubs:
-                seconds[idx] += span.duration * int(span.filter_by_pub(idx).size) / total
-                seen = True
+        shots = {idx: n for idx, n in span_shots_per_pub(span, n_pubs).items() if n > 0}
+        if len(shots) > 1:
+            return None
+        for idx in shots:
+            seconds[idx] += span.duration
+            seen = True
     return seconds if seen else None
 
 
@@ -1935,13 +1947,28 @@ def measure_probe(
     manifest_estimate: Mapping[str, Any],
 ) -> dict[str, Any]:
     """
-    Per-shot time and fixed overhead from one probe job, and what they imply.
+    What one probe job says about the main job's QPU time.
 
-    Model: ``usage = fixed + sum_i shots * per_shot_i``.  ``per_shot_i`` comes
-    from the execution spans; ``fixed = usage - span time``.  The fixed part is
-    charged per circuit (``fixed / n_pubs``), which over-counts it for a larger
-    job if most of it is per job -- the conservative side.  Without spans, the
-    per-shot time falls back to the schedule model and is flagged.
+    Only what the probe identifies is used:
+
+    * ``executed`` -- wall time of the execution spans -- against the schedule
+      model ``model = sum_i shots * (duration_i + rep_delay)``;
+    * ``fixed = usage - executed``, the time charged outside the spans.
+
+    The in-span excess ``executed - model`` cannot be pinned to "per shot" or
+    "per PUB" from a two-PUB probe whose spans are shared, so the main job is
+    projected under both readings and the larger one is used:
+
+    * per shot, multiplicative: ``k = executed / model``, main = ``k * floor``;
+    * per PUB, additive: ``c = (executed - model) / n_probe``,
+      main = ``floor + N * c``;
+
+    where ``floor`` is the main job's own schedule model (the manifest's
+    ``floor_seconds``) and ``N`` its circuit count.  ``fixed`` is charged per
+    PUB too (``fixed / n_probe`` each), the conservative reading of a cost
+    that may well be per job.  The result is expressed as the two flags
+    ``--plan`` already takes, so the re-planned estimate reproduces it:
+    ``per_shot = in-span total / total_shots`` and ``overhead = fixed / n_probe``.
 
     Parameters
     ----------
@@ -1956,60 +1983,69 @@ def measure_probe(
     rep_delay:
         The device's default ``rep_delay``.
     manifest_estimate:
-        The manifest's ``estimate`` block (totals and budget cap).
+        The manifest's ``estimate`` block (``floor_seconds``, ``total_shots``,
+        ``n_circuits``, ``budget_cap_seconds``).
 
     Returns
     -------
     dict
-        Measured numbers, the recommended ``--per-shot-time`` / ``--overhead``,
-        and the main job's estimate under them.
+        Measured numbers, both projections, the recommended flags and the
+        main job's estimate under them.
     """
     n = len(pubs)
+    model_per_pub = [shots * (float(p["duration_s"]) + rep_delay) for p in pubs]
+    model = sum(model_per_pub)
+    union = spans_union_seconds(spans)
+    executed = union if union is not None else model
     per_pub = span_seconds_per_pub(spans, n)
-    model_per_shot = [float(p["duration_s"]) + rep_delay for p in pubs]
-    if per_pub is not None:
-        per_shot = [s / shots for s in per_pub]
-        executed = spans_union_seconds(spans) or sum(per_pub)
-        source = "execution spans"
-    else:
-        per_shot = model_per_shot
-        executed = shots * sum(model_per_shot)
-        source = "schedule model (no execution spans in the result)"
 
     out: dict[str, Any] = {
         "usage_seconds": usage_seconds,
-        "per_shot_source": source,
-        "per_shot_seconds": per_shot,
-        "model_per_shot_seconds": model_per_shot,
-        "measured_over_model": [m / s for m, s in zip(per_shot, model_per_shot, strict=True)],
+        "executed_source": "execution spans" if union is not None
+        else "schedule model (no execution spans in the result)",
         "executed_seconds": executed,
+        "model_seconds": model,
+        "model_seconds_per_pub": model_per_pub,
+        "spans_shared_by_pubs": union is not None and per_pub is None,
+        "per_pub_seconds": per_pub,
+        "measured_over_model": executed / model if model else None,
+        "in_span_excess_per_pub_s": max(0.0, executed - model) / n,
     }
     if not isinstance(usage_seconds, (int, float)) or usage_seconds <= 0:
         out["recommendation"] = None
         out["note"] = "job.usage() not final yet; run --probe-report again later."
         return out
 
-    fixed = max(0.0, float(usage_seconds) - executed)
-    rec_per_shot = max(per_shot)
-    rec_overhead = fixed / n
+    floor = float(manifest_estimate["floor_seconds"])
     total_shots = int(manifest_estimate["total_shots"])
     n_circuits = int(manifest_estimate["n_circuits"])
-    raw = total_shots * rec_per_shot + n_circuits * rec_overhead
-    estimate = raw * SAFETY_FACTOR
     cap = float(manifest_estimate["budget_cap_seconds"])
+    k = out["measured_over_model"] or 1.0
+    c = out["in_span_excess_per_pub_s"]
+    fixed = max(0.0, float(usage_seconds) - executed)
+
+    per_shot_reading = k * floor
+    per_pub_reading = floor + n_circuits * c
+    in_span = max(per_shot_reading, per_pub_reading)
+    conservative = in_span + n_circuits * fixed / n
+    optimistic = per_shot_reading + fixed
     out.update({
         "fixed_seconds": fixed,
-        "recommendation": {
-            "per_shot_time_s": rec_per_shot,
-            "overhead_s": rec_overhead,
-            "rule": "per_shot = the slower PUB's measured per-shot time; "
-                    "overhead = all fixed time / probe PUBs",
-        },
         "main_job": {
-            "expected_seconds": raw,
-            "estimated_seconds": estimate,
+            "floor_seconds": floor,
+            "in_span_if_per_shot_s": per_shot_reading,
+            "in_span_if_per_pub_s": per_pub_reading,
+            "expected_conservative_s": conservative,
+            "expected_optimistic_s": optimistic,
+            "estimated_seconds": conservative * SAFETY_FACTOR,
             "budget_cap_seconds": cap,
-            "within_budget": estimate <= cap,
+            "within_budget": conservative * SAFETY_FACTOR <= cap,
+        },
+        "recommendation": {
+            "per_shot_time_s": in_span / total_shots,
+            "overhead_s": fixed / n,
+            "rule": "per_shot = the larger in-span projection / the main job's shots; "
+                    "overhead = time outside the spans / probe PUBs",
         },
     })
     return out
@@ -2131,10 +2167,14 @@ def run_probe_report(args: argparse.Namespace, paths: Paths) -> int:
         spans=spans, rep_delay=float(doc["rep_delay_s"]),
         manifest_estimate=doc["manifest_estimate"],
     )
+    span_types = sorted({type(s).__name__ for s in spans}) if spans is not None else []
     measured.update({
         "status": status_name,
         "options_accepted": True,
-        "twirling_accepted": twirling_on,
+        "twirling_requested": twirling_on,
+        # A TwirledSliceSpan* is only produced when the server actually twirled.
+        "twirling_applied": any(t.startswith("Twirled") for t in span_types),
+        "span_types": span_types,
         "counts_total": [sum(c.values()) for c in counts],
         "usage": usage,
         "reported_utc": utc_timestamp(),
@@ -2147,37 +2187,45 @@ def run_probe_report(args: argparse.Namespace, paths: Paths) -> int:
         "manifest_estimate_seconds": None, "manifest_floor_seconds": None,
     }})
 
+    dd_on = bool(doc["options"].get("dynamical_decoupling", {}).get("enable"))
     print(f"probe {doc['job_id']}: DONE on {doc['backend']}; options accepted "
-          f"(gate twirling {'ON' if twirling_on else 'off'}, DD "
-          f"{'ON' if doc['options'].get('dynamical_decoupling', {}).get('enable') else 'off'}).")
-    print(f"job.usage() = {measured['usage_seconds']} s; per-shot source: "
-          f"{measured['per_shot_source']}")
-    for pub, ps, model in zip(doc["pubs"], measured["per_shot_seconds"],
-                              measured["model_per_shot_seconds"], strict=True):
-        print(f"  {pub['key']:<22} lam={pub['nominal_scale']:g}: {ps * 1e6:7.1f} us/shot "
-              f"(schedule model {model * 1e6:.1f} us)")
+          f"(gate twirling requested {'ON' if twirling_on else 'off'}, applied "
+          f"{'YES' if measured['twirling_applied'] else 'no'} [{', '.join(span_types)}]; "
+          f"DD {'ON' if dd_on else 'off'}).")
+    print(f"job.usage() = {measured['usage_seconds']} s")
+    print(f"execution spans: {measured['executed_seconds']:.3f} s vs schedule model "
+          f"{measured['model_seconds']:.3f} s -> x{measured['measured_over_model']:.3f} "
+          + ("(one span shared by the PUBs: per-PUB timing not identifiable)"
+             if measured["spans_shared_by_pubs"] else ""))
     rec = measured.get("recommendation")
     if rec is None:
         print(measured.get("note"))
         return 3
     main = measured["main_job"]
-    print(f"fixed (non-shot) time: {measured['fixed_seconds']:.1f} s for {len(doc['pubs'])} PUBs")
-    print(f"\nmain job with these numbers: expected {main['expected_seconds']:.1f} s, "
-          f"estimate x{SAFETY_FACTOR:g} = {main['estimated_seconds']:.1f} s vs cap "
+    print(f"time outside the spans (usage - spans): {measured['fixed_seconds']:.3f} s")
+    print(f"\nmain job ({main['floor_seconds']:.1f} s schedule model):")
+    print(f"  in-span time if the excess is per shot: {main['in_span_if_per_shot_s']:.1f} s")
+    print(f"  in-span time if the excess is per PUB:  {main['in_span_if_per_pub_s']:.1f} s")
+    print(f"  expected: {main['expected_optimistic_s']:.1f} s (outside-span time per job) to "
+          f"{main['expected_conservative_s']:.1f} s (larger in-span reading, outside-span "
+          "time per PUB)")
+    print(f"  estimate = conservative x{SAFETY_FACTOR:g} = {main['estimated_seconds']:.1f} s vs cap "
           f"{main['budget_cap_seconds']:.0f} s -> "
           + ("WITHIN BUDGET" if main["within_budget"] else "STILL OVER BUDGET"))
     print("\nRe-plan with the measured numbers (subtract this probe's usage from the "
           "remaining allowance on the dashboard):")
     print(f"  python paper/scripts/hardware_batch.py --plan --force --backend {doc['backend']} "
           f"--per-shot-time {rec['per_shot_time_s']:.6g} --overhead {rec['overhead_s']:.4g} "
-          "--remaining-seconds <dashboard>")
+          f"--remaining-seconds <dashboard> --date {doc['date']}")
     dry = paths.dryrun_dir / f"{doc['pubs'][0]['key']}.json"
     if dry.exists() and doc["pubs"][0]["nominal_scale"] == 1.0:
         record = json.loads(dry.read_text(encoding="utf-8"))
         sols = record["metrics"]["solution_bitstrings"]
         if sols:
-            print(f"\nsanity: {doc['pubs'][0]['key']} lam=1 P_sol on hardware "
-                  f"{solution_probability(counts[0], sols):.3f} vs noise-model prediction "
+            hw_p, lo, hi = bootstrap_metric(
+                counts[0], lambda c: solution_probability(c, sols), BOOTSTRAP_B, BOOTSTRAP_SEED)
+            print(f"\nsanity: {doc['pubs'][0]['key']} lam=1 P_sol on hardware {hw_p:.3f} "
+                  f"[{lo:.3f}, {hi:.3f}] vs noise-model prediction "
                   f"{record['metrics']['solution_probability']:.3f}")
     return 0
 
