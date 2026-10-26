@@ -1207,8 +1207,9 @@ def print_plan_summary(manifest: Mapping[str, Any]) -> None:
         print(f"longest circuit {est['longest_circuit_s'] * 1e6:.1f} us + rep_delay "
               f"{est['rep_delay_s'] * 1e6:.0f} us = {est['longest_per_shot_s'] * 1e6:.1f} us/shot")
     if est["per_shot_below_longest_circuit"]:
-        print("WARNING: --per-shot-time is below the longest circuit's per-shot time; "
-              "it is not a conservative bound. Raise it.")
+        print("note: --per-shot-time is below the longest circuit's per-shot time. That is "
+              "right for the job-average --probe-report prints; for a guessed value it is not "
+              "a conservative bound, so raise it.")
     print(f"\nESTIMATED QPU TIME = ({est['total_shots']} shots x {est['per_shot_time_s']:.6g} s "
           f"+ {est['n_circuits']} circuits x {est['per_circuit_overhead_s']:g} s) x "
           f"{est['safety_factor']:g} = {est['estimated_seconds']:.1f} s "
@@ -1583,7 +1584,7 @@ def print_records_summary(summaries: Sequence[Mapping[str, Any]], label: str) ->
     """Per record: ideal vs scale-1 vs ZNE-scalar P(solution); drift lines."""
     print(f"\n{label}")
     print(f"{'record':<22} {'M':>2} {'r':>2} {'ideal':>6}  {'P_sol lam=1 [95% CI]':<22}  "
-          f"{'ZNE exp [95% CI]':<22}  resolved  ident.  Mitiq exp")
+          f"{'ZNE exp [95% CI]':<26}  resolved  ident.  Mitiq exp")
     for s in summaries:
         ci = s["p_sol_ci"] or [None, None]
         cell = f"{_fmt(s['p_sol'])} [{_fmt(ci[0])}, {_fmt(ci[1])}]"
@@ -1591,12 +1592,17 @@ def print_records_summary(summaries: Sequence[Mapping[str, Any]], label: str) ->
         if s["zne"] is not None:
             z = s["zne"]
             zci = z.get("ci") or [None, None]
-            zne_cell = (f"{_fmt(z.get('value'))} [{_fmt(zci[0])}, {_fmt(zci[1])}]"
-                        if z.get("identifiable") else
-                        f"n/i, reports {_fmt(z.get('reported_value'))}")
+            # Only an extrapolation the record actually reports is shown with
+            # its interval; otherwise the value reported instead (lambda = 1),
+            # as the records and the paper's reporting rule have it.
+            if z.get("reported_source") == "extrapolation":
+                zne_cell = f"{_fmt(z.get('value'))} [{_fmt(zci[0])}, {_fmt(zci[1])}]"
+            else:
+                why = "unresolved" if z.get("identifiable") else "n/i"
+                zne_cell = f"{why}, reports {_fmt(z.get('reported_value'))}"
             resolved, ident = str(z.get("resolved")), str(z.get("identifiable"))
         print(f"{s['key']:<22} {s['M']:>2} {s['r']:>2} {_fmt(s['p_ideal']):>6}  {cell:<22}  "
-              f"{zne_cell:<22}  {resolved:<8}  {ident:<6}  "
+              f"{zne_cell:<26}  {resolved:<8}  {ident:<6}  "
               f"{_fmt(s['mitiq']) if s.get('mitiq') is not None else '-'}")
     for s in summaries:
         if s["drift"]:

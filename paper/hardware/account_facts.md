@@ -101,6 +101,10 @@ This is the one that decides how the single monthly job is shaped.
       does in a single call.
 - [ ] Sessions work and are worth using because: ______
 
+**Used on 2026-10-26:** job mode (`--mode job`). Batch works on this plan,
+but it only groups several jobs, and the hardware run is a single job of 47
+PUBs, so it would add nothing.
+
 Note that `dgssp.runtime.sample_counts` submits a list of circuits as one job
 regardless, so the many-PUBs path needs no code change — only the wrapper in
 `execution_mode` does.
@@ -119,13 +123,28 @@ regardless, so the many-PUBs path needs no code change — only the wrapper in
 
 Fill once sections 1–4 are answered.
 
-- QPU seconds available per month: 600
-- Estimated QPU seconds per circuit at the paper's largest `n`: ______
-  (from `job.usage_estimation` on a dry run, or measured on a small job)
-- Circuits per monthly job the budget allows: ______
-- Therefore the frozen instance family is ______ instances × ______ noise
-  scales × ______ iteration counts = ______ circuits.
-- Months of hardware time the paper needs: ______
+- QPU seconds available per month: 600 per 28-day rolling window (not a
+  calendar month; https://quantum.cloud.ibm.com/docs/en/guides/max-execution-time).
+  The window in use runs 2026-10-24 → about 2026-11-21.
+- Estimated QPU seconds per circuit at the paper's largest `n`: measured, not
+  estimated. The main job (`dbfeqr7gdj9s73bbgh6g`, 47 PUBs × 4096 shots,
+  twirled 32 × 128, DD off) was charged **75 s**, i.e. **≈ 1.6 s per circuit**
+  on average. The probe (`dbf9tu7gdj9s73fn4u40`: the shortest and the longest
+  circuit, 4096 shots each) was charged 7 s. Its execution span ran 1.58× the
+  schedule model (scheduled duration + 250 µs `rep_delay` per shot), which puts
+  the longest circuit (n = 4, λ = 5, 6400 cz) at about 4–5 s.
+- Circuits per monthly job the budget allows: at the 50 % rule (300 s of a
+  full window) and this mix, about **180 circuits** (≈ 2.5× this job). The
+  planning estimate (`--per-shot-time 0.000622611 --overhead 0.3824`, ×2
+  safety) gave 275.7 s against 75 s actual, so it over-estimates by about
+  3.7×. IBM's rule of thumb (2 s + 0.35 ms per shot) gave 69 s and was the
+  closest.
+- Therefore the frozen hardware job is 10 instances × 3 noise scales
+  (λ = 1, 3, 5) + 5 iteration-sweep variants × 3 scales + 2 drift repeats =
+  **47 circuits** (192 512 shots).
+- Months of hardware time the paper needs: one job, run 2026-10-26 (75 s,
+  12.5 % of the window), plus the 7 s probe. Left in this window after both:
+  516 s (8 min 36 s), enough for one optional follow-up job.
 
 ---
 
@@ -133,4 +152,5 @@ Fill once sections 1–4 are answered.
 
 | Date | What changed | Source |
 |---|---|---|
-| | | |
+| 2026-10-25 | Sections 1–4 filled | `describe_account.py`, dashboard |
+| 2026-10-26 | §3 records job mode; §5 filled with the measured cost of the probe and the main job | `paper/hardware/usage.md`, `probe_2026-10-25.json` |
