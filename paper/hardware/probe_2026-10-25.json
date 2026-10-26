@@ -1,0 +1,204 @@
+{
+  "schema": "dgssp/paper/hardware-probe/1",
+  "date": "2026-10-25",
+  "manifest": "paper/hardware/manifest_2026-10-25.json",
+  "manifest_sha256": "43f09b1e44123facaf96418976ba4b1ef0db7b6a24c2691be5ff1b01d829e7b4",
+  "backend": "ibm_fez",
+  "job_id": "dbf9tu7gdj9s73fn4u40",
+  "shots": 4096,
+  "options": {
+    "environment": {
+      "job_tags": [
+        "dgssp",
+        "paper-a",
+        "wp6",
+        "2026-10-25",
+        "probe"
+      ]
+    },
+    "max_execution_time": 60,
+    "twirling": {
+      "enable_gates": true,
+      "enable_measure": false,
+      "num_randomizations": 32,
+      "shots_per_randomization": 128,
+      "strategy": "active-accum"
+    },
+    "dynamical_decoupling": {
+      "enable": false
+    }
+  },
+  "rep_delay_s": 0.00025,
+  "pubs": [
+    {
+      "probe_index": 0,
+      "manifest_pub": 0,
+      "key": "P-n2-M1-11",
+      "nominal_scale": 1.0,
+      "two_q_count": 71,
+      "duration_s": 8.568e-06
+    },
+    {
+      "probe_index": 1,
+      "manifest_pub": 20,
+      "key": "P-n4-M0-09",
+      "nominal_scale": 5.0,
+      "two_q_count": 6400,
+      "duration_s": 0.00045348000000000003
+    }
+  ],
+  "manifest_estimate": {
+    "formula": "(total_shots * per_shot_time_s + n_circuits * per_circuit_overhead_s) * safety_factor",
+    "per_shot_time_s": 0.00070348,
+    "per_shot_time_source": "auto: longest circuit + rep_delay",
+    "per_circuit_overhead_s": 2.0,
+    "safety_factor": 2.0,
+    "total_shots": 192512,
+    "n_circuits": 47,
+    "estimated_seconds": 458.85668352,
+    "estimated_minutes": 7.647611392,
+    "floor_seconds": 65.93391820800001,
+    "floor_model": "sum shots * (ASAP-scheduled duration + default rep_delay), execution only",
+    "rep_delay_s": 0.00025,
+    "longest_circuit_s": 0.00045348000000000003,
+    "longest_per_shot_s": 0.00070348,
+    "per_shot_below_longest_circuit": false,
+    "remaining_allowance_seconds": 600.0,
+    "remaining_allowance_source": "--remaining-seconds",
+    "budget_fraction": 0.5,
+    "budget_cap_seconds": 300.0,
+    "fraction_of_remaining": 0.7647611392,
+    "within_budget": false,
+    "verify": "Measure per_shot and overhead from job.usage() of a previous small job (paper/hardware/usage.md once one exists), or from https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time (quick rule there: 2 s + 0.00035 s per execution).",
+    "device_limits": {
+      "max_shots": 100000,
+      "max_circuits": 300,
+      "default_rep_delay": 0.00025,
+      "rep_delay_range": [
+        0.0,
+        0.002
+      ],
+      "dt": 4e-09
+    }
+  },
+  "calibration_at_submit": "2026-10-25T17:41:33-06:00",
+  "status_at_submit": {
+    "operational": true,
+    "pending_jobs": 1,
+    "status_msg": "active"
+  },
+  "submitted_utc": "2026-10-26T00:29:45Z",
+  "provenance": {
+    "timestamp_utc": "2026-10-26T00:29:45Z",
+    "git": {
+      "commit": "9623c53b85c6ddcb78fb0fa6913a4f3cb2a9c3e5",
+      "short_commit": "9623c53",
+      "branch": "main",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 40,
+      "untracked_outputs_by_dir": {
+        "paper/data": 35,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 5,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-26T00:29:45Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.16",
+      "implementation": "CPython",
+      "executable": "C:\\Users\\Arturo Arvizu\\.conda\\envs\\dgssp-paper\\python.exe"
+    },
+    "platform": "Windows-10-10.0.26300-SP0",
+    "host": "DESKTOP-893P15V",
+    "user": "Arturo Arvizu",
+    "backend": null
+  },
+  "measured": {
+    "usage_seconds": 7,
+    "executed_source": "execution spans",
+    "executed_seconds": 6.235277,
+    "model_seconds": 3.9405486080000003,
+    "model_seconds_per_pub": [
+      1.059094528,
+      2.88145408
+    ],
+    "spans_shared_by_pubs": true,
+    "per_pub_seconds": null,
+    "measured_over_model": 1.5823372886052722,
+    "in_span_excess_per_pub_s": 1.1473641959999998,
+    "fixed_seconds": 0.764723,
+    "main_job": {
+      "floor_seconds": 65.93391820800001,
+      "in_span_if_per_shot_s": 104.32969736436853,
+      "in_span_if_per_pub_s": 119.86003542,
+      "expected_conservative_s": 137.83102592,
+      "expected_optimistic_s": 105.09442036436853,
+      "estimated_seconds": 275.66205184,
+      "budget_cap_seconds": 300.0,
+      "within_budget": true
+    },
+    "recommendation": {
+      "per_shot_time_s": 0.0006226107225523604,
+      "overhead_s": 0.3823615,
+      "rule": "per_shot = the larger in-span projection / the main job's shots; overhead = time outside the spans / probe PUBs"
+    },
+    "status": "DONE",
+    "options_accepted": true,
+    "twirling_requested": true,
+    "twirling_applied": true,
+    "span_types": [
+      "TwirledSliceSpanV2"
+    ],
+    "counts_total": [
+      4096,
+      4096
+    ],
+    "usage": {
+      "job_id": "dbf9tu7gdj9s73fn4u40",
+      "status": "DONE",
+      "usage_seconds": 7,
+      "usage_estimation": {
+        "quantum_seconds": 14.320960128
+      },
+      "metrics": {
+        "caller": "qiskit_ibm_runtime~sampler.py",
+        "qiskit_version": "qiskit_ibm_runtime-0.49.0,qiskit-2.5.2*,qiskit_aer-0.17.2*",
+        "timestamps": {
+          "created": "2026-10-26T00:29:44.214598Z",
+          "finished": "2026-10-26T00:30:17.878854Z",
+          "running": "2026-10-26T00:29:45.370033Z"
+        },
+        "usage": {
+          "qpu_charge_time_seconds": 7,
+          "value": 0.102711,
+          "unit": "resource_units",
+          "status": "complete",
+          "details": [
+            {
+              "value": 0.102711,
+              "unit": "resource_units",
+              "metric": {
+                "id": "caffe3ca-729c-5750-8777-df63bbf8bfd9",
+                "value": 7
+              }
+            }
+          ]
+        },
+        "circuits_execution_time_ns": 4334479872
+      }
+    },
+    "reported_utc": "2026-10-26T00:49:19Z"
+  }
+}

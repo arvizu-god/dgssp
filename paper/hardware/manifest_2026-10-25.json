@@ -1,0 +1,2745 @@
+{
+  "schema": "dgssp/paper/hardware-manifest/1",
+  "date": "2026-10-25",
+  "created_utc": "2026-10-26T00:58:01Z",
+  "backend": {
+    "name": "ibm_fez",
+    "source": "live",
+    "num_qubits": 156,
+    "processor_family": "heron",
+    "heavy_hex": true,
+    "status_at_plan": {
+      "operational": true,
+      "pending_jobs": 0,
+      "status_msg": "active"
+    },
+    "calibration_timestamp": "2026-10-25T18:24:25-06:00",
+    "calibration_timestamp_after_plan": "2026-10-25T18:24:25-06:00",
+    "calibration_stable_during_plan": true,
+    "calibration_file": "paper/hardware/calibration_2026-10-25.json",
+    "calibration_sha256": "4d48db8e678558aecd2959ea3668b60aab9949496b6fc05960ba8a34bf6697cd",
+    "snapshot_matches_live_target": true
+  },
+  "account_facts": {
+    "file": "paper/hardware/account_facts.md",
+    "exists": true,
+    "filled": true,
+    "backend_listed": true
+  },
+  "circuits_file": "paper/hardware/circuits_2026-10-25.qpy",
+  "circuits_sha256": "11e9e916d7a11b53d5763ec072eca2383997d3b4bb4f2e4b46a771683664a8d9",
+  "settings": {
+    "shots": 4096,
+    "scales": [
+      1.0,
+      3.0,
+      5.0
+    ],
+    "seed_min": 0,
+    "seed_max": 32,
+    "optimization_level": 3,
+    "layout_method": "sabre",
+    "fold_seed": 0,
+    "fold": "dgssp.mitigation.fold_isa (= fold_transpiled) + rebase_to_backend, via plan_zne_batch; submitted as-is (no further transpilation)",
+    "zne": {
+      "method": "exponential",
+      "mode": "scalar",
+      "renorm": "clip",
+      "asymptote": "p_uniform",
+      "methods_fitted": [
+        "linear",
+        "quadratic",
+        "richardson",
+        "exponential"
+      ],
+      "n_bootstrap": 500,
+      "bootstrap_seed": 0
+    },
+    "seed_simulator": 20261020,
+    "drift_check": "scale-1 repeat, as the last PUBs, of the two smallest instances whose ideal P_sol exceeds P_uniform by >= 0.25",
+    "instances_files": {
+      "hardware_subset": "paper/instances/hardware_subset.json",
+      "hardware_subset_sha256": "f981f79e808d7fabcfb33deede9aff108c7585187f3a19b3b26a3cb8108e9d8c",
+      "sweep": "paper/instances/sweep.json",
+      "sweep_sha256": "38420b4045f4f85a397314cb5fc654f038d52cbd919ebbff4350af08bd83160b"
+    }
+  },
+  "sampler": {
+    "options": {
+      "environment": {
+        "job_tags": [
+          "dgssp",
+          "paper-a",
+          "wp6",
+          "2026-10-25"
+        ]
+      },
+      "max_execution_time": 296,
+      "twirling": {
+        "enable_gates": true,
+        "enable_measure": false,
+        "num_randomizations": 32,
+        "shots_per_randomization": 128,
+        "strategy": "active-accum"
+      },
+      "dynamical_decoupling": {
+        "enable": false
+      }
+    },
+    "execution_mode_default": "job",
+    "twirling": {
+      "client_supports_gate_twirling": true,
+      "client_version": "0.49.0",
+      "plan_support": "unverified: decided server-side at submission",
+      "enabled": true
+    },
+    "dynamical_decoupling": {
+      "enabled": false,
+      "sequence_type": null
+    },
+    "measurement_mitigation": "none",
+    "notes": "No measurement mitigation: SamplerV2 has no readout-error mitigation option (resilience options exist only for EstimatorV2), and measurement twirling (twirling.enable_measure) is kept off so readout noise keeps the form the calibration-derived noise model assumes. rep_delay and init_qubits are left at the device defaults. Error suppression is gate twirling only: it is noise tailoring for ZNE (folded noise grows predictably once coherent errors are randomised). Dynamical decoupling is off by design: it is not part of C2, the noise model has no counterpart, and it would change each fold's idle noise differently. The local simulator path ignores twirling (qiskit-ibm-runtime warns); under the Aer noise model, which is already stochastic, twirling does not change the expected distribution."
+  },
+  "records": [
+    {
+      "key": "P-n2-M1-11",
+      "kind": "zne",
+      "instance": "P-n2-M1-11",
+      "role": "subset",
+      "items": [
+        2,
+        1
+      ],
+      "target": 3,
+      "n_items": 2,
+      "M": 1,
+      "solution_bitstrings": [
+        "11"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 5,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        0,
+        1,
+        2
+      ],
+      "drift_check": true
+    },
+    {
+      "key": "P-n3-M2-17",
+      "kind": "zne",
+      "instance": "P-n3-M2-17",
+      "role": "subset",
+      "items": [
+        2,
+        1,
+        2
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 2,
+      "solution_bitstrings": [
+        "011",
+        "110"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 11,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        3,
+        4,
+        5
+      ],
+      "drift_check": true
+    },
+    {
+      "key": "P-n2-M0-06",
+      "kind": "zne",
+      "instance": "P-n2-M0-06",
+      "role": "subset",
+      "items": [
+        2,
+        2
+      ],
+      "target": 1,
+      "n_items": 2,
+      "M": 0,
+      "solution_bitstrings": [],
+      "p_uniform": 0.0,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 4,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        91,
+        109,
+        112,
+        110,
+        98,
+        111
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        6,
+        7,
+        8
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n2-M2-03",
+      "kind": "zne",
+      "instance": "P-n2-M2-03",
+      "role": "subset",
+      "items": [
+        1,
+        1
+      ],
+      "target": 1,
+      "n_items": 2,
+      "M": 2,
+      "solution_bitstrings": [
+        "01",
+        "10"
+      ],
+      "p_uniform": 0.5,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 0,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        108,
+        111,
+        118,
+        110,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        9,
+        10,
+        11
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n3-M0-06",
+      "kind": "zne",
+      "instance": "P-n3-M0-06",
+      "role": "subset",
+      "items": [
+        3,
+        2,
+        2
+      ],
+      "target": 6,
+      "n_items": 3,
+      "M": 0,
+      "solution_bitstrings": [],
+      "p_uniform": 0.0,
+      "iterations": 2,
+      "r_opt": 2,
+      "best_seed": 31,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        113,
+        109,
+        91,
+        112,
+        110,
+        98,
+        111
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        12,
+        13,
+        14
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n3-M1-17",
+      "kind": "zne",
+      "instance": "P-n3-M1-17",
+      "role": "subset",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 2,
+      "r_opt": 2,
+      "best_seed": 30,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        15,
+        16,
+        17
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n4-M0-09",
+      "kind": "zne",
+      "instance": "P-n4-M0-09",
+      "role": "subset",
+      "items": [
+        2,
+        2,
+        3,
+        2
+      ],
+      "target": 1,
+      "n_items": 4,
+      "M": 0,
+      "solution_bitstrings": [],
+      "p_uniform": 0.0,
+      "iterations": 3,
+      "r_opt": 3,
+      "best_seed": 26,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        91,
+        118,
+        109,
+        108,
+        113,
+        110,
+        111,
+        98,
+        112
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        18,
+        19,
+        20
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n4-M1-10",
+      "kind": "zne",
+      "instance": "P-n4-M1-10",
+      "role": "subset",
+      "items": [
+        2,
+        2,
+        1,
+        2
+      ],
+      "target": 1,
+      "n_items": 4,
+      "M": 1,
+      "solution_bitstrings": [
+        "0100"
+      ],
+      "p_uniform": 0.0625,
+      "iterations": 3,
+      "r_opt": 3,
+      "best_seed": 3,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        21,
+        22,
+        23
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n4-M2-02",
+      "kind": "zne",
+      "instance": "P-n4-M2-02",
+      "role": "subset",
+      "items": [
+        1,
+        3,
+        2,
+        1
+      ],
+      "target": 6,
+      "n_items": 4,
+      "M": 2,
+      "solution_bitstrings": [
+        "0111",
+        "1110"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 2,
+      "r_opt": 2,
+      "best_seed": 8,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        114,
+        98,
+        91,
+        92,
+        119,
+        112,
+        111,
+        113
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        24,
+        25,
+        26
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "S-n4-g1-M2-00",
+      "kind": "zne",
+      "instance": "S-n4-g1-M2-00",
+      "role": "subset",
+      "items": [
+        2,
+        1,
+        1,
+        -2
+      ],
+      "target": -1,
+      "n_items": 4,
+      "M": 2,
+      "solution_bitstrings": [
+        "1010",
+        "1100"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 2,
+      "r_opt": 2,
+      "best_seed": 16,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        25,
+        43,
+        56,
+        42,
+        44,
+        46,
+        37,
+        45
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        27,
+        28,
+        29
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n3-M1-17_r1",
+      "kind": "zne",
+      "instance": "P-n3-M1-17",
+      "role": "sweep",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 1,
+      "r_opt": 2,
+      "best_seed": 30,
+      "seed_source": "sweep_fixed_layout",
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        30,
+        31,
+        32
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n3-M1-17_r3",
+      "kind": "zne",
+      "instance": "P-n3-M1-17",
+      "role": "sweep",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 3,
+      "r_opt": 2,
+      "best_seed": 30,
+      "seed_source": "sweep_fixed_layout",
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        33,
+        34,
+        35
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n4-M1-10_r1",
+      "kind": "zne",
+      "instance": "P-n4-M1-10",
+      "role": "sweep",
+      "items": [
+        2,
+        2,
+        1,
+        2
+      ],
+      "target": 1,
+      "n_items": 4,
+      "M": 1,
+      "solution_bitstrings": [
+        "0100"
+      ],
+      "p_uniform": 0.0625,
+      "iterations": 1,
+      "r_opt": 3,
+      "best_seed": 3,
+      "seed_source": "sweep_fixed_layout",
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        36,
+        37,
+        38
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n4-M1-10_r2",
+      "kind": "zne",
+      "instance": "P-n4-M1-10",
+      "role": "sweep",
+      "items": [
+        2,
+        2,
+        1,
+        2
+      ],
+      "target": 1,
+      "n_items": 4,
+      "M": 1,
+      "solution_bitstrings": [
+        "0100"
+      ],
+      "p_uniform": 0.0625,
+      "iterations": 2,
+      "r_opt": 3,
+      "best_seed": 3,
+      "seed_source": "sweep_fixed_layout",
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        39,
+        40,
+        41
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n4-M1-10_r4",
+      "kind": "zne",
+      "instance": "P-n4-M1-10",
+      "role": "sweep",
+      "items": [
+        2,
+        2,
+        1,
+        2
+      ],
+      "target": 1,
+      "n_items": 4,
+      "M": 1,
+      "solution_bitstrings": [
+        "0100"
+      ],
+      "p_uniform": 0.0625,
+      "iterations": 4,
+      "r_opt": 3,
+      "best_seed": 3,
+      "seed_source": "sweep_fixed_layout",
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "nominal_scales": [
+        1.0,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        42,
+        43,
+        44
+      ],
+      "drift_check": false
+    },
+    {
+      "key": "P-n2-M1-11_drift",
+      "kind": "drift",
+      "instance": "P-n2-M1-11",
+      "role": "drift_repeat",
+      "items": [
+        2,
+        1
+      ],
+      "target": 3,
+      "n_items": 2,
+      "M": 1,
+      "solution_bitstrings": [
+        "11"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 5,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        45
+      ],
+      "repeat_of_pub": 0,
+      "drift_check": true
+    },
+    {
+      "key": "P-n3-M2-17_drift",
+      "kind": "drift",
+      "instance": "P-n3-M2-17",
+      "role": "drift_repeat",
+      "items": [
+        2,
+        1,
+        2
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 2,
+      "solution_bitstrings": [
+        "011",
+        "110"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 11,
+      "seed_source": "sabre_sweep",
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        46
+      ],
+      "repeat_of_pub": 3,
+      "drift_check": true
+    }
+  ],
+  "circuits": [
+    {
+      "pub_index": 0,
+      "key": "P-n2-M1-11",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 71,
+      "two_q_depth": 67,
+      "depth": 240,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 8.568e-06
+    },
+    {
+      "pub_index": 1,
+      "key": "P-n2-M1-11",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 213,
+      "two_q_depth": 201,
+      "depth": 1098,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 2.2384e-05
+    },
+    {
+      "pub_index": 2,
+      "key": "P-n2-M1-11",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 355,
+      "two_q_depth": 335,
+      "depth": 1956,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.62e-05
+    },
+    {
+      "pub_index": 3,
+      "key": "P-n3-M2-17",
+      "instance": "P-n3-M2-17",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 194,
+      "two_q_depth": 151,
+      "depth": 502,
+      "physical_qubits": [
+        118,
+        109,
+        110,
+        98,
+        112,
+        113,
+        111
+      ],
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 1.6780000000000002e-05
+    },
+    {
+      "pub_index": 4,
+      "key": "P-n3-M2-17",
+      "instance": "P-n3-M2-17",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 582,
+      "two_q_depth": 453,
+      "depth": 2320,
+      "physical_qubits": [
+        118,
+        109,
+        110,
+        98,
+        112,
+        113,
+        111
+      ],
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 4.702e-05
+    },
+    {
+      "pub_index": 5,
+      "key": "P-n3-M2-17",
+      "instance": "P-n3-M2-17",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 970,
+      "two_q_depth": 755,
+      "depth": 4138,
+      "physical_qubits": [
+        118,
+        109,
+        110,
+        98,
+        112,
+        113,
+        111
+      ],
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 7.726e-05
+    },
+    {
+      "pub_index": 6,
+      "key": "P-n2-M0-06",
+      "instance": "P-n2-M0-06",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 137,
+      "two_q_depth": 112,
+      "depth": 416,
+      "physical_qubits": [
+        110,
+        109,
+        91,
+        112,
+        111,
+        98
+      ],
+      "initial_layout": [
+        91,
+        109,
+        112,
+        110,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 1.3432000000000001e-05
+    },
+    {
+      "pub_index": 7,
+      "key": "P-n2-M0-06",
+      "instance": "P-n2-M0-06",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 411,
+      "two_q_depth": 336,
+      "depth": 1938,
+      "physical_qubits": [
+        110,
+        109,
+        91,
+        112,
+        111,
+        98
+      ],
+      "initial_layout": [
+        91,
+        109,
+        112,
+        110,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.6976e-05
+    },
+    {
+      "pub_index": 8,
+      "key": "P-n2-M0-06",
+      "instance": "P-n2-M0-06",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 685,
+      "two_q_depth": 560,
+      "depth": 3460,
+      "physical_qubits": [
+        110,
+        109,
+        91,
+        112,
+        111,
+        98
+      ],
+      "initial_layout": [
+        91,
+        109,
+        112,
+        110,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 6.052e-05
+    },
+    {
+      "pub_index": 9,
+      "key": "P-n2-M2-03",
+      "instance": "P-n2-M2-03",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 80,
+      "two_q_depth": 76,
+      "depth": 261,
+      "physical_qubits": [
+        108,
+        109,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        108,
+        111,
+        118,
+        110,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 9.468e-06
+    },
+    {
+      "pub_index": 10,
+      "key": "P-n2-M2-03",
+      "instance": "P-n2-M2-03",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 240,
+      "two_q_depth": 228,
+      "depth": 1209,
+      "physical_qubits": [
+        108,
+        109,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        108,
+        111,
+        118,
+        110,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 2.5084000000000002e-05
+    },
+    {
+      "pub_index": 11,
+      "key": "P-n2-M2-03",
+      "instance": "P-n2-M2-03",
+      "r": 1,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 400,
+      "two_q_depth": 380,
+      "depth": 2157,
+      "physical_qubits": [
+        108,
+        109,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        108,
+        111,
+        118,
+        110,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 4.07e-05
+    },
+    {
+      "pub_index": 12,
+      "key": "P-n3-M0-06",
+      "instance": "P-n3-M0-06",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 371,
+      "two_q_depth": 293,
+      "depth": 1028,
+      "physical_qubits": [
+        111,
+        110,
+        112,
+        113,
+        109,
+        91,
+        98
+      ],
+      "initial_layout": [
+        113,
+        109,
+        91,
+        112,
+        110,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.1888000000000004e-05
+    },
+    {
+      "pub_index": 13,
+      "key": "P-n3-M0-06",
+      "instance": "P-n3-M0-06",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 1113,
+      "two_q_depth": 879,
+      "depth": 4790,
+      "physical_qubits": [
+        111,
+        110,
+        112,
+        113,
+        109,
+        91,
+        98
+      ],
+      "initial_layout": [
+        113,
+        109,
+        91,
+        112,
+        110,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 9.234400000000001e-05
+    },
+    {
+      "pub_index": 14,
+      "key": "P-n3-M0-06",
+      "instance": "P-n3-M0-06",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 1855,
+      "two_q_depth": 1465,
+      "depth": 8552,
+      "physical_qubits": [
+        111,
+        110,
+        112,
+        113,
+        109,
+        91,
+        98
+      ],
+      "initial_layout": [
+        113,
+        109,
+        91,
+        112,
+        110,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.0001528
+    },
+    {
+      "pub_index": 15,
+      "key": "P-n3-M1-17",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 212,
+      "two_q_depth": 175,
+      "depth": 607,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 1.9536e-05
+    },
+    {
+      "pub_index": 16,
+      "key": "P-n3-M1-17",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 636,
+      "two_q_depth": 525,
+      "depth": 2803,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 5.5288e-05
+    },
+    {
+      "pub_index": 17,
+      "key": "P-n3-M1-17",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 1060,
+      "two_q_depth": 875,
+      "depth": 4999,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 9.104000000000001e-05
+    },
+    {
+      "pub_index": 18,
+      "key": "P-n4-M0-09",
+      "instance": "P-n4-M0-09",
+      "r": 3,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 1280,
+      "two_q_depth": 915,
+      "depth": 2805,
+      "physical_qubits": [
+        108,
+        118,
+        110,
+        109,
+        112,
+        91,
+        113,
+        111,
+        98
+      ],
+      "initial_layout": [
+        91,
+        118,
+        109,
+        108,
+        113,
+        110,
+        111,
+        98,
+        112
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 9.202400000000001e-05
+    },
+    {
+      "pub_index": 19,
+      "key": "P-n4-M0-09",
+      "instance": "P-n4-M0-09",
+      "r": 3,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 3840,
+      "two_q_depth": 2745,
+      "depth": 13085,
+      "physical_qubits": [
+        108,
+        118,
+        110,
+        109,
+        112,
+        91,
+        113,
+        111,
+        98
+      ],
+      "initial_layout": [
+        91,
+        118,
+        109,
+        108,
+        113,
+        110,
+        111,
+        98,
+        112
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.000272752
+    },
+    {
+      "pub_index": 20,
+      "key": "P-n4-M0-09",
+      "instance": "P-n4-M0-09",
+      "r": 3,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 6400,
+      "two_q_depth": 4575,
+      "depth": 23365,
+      "physical_qubits": [
+        108,
+        118,
+        110,
+        109,
+        112,
+        91,
+        113,
+        111,
+        98
+      ],
+      "initial_layout": [
+        91,
+        118,
+        109,
+        108,
+        113,
+        110,
+        111,
+        98,
+        112
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00045348000000000003
+    },
+    {
+      "pub_index": 21,
+      "key": "P-n4-M1-10",
+      "instance": "P-n4-M1-10",
+      "r": 3,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 749,
+      "two_q_depth": 561,
+      "depth": 1824,
+      "physical_qubits": [
+        79,
+        92,
+        94,
+        93,
+        90,
+        98,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 5.7648e-05
+    },
+    {
+      "pub_index": 22,
+      "key": "P-n4-M1-10",
+      "instance": "P-n4-M1-10",
+      "r": 3,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 2247,
+      "two_q_depth": 1683,
+      "depth": 8514,
+      "physical_qubits": [
+        79,
+        92,
+        94,
+        93,
+        90,
+        98,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.000169624
+    },
+    {
+      "pub_index": 23,
+      "key": "P-n4-M1-10",
+      "instance": "P-n4-M1-10",
+      "r": 3,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 3745,
+      "two_q_depth": 2805,
+      "depth": 15204,
+      "physical_qubits": [
+        79,
+        92,
+        94,
+        93,
+        90,
+        98,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.0002816
+    },
+    {
+      "pub_index": 24,
+      "key": "P-n4-M2-02",
+      "instance": "P-n4-M2-02",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 495,
+      "two_q_depth": 346,
+      "depth": 1171,
+      "physical_qubits": [
+        92,
+        111,
+        98,
+        91,
+        119,
+        114,
+        112,
+        113
+      ],
+      "initial_layout": [
+        114,
+        98,
+        91,
+        92,
+        119,
+        112,
+        111,
+        113
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.6476e-05
+    },
+    {
+      "pub_index": 25,
+      "key": "P-n4-M2-02",
+      "instance": "P-n4-M2-02",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 1485,
+      "two_q_depth": 1038,
+      "depth": 5415,
+      "physical_qubits": [
+        92,
+        111,
+        98,
+        91,
+        119,
+        114,
+        112,
+        113
+      ],
+      "initial_layout": [
+        114,
+        98,
+        91,
+        92,
+        119,
+        112,
+        111,
+        113
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00010610800000000001
+    },
+    {
+      "pub_index": 26,
+      "key": "P-n4-M2-02",
+      "instance": "P-n4-M2-02",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 2475,
+      "two_q_depth": 1730,
+      "depth": 9659,
+      "physical_qubits": [
+        92,
+        111,
+        98,
+        91,
+        119,
+        114,
+        112,
+        113
+      ],
+      "initial_layout": [
+        114,
+        98,
+        91,
+        92,
+        119,
+        112,
+        111,
+        113
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00017574000000000002
+    },
+    {
+      "pub_index": 27,
+      "key": "S-n4-g1-M2-00",
+      "instance": "S-n4-g1-M2-00",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 466,
+      "two_q_depth": 345,
+      "depth": 1164,
+      "physical_qubits": [
+        42,
+        56,
+        44,
+        43,
+        46,
+        25,
+        45,
+        37
+      ],
+      "initial_layout": [
+        25,
+        43,
+        56,
+        42,
+        44,
+        46,
+        37,
+        45
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.6668e-05
+    },
+    {
+      "pub_index": 28,
+      "key": "S-n4-g1-M2-00",
+      "instance": "S-n4-g1-M2-00",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 1398,
+      "two_q_depth": 1035,
+      "depth": 5422,
+      "physical_qubits": [
+        42,
+        56,
+        44,
+        43,
+        46,
+        25,
+        45,
+        37
+      ],
+      "initial_layout": [
+        25,
+        43,
+        56,
+        42,
+        44,
+        46,
+        37,
+        45
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00010668400000000001
+    },
+    {
+      "pub_index": 29,
+      "key": "S-n4-g1-M2-00",
+      "instance": "S-n4-g1-M2-00",
+      "r": 2,
+      "role": "subset",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 2330,
+      "two_q_depth": 1725,
+      "depth": 9680,
+      "physical_qubits": [
+        42,
+        56,
+        44,
+        43,
+        46,
+        25,
+        45,
+        37
+      ],
+      "initial_layout": [
+        25,
+        43,
+        56,
+        42,
+        44,
+        46,
+        37,
+        45
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.0001767
+    },
+    {
+      "pub_index": 30,
+      "key": "P-n3-M1-17_r1",
+      "instance": "P-n3-M1-17",
+      "r": 1,
+      "role": "sweep",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 112,
+      "two_q_depth": 97,
+      "depth": 321,
+      "physical_qubits": [
+        111,
+        110,
+        109,
+        118,
+        129,
+        108
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 1.1496000000000001e-05
+    },
+    {
+      "pub_index": 31,
+      "key": "P-n3-M1-17_r1",
+      "instance": "P-n3-M1-17",
+      "r": 1,
+      "role": "sweep",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 336,
+      "two_q_depth": 291,
+      "depth": 1497,
+      "physical_qubits": [
+        111,
+        110,
+        109,
+        118,
+        129,
+        108
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.1168000000000004e-05
+    },
+    {
+      "pub_index": 32,
+      "key": "P-n3-M1-17_r1",
+      "instance": "P-n3-M1-17",
+      "r": 1,
+      "role": "sweep",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 560,
+      "two_q_depth": 485,
+      "depth": 2673,
+      "physical_qubits": [
+        111,
+        110,
+        109,
+        118,
+        129,
+        108
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 5.084e-05
+    },
+    {
+      "pub_index": 33,
+      "key": "P-n3-M1-17_r3",
+      "instance": "P-n3-M1-17",
+      "r": 3,
+      "role": "sweep",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 350,
+      "two_q_depth": 302,
+      "depth": 999,
+      "physical_qubits": [
+        118,
+        109,
+        108,
+        129,
+        111,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.2204e-05
+    },
+    {
+      "pub_index": 34,
+      "key": "P-n3-M1-17_r3",
+      "instance": "P-n3-M1-17",
+      "r": 3,
+      "role": "sweep",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 1050,
+      "two_q_depth": 906,
+      "depth": 4635,
+      "physical_qubits": [
+        118,
+        109,
+        108,
+        129,
+        111,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 9.3292e-05
+    },
+    {
+      "pub_index": 35,
+      "key": "P-n3-M1-17_r3",
+      "instance": "P-n3-M1-17",
+      "r": 3,
+      "role": "sweep",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 1750,
+      "two_q_depth": 1510,
+      "depth": 8271,
+      "physical_qubits": [
+        118,
+        109,
+        108,
+        129,
+        111,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00015438000000000002
+    },
+    {
+      "pub_index": 36,
+      "key": "P-n4-M1-10_r1",
+      "instance": "P-n4-M1-10",
+      "r": 1,
+      "role": "sweep",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 233,
+      "two_q_depth": 180,
+      "depth": 596,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        98,
+        90,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 1.9672e-05
+    },
+    {
+      "pub_index": 37,
+      "key": "P-n4-M1-10_r1",
+      "instance": "P-n4-M1-10",
+      "r": 1,
+      "role": "sweep",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 699,
+      "two_q_depth": 540,
+      "depth": 2786,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        98,
+        90,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 5.5696000000000003e-05
+    },
+    {
+      "pub_index": 38,
+      "key": "P-n4-M1-10_r1",
+      "instance": "P-n4-M1-10",
+      "r": 1,
+      "role": "sweep",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 1165,
+      "two_q_depth": 900,
+      "depth": 4976,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        98,
+        90,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 9.172000000000001e-05
+    },
+    {
+      "pub_index": 39,
+      "key": "P-n4-M1-10_r2",
+      "instance": "P-n4-M1-10",
+      "r": 2,
+      "role": "sweep",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 475,
+      "two_q_depth": 341,
+      "depth": 1149,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        90,
+        111,
+        91,
+        98
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 3.6264000000000004e-05
+    },
+    {
+      "pub_index": 40,
+      "key": "P-n4-M1-10_r2",
+      "instance": "P-n4-M1-10",
+      "r": 2,
+      "role": "sweep",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 1425,
+      "two_q_depth": 1023,
+      "depth": 5361,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        90,
+        111,
+        91,
+        98
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00010547200000000001
+    },
+    {
+      "pub_index": 41,
+      "key": "P-n4-M1-10_r2",
+      "instance": "P-n4-M1-10",
+      "r": 2,
+      "role": "sweep",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 2375,
+      "two_q_depth": 1705,
+      "depth": 9573,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        90,
+        111,
+        91,
+        98
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00017468
+    },
+    {
+      "pub_index": 42,
+      "key": "P-n4-M1-10_r4",
+      "instance": "P-n4-M1-10",
+      "r": 4,
+      "role": "sweep",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 976,
+      "two_q_depth": 733,
+      "depth": 2371,
+      "physical_qubits": [
+        94,
+        79,
+        92,
+        93,
+        90,
+        111,
+        91,
+        98
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 7.4676e-05
+    },
+    {
+      "pub_index": 43,
+      "key": "P-n4-M1-10_r4",
+      "instance": "P-n4-M1-10",
+      "r": 4,
+      "role": "sweep",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 2928,
+      "two_q_depth": 2199,
+      "depth": 11029,
+      "physical_qubits": [
+        94,
+        79,
+        92,
+        93,
+        90,
+        111,
+        91,
+        98
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00022070800000000002
+    },
+    {
+      "pub_index": 44,
+      "key": "P-n4-M1-10_r4",
+      "instance": "P-n4-M1-10",
+      "r": 4,
+      "role": "sweep",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 4880,
+      "two_q_depth": 3665,
+      "depth": 19689,
+      "physical_qubits": [
+        94,
+        79,
+        92,
+        93,
+        90,
+        111,
+        91,
+        98
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 4096,
+      "duration_s": 0.00036674
+    },
+    {
+      "pub_index": 45,
+      "key": "P-n2-M1-11_drift",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "drift_repeat",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 71,
+      "two_q_depth": 67,
+      "depth": 240,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": 0,
+      "shots": 4096,
+      "duration_s": 8.568e-06
+    },
+    {
+      "pub_index": 46,
+      "key": "P-n3-M2-17_drift",
+      "instance": "P-n3-M2-17",
+      "r": 1,
+      "role": "drift_repeat",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 194,
+      "two_q_depth": 151,
+      "depth": 502,
+      "physical_qubits": [
+        118,
+        109,
+        110,
+        98,
+        112,
+        113,
+        111
+      ],
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "repeat_of_pub": 3,
+      "shots": 4096,
+      "duration_s": 1.6780000000000002e-05
+    }
+  ],
+  "totals": {
+    "circuits": 47,
+    "shots": 192512,
+    "by_role": {
+      "subset": 30,
+      "sweep": 15,
+      "drift_repeat": 2
+    },
+    "records": 17
+  },
+  "estimate": {
+    "formula": "(total_shots * per_shot_time_s + n_circuits * per_circuit_overhead_s) * safety_factor",
+    "per_shot_time_s": 0.000622611,
+    "per_shot_time_source": "--per-shot-time",
+    "per_circuit_overhead_s": 0.3824,
+    "safety_factor": 2.0,
+    "total_shots": 192512,
+    "n_circuits": 47,
+    "estimated_seconds": 275.665777664,
+    "estimated_minutes": 4.594429627733334,
+    "floor_seconds": 65.93391820800001,
+    "floor_model": "sum shots * (ASAP-scheduled duration + default rep_delay), execution only",
+    "rep_delay_s": 0.00025,
+    "longest_circuit_s": 0.00045348000000000003,
+    "longest_per_shot_s": 0.00070348,
+    "per_shot_below_longest_circuit": true,
+    "remaining_allowance_seconds": 593.0,
+    "remaining_allowance_source": "--remaining-seconds",
+    "budget_fraction": 0.5,
+    "budget_cap_seconds": 296.5,
+    "fraction_of_remaining": 0.46486640415514335,
+    "within_budget": true,
+    "verify": "Measure per_shot and overhead from job.usage() of a previous small job (paper/hardware/usage.md once one exists), or from https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time (quick rule there: 2 s + 0.00035 s per execution).",
+    "device_limits": {
+      "max_shots": 100000,
+      "max_circuits": 300,
+      "default_rep_delay": 0.00025,
+      "rep_delay_range": [
+        0.0,
+        0.002
+      ],
+      "dt": 4e-09
+    }
+  },
+  "service_usage_raw": null,
+  "preflight": {
+    "live_target": {
+      "passed": true,
+      "checks": {
+        "options": "ok",
+        "program_inputs": "ok",
+        "coerce_pubs": "ok",
+        "classical_registers": "ok",
+        "rzz_angles": "ok",
+        "dd_with_dynamic_circuits": "ok",
+        "isa": "ok",
+        "instructions_in_target": "ok",
+        "faulty_qubits": "ok"
+      },
+      "program_inputs": {
+        "options": {
+          "dynamical_decoupling": {
+            "enable": false
+          },
+          "twirling": {
+            "enable_gates": true,
+            "enable_measure": false,
+            "num_randomizations": 32,
+            "shots_per_randomization": 128,
+            "strategy": "active-accum"
+          }
+        },
+        "version": 2,
+        "support_qiskit": true
+      },
+      "n_pubs": 47,
+      "shots": 4096
+    },
+    "snapshot_target": {
+      "passed": true,
+      "checks": {
+        "options": "ok",
+        "program_inputs": "ok",
+        "coerce_pubs": "ok",
+        "classical_registers": "ok",
+        "rzz_angles": "ok",
+        "dd_with_dynamic_circuits": "ok",
+        "isa": "ok",
+        "instructions_in_target": "ok"
+      },
+      "n_pubs": 47,
+      "shots": 4096
+    },
+    "device_limits_problems": [],
+    "passed": true,
+    "not_covered": "plan entitlements and server-side option support (twirling, DD) are only checked when the job arrives"
+  },
+  "verify": {
+    "qpu_time_model": "https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time",
+    "execution_modes": "https://quantum.cloud.ibm.com/docs/en/guides/execution-modes",
+    "twirling_options": "https://quantum.cloud.ibm.com/docs/en/api/qiskit-ibm-runtime/options-twirling-options",
+    "dd_options": "https://quantum.cloud.ibm.com/docs/en/api/qiskit-ibm-runtime/options-dynamical-decoupling-options",
+    "error_suppression": "https://quantum.cloud.ibm.com/docs/en/guides/configure-error-suppression",
+    "max_execution_time": "https://quantum.cloud.ibm.com/docs/en/guides/max-execution-time"
+  },
+  "provenance": {
+    "timestamp_utc": "2026-10-26T00:58:01Z",
+    "git": {
+      "commit": "9c5aa6703ec8f0ae6fe83dbe3f0b732ad836ebfb",
+      "short_commit": "9c5aa67",
+      "branch": "main",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 44,
+      "untracked_outputs_by_dir": {
+        "paper/data": 36,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 8,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-26T00:58:01Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.16",
+      "implementation": "CPython",
+      "executable": "C:\\Users\\Arturo Arvizu\\.conda\\envs\\dgssp-paper\\python.exe"
+    },
+    "platform": "Windows-10-10.0.26300-SP0",
+    "host": "DESKTOP-893P15V",
+    "user": "Arturo Arvizu",
+    "backend": {
+      "name": "ibm_fez",
+      "num_qubits": 156,
+      "processor_family": "heron",
+      "heavy_hex": true,
+      "calibration_timestamp": "2026-10-25T18:24:25-06:00"
+    }
+  }
+}
