@@ -53,25 +53,31 @@ every instance here except `M = 0` and `M = N/2`, which have no signal to
 resolve and so are never resolved). The records were written under rule v1,
 which was two-sided and so counted a series pushed *below* random guessing as
 resolved; `aggregate.py` re-derives the flags from the stored observations,
-and `sim_per_instance.csv` keeps the v1 flags in `*_v1` columns. All fractions
-below are over every instance on the grid, `M = 0` and `M = N/2` included.
+and `sim_per_instance.csv` keeps the v1 flags in `*_v1` columns.
 
-| grid | resolved | identifiable | reported from extrapolation |
-|---|---|---|---|
-| planned | 0.4017 | 0.514 | 0.4017 |
-| odd | 0.08855 | 0.3024 | 0.08855 |
-| odd7 | 0.06599 | 0.3807 | 0.06599 |
+Each fraction is given twice: over **every** instance on the grid, and over the
+instances **with signal** (`M = 0` and `M = N/2` excluded, the
+`signal_direction != 0` rows). The first partly counts how many signal-free
+instances the family contains (at `n = 2` that is most of them); the second
+measures ZNE itself. The with-signal column is the one to quote for ZNE.
+
+| grid | N | resolved | identifiable | N with signal | resolved, with signal | identifiable, with signal | reported from extrapolation |
+|---|---|---|---|---|---|---|---|
+| planned | 463 | 0.4017 | 0.514 | 340 | 0.5471 | 0.7 | 0.4017 |
+| odd | 463 | 0.08855 | 0.3024 | 340 | 0.1206 | 0.4118 | 0.08855 |
+| odd7 | 197 | 0.06599 | 0.3807 | 130 | 0.1 | 0.5769 | 0.06599 |
 
 Against `n`, odd versus planned (this is the partial-folding result, and
-`fig_sim_grid`):
+`fig_sim_grid`, which plots the all-instance fractions), as resolved /
+identifiable:
 
-| n | odd: resolved / identifiable | planned: resolved / identifiable |
-|---|---|---|
-| 2 | 0.234 / 0.4255 | 0.4255 / 0.4255 |
-| 3 | 0.2 / 0.5636 | 0.7091 / 0.7273 |
-| 4 | 0.04167 / 0.2917 | 0.5417 / 0.6417 |
-| 5 | 0.008333 / 0.1083 | 0.09167 / 0.3333 |
-| 6 | 0.0303 / 0.1515 | 0.1818 / 0.3182 |
+| n | odd, all | odd, with signal | planned, all | planned, with signal | N all / with signal |
+|---|---|---|---|---|---|
+| 2 | 0.234 / 0.4255 | 0.55 / 1 | 0.4255 / 0.4255 | 1 / 1 | 47 / 20 |
+| 3 | 0.2 / 0.5636 | 0.275 / 0.775 | 0.7091 / 0.7273 | 0.975 / 1 | 110 / 80 |
+| 4 | 0.04167 / 0.2917 | 0.05556 / 0.3889 | 0.5417 / 0.6417 | 0.7222 / 0.8556 | 120 / 90 |
+| 5 | 0.008333 / 0.1083 | 0.01111 / 0.1444 | 0.09167 / 0.3333 | 0.1222 / 0.4444 | 120 / 90 |
+| 6 | 0.0303 / 0.1515 | 0.03333 / 0.1667 | 0.1818 / 0.3182 | 0.2 / 0.35 | 66 / 60 |
 
 TEXT TO WRITE: the `n` at which the odd grid stops identifying the exponential,
 and that the planned grid still does, at the same shot count. This is the
@@ -128,5 +134,5 @@ whether ZNE moves the peak back.
 
 ---
 
-Generated 2026-10-27T02:58:20Z from commit
-687c5a1.
+Generated 2026-10-27T03:24:58Z from commit
+94ed221.
