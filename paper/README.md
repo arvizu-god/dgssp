@@ -97,9 +97,11 @@ grow with every record a campaign writes. The git probe runs once per process.
 | `run_campaign.py` | the six `sim_*` stages, `data/campaign_log.json` | WP5: the campaign unattended, gated, logged, optionally synced to a bucket |
 | `verify_campaign.py` | stdout; exit 1 on any failure | WP5: every record present, one commit, one environment, shot totals, Mitiq present |
 | `aggregate.py` | `data/sim_*.csv`, `data/sim_summary.json`, `tex/sim_table_<grid>.tex`, `notes/sim_results.md` | WP5: every table the text quotes |
-| `make_figures.py` | `figures/fig_sim_*.pdf` | WP5: the five simulation figures, from `data/` alone |
+| `make_figures.py` | `figures/fig_sim_*.pdf` (`--set sim`), `figures/fig_hw_*.pdf` (`--set hw`) | WP5: the five simulation figures; WP6: the hardware figures (worked example, signal kept vs gates, folding, ZNE vs Mitiq, sweep and M = 0 with hardware points); from `data/` alone |
 | `qpu_budget.py` | stdout, optional `hardware/qpu_budget.json` | QPU minutes a job shape would cost, offline from the device's calibrated durations |
 | `hardware_batch.py` | `hardware/{manifest,circuits,calibration,jobs}_<date>.*`, `data/hw[_dryrun]_<date>/`, `hardware/usage.md` | WP6: the single hardware job: `--plan`, `--dry-run`, `--probe` / `--probe-report` (2-PUB timing job), `--submit` (checklist-gated), `--collect` |
+| `noise_model_check.py` | `hardware/calibration_exec_<date>[_fetch].json`, `data/hw_predict_<label>_<date>/`, `data/hw_alpha_<label>_<date>/fit.json` | WP6: the calibration in force during the job (`--fetch-calibration`, needs the token), the job re-simulated on it (`--predict`), the fitted error scale alpha (`--fit-alpha`); no QPU time |
+| `hw_aggregate.py` | `data/hw_records.csv`, `data/hw_summary.json`, `tex/hw_table_results.tex`, `tex/hw_table_config.tex` | WP6: every hardware table the text quotes; flags re-derived under the current rule |
 
 `resource_scaling.py` is the C1 measurement: it checks every closed form in
 `notes/resource_model.md` against the circuit the solver builds (144 asserts),

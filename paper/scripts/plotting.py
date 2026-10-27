@@ -198,6 +198,16 @@ EXECUTORS: dict[str, SeriesStyle] = {
         linestyle="-",
         zorder=6,
     ),
+    # The hardware device's own calibration as a noise model (the WP6 dry run
+    # and its re-predictions); "noisy" stays the WP5 simulation campaign.
+    "noise_model": SeriesStyle(
+        key="noise_model",
+        label="Noise model (device calibration)",
+        color=OKABE_ITO["sky_blue"],
+        marker="P",
+        linestyle="-.",
+        zorder=4,
+    ),
 }
 
 
@@ -538,6 +548,46 @@ def legend_below(ax: Any, *, ncol: int = 3, **kwargs: Any) -> Any:
     return ax.legend(**defaults)
 
 
+def figure_legend(fig: Any, axes: Any, *, ncol: int = 3, **kwargs: Any) -> Any:
+    """
+    One legend for a multi-panel figure, under all of it.
+
+    :func:`legend_below` hangs the legend off one panel, and constrained
+    layout then widens that panel's column to make room, so the panels come
+    out unequal.  A figure legend takes its own row instead.  Entries are
+    collected from every panel, first label wins, so a series drawn in each
+    panel appears once.
+
+    Parameters
+    ----------
+    fig:
+        The figure.
+    axes:
+        Its axes (any iterable or array).
+    ncol:
+        Number of legend columns.
+    **kwargs:
+        Forwarded to ``fig.legend``.
+
+    Returns
+    -------
+    matplotlib.legend.Legend | None
+        The legend created; ``None`` when no panel has a labelled artist.
+    """
+    handles: list[Any] = []
+    labels: list[str] = []
+    for ax in getattr(axes, "ravel", lambda: axes)():
+        for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
+            if label not in labels:
+                handles.append(handle)
+                labels.append(label)
+    if not handles:
+        return None
+    defaults: dict[str, Any] = {"loc": "outside lower center", "ncol": ncol}
+    defaults.update(kwargs)
+    return fig.legend(handles, labels, **defaults)
+
+
 __all__ = [
     "COLUMN_WIDTH_IN",
     "FULL_WIDTH_IN",
@@ -555,4 +605,5 @@ __all__ = [
     "figure",
     "save_figure",
     "legend_below",
+    "figure_legend",
 ]

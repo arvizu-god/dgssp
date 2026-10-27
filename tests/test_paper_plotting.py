@@ -68,7 +68,7 @@ def test_save_figure_writes_pdf_and_png(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_all_six_executors_are_registered():
+def test_all_seven_executors_are_registered():
     """The legend vocabulary the paper commits to."""
     assert set(plotting.EXECUTORS) == {
         "ideal",
@@ -77,6 +77,7 @@ def test_all_six_executors_are_registered():
         "zne_pointwise",
         "mitiq",
         "hardware",
+        "noise_model",
     }
 
 

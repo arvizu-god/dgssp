@@ -183,8 +183,23 @@ reporting confident, wrong numbers.
        shot noise (instance-to-instance scatter, e.g. different qubits). The
        scaled CI absorbs it; the leave-one-record-out range shows no single
        record drives α.
-4. Hardware tables and figures for the paper (`aggregate.py` covers only the
-   simulation data).
+4. **In progress: hardware tables and figures.** `hw_aggregate.py` (tables,
+   `hw_summary.json`) and `make_figures.py --set hw`, from the committed files
+   alone; flags under rule v2.
+   - Done: Table 3 (run configuration, `tex/hw_table_config.tex`), Table 4
+     (results per record, `tex/hw_table_results.tex`); Fig 2 worked example
+     (`fig_hw_example`), Fig 5 signal kept vs two-qubit gates with the
+     WP5 cloud, the device model and the model at α̂ (`fig_hw_signal`), Fig 6
+     folding, one record per status (`fig_hw_folding`), Fig 7 ZNE vs Mitiq
+     (`fig_hw_zne`), Fig 9 sweep with hardware points (`fig_hw_sweep`), Fig 10
+     M = 0 with hardware points (`fig_hw_dtv`).
+   - Fixed on the way: the sweep figure drew the fit's interval (up to 820)
+     beside a λ = 1 fallback, and took the flags as stored (rule v1); it now
+     re-derives them and draws an interval only for a reported extrapolation.
+     The D_TV figure's legend no longer widens one panel.
+   - Left: Fig 1 (circuit, TikZ), Fig 3 (pipeline diagram), Fig 4 (resource
+     scaling with the hardware band, `resource_scaling.py`), Table 2 (closed
+     forms vs measured).
 5. Carried over from WP5: the six TEXT TO WRITE paragraphs; the Mitiq section;
    Zenodo deposit, then delete the bucket (on Arturo's OK).
 6. Untracked on purpose: `paper/hardware/account_snapshot.json` (raw account
