@@ -47,22 +47,31 @@ collapses.
 
 ## 2. Resolved and identifiable
 
+Rule v2: a scale counts only if it sits at least 2 standard
+errors from `P_uniform` **on the side of the noiseless answer** (above it, for
+every instance here except `M = 0` and `M = N/2`, which have no signal to
+resolve and so are never resolved). The records were written under rule v1,
+which was two-sided and so counted a series pushed *below* random guessing as
+resolved; `aggregate.py` re-derives the flags from the stored observations,
+and `sim_per_instance.csv` keeps the v1 flags in `*_v1` columns. All fractions
+below are over every instance on the grid, `M = 0` and `M = N/2` included.
+
 | grid | resolved | identifiable | reported from extrapolation |
 |---|---|---|---|
-| planned | 0.4363 | 0.5508 | 0.4363 |
-| odd | 0.1102 | 0.3175 | 0.1037 |
-| odd7 | 0.09645 | 0.4112 | 0.08629 |
+| planned | 0.4017 | 0.514 | 0.4017 |
+| odd | 0.08855 | 0.3024 | 0.08855 |
+| odd7 | 0.06599 | 0.3807 | 0.06599 |
 
 Against `n`, odd versus planned (this is the partial-folding result, and
 `fig_sim_grid`):
 
 | n | odd: resolved / identifiable | planned: resolved / identifiable |
 |---|---|---|
-| 2 | 0.3191 / 0.5319 | 0.5745 / 0.5745 |
-| 3 | 0.2182 / 0.5636 | 0.7091 / 0.7273 |
-| 4 | 0.06667 / 0.2917 | 0.5417 / 0.6417 |
-| 5 | 0.01667 / 0.1083 | 0.09167 / 0.3333 |
-| 6 | 0.0303 / 0.1818 | 0.3182 / 0.4697 |
+| 2 | 0.234 / 0.4255 | 0.4255 / 0.4255 |
+| 3 | 0.2 / 0.5636 | 0.7091 / 0.7273 |
+| 4 | 0.04167 / 0.2917 | 0.5417 / 0.6417 |
+| 5 | 0.008333 / 0.1083 | 0.09167 / 0.3333 |
+| 6 | 0.0303 / 0.1515 | 0.1818 / 0.3182 |
 
 TEXT TO WRITE: the `n` at which the odd grid stops identifying the exponential,
 and that the planned grid still does, at the same shot count. This is the
@@ -119,5 +128,5 @@ whether ZNE moves the peak back.
 
 ---
 
-Generated 2026-10-15T02:55:22Z from commit
-09bdac0.
+Generated 2026-10-27T02:58:20Z from commit
+687c5a1.

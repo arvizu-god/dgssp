@@ -39,14 +39,14 @@ again on ibm_fez).
 perfect, 0 is random guessing. Same 10-instance subset throughout (the
 shallowest instance of each n × M cell, plus the edge instance).
 
-| Instance | 2q gates (fez) | WP5 fake_marrakesh | ibm_fez noise model | Hardware |
-|---|---|---|---|---|
-| P-n2-M1-11 | 71 | 0.85 | 0.78 | **0.47** |
-| P-n3-M2-17 | 194 | 0.64 | 0.56 | **0.14** |
-| P-n3-M1-17 | 212 | 0.61 | 0.53 | **0.16** |
-| P-n4-M2-02 | 495 | 0.37 | 0.22 | **0.02** |
-| S-n4-g1-M2-00 | 466 | 0.24 | 0.19 | **0.01** |
-| P-n4-M1-10 | 749 | 0.14 | 0.10 | **0.02** |
+| Instance | 2q gates (fez) | WP5 fake_marrakesh | ibm_fez model, plan calibration | ibm_fez model, execution calibration | Hardware |
+|---|---|---|---|---|---|
+| P-n2-M1-11 | 71 | 0.85 | 0.78 | 0.79 | **0.47** |
+| P-n3-M2-17 | 194 | 0.64 | 0.56 | 0.58 | **0.14** |
+| P-n3-M1-17 | 212 | 0.61 | 0.53 | 0.54 | **0.16** |
+| P-n4-M2-02 | 495 | 0.37 | 0.22 | 0.24 | **0.02** |
+| S-n4-g1-M2-00 | 466 | 0.24 | 0.19 | 0.20 | **0.01** |
+| P-n4-M1-10 | 749 | 0.14 | 0.10 | 0.10 | **0.02** |
 
 - Hardware signal ≈ (noise-model signal)³ on the three instances with signal
   left (0.78³ = 0.47, 0.56³ = 0.18, 0.53³ = 0.15): ibm_fez behaves as if each
@@ -54,7 +54,9 @@ shallowest instance of each n × M cell, plus the edge instance).
   error is *lower* than fake_marrakesh's (2.6e-3 vs 3.3e-3), so the gap is
   noise the calibration does not capture. It is not calibration age: the
   probe, run 6 min after the 18:24 calibration, showed the same gap on
-  P-n2-M1-11 (0.590 vs 0.837 predicted).
+  P-n2-M1-11 (0.590 vs 0.837 predicted), and the calibration in force while
+  the job ran predicts slightly *more* signal, not less. Measured: α = 3.18
+  (95 % CI 3.07–3.35), see Open item 3.
 - The algorithm works at n = 2 (0.60 vs 0.25 random), is marginal at n = 3
   (0.26–0.35, 1.4–2.1× random) and is indistinguishable from random at n = 4
   (0.077 / 0.142 / 0.131 vs 0.0625 / 0.125 / 0.125), for the *easiest* n = 4
@@ -99,8 +101,9 @@ On ibm_fez the Draper-oracle Grover search for Subset Sum returns a real answer
 only for the smallest instances (n = 2, marginally n = 3: circuits up to about
 200 two-qubit gates). ZNE recovers the answer while signal survives, but the
 device is about 3× noisier per gate than a noise model built from its own
-calibration, so simulation overstates how far both the algorithm and the
-mitigation reach; an identifiability check is what keeps extrapolation from
+calibration (every calibrated error × 3.18, 95 % CI 3.07–3.35, fitted to the
+hardware P(solution)), so simulation overstates how far both the algorithm and
+the mitigation reach; an identifiability check is what keeps extrapolation from
 reporting confident, wrong numbers.
 
 ## Fixed on the way
@@ -136,29 +139,45 @@ reporting confident, wrong numbers.
 2. Optional second job in this window (516 s left, ends ≈ 2026-11-21): the same
    instances on a narrow partial-folding grid (λ = 1, 1.25, 1.5), the one test
    that could change a finding (ZNE at n = 3 on hardware). About 50–75 s.
-3. **In progress: is the gap calibration age, and how big is it?**
-   `paper/scripts/noise_model_check.py`, no QPU time.
-   - `--fetch-calibration` (needs the token) freezes the calibration in force
-     while the job ran (`target_history` at 06:05:15 UTC). It first checks that
-     `target_history` at the plan stamp rebuilds the plan snapshot exactly.
-     *To run.*
-   - `--predict` re-simulates the 47 circuits on it. Accepted: on the plan
-     calibration it reproduces the dry run's counts on all 47 PUBs.
-   - `--fit-alpha` fits α, the factor on every calibrated error (T1/T2 fixed)
-     at which the model matches the hardware P(solution). Against the
-     **plan** calibration (preview; the paper number uses the execution-time
-     one), on the 35 PUBs with signal:
+3. **Done (2026-10-26): the gap is not calibration age, and it is α ≈ 3.2.**
+   `paper/scripts/noise_model_check.py`, no QPU time; every output stamped
+   with the clean commit `687c5a1`.
+   - `--fetch-calibration` froze the calibration in force while the job ran
+     (`target_history` at 06:05:15 UTC → the 23:36:48 −06:00 calibration;
+     `calibration_exec_2026-10-25.json`, report `…_fetch.json`). Method check
+     passed: `target_history` at the plan stamp rebuilds the plan snapshot
+     with 0 differences. ISA check of the 47 circuits: ok. On the 25 qubits the
+     job used, CZ errors are unchanged (median 2.15e-3), sx and readout moved
+     a little (readout median 8.3e-3 → 7.2e-3).
+   - `--predict` (`hw_predict_exec_2026-10-25/`): the execution calibration
+     predicts slightly **more** signal than the plan one (P-n2-M1-11: 0.79 vs
+     0.78; hardware 0.47). So the newer calibration widens the gap. Accepted
+     beforehand: on the plan calibration it reproduces the dry run's counts on
+     all 47 PUBs.
+   - `--fit-alpha` fits α, the factor on every calibrated error (gates,
+     readout, reset; T1/T2 and durations fixed; capped at 0.5), at which the
+     model matches the hardware P(solution). 35 PUBs with signal (M = 0 and
+     M = N/2 excluded), grid α ∈ {1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 8}, 500
+     bootstrap resamples. 95 % CI scaled by √(χ²/dof) where χ²/dof > 1:
 
-     | fitted on | α | 95 % CI (scaled by √χ²/dof) | χ²/dof | leave-one-record-out |
-     |---|---|---|---|---|
-     | λ = 1 | 3.05 | [2.73, 3.42] | 5.1 | 2.97–3.10 |
-     | λ = 3 | 3.10 | [2.73, 3.72] | 0.6 | 3.07–3.19 |
-     | λ = 5 | 4.33 | [2.00, 8.97] | 1.6 | 3.04–5.03 |
-     | all | 3.05 | [2.76, 3.33] | 2.5 | 2.97–3.10 |
+     | fitted on | PUBs | α, execution calibration (paper) | α, plan calibration | χ²/dof | leave-one-record-out (exec) |
+     |---|---|---|---|---|---|
+     | λ = 1 | 13 | **3.18** [2.97, 3.46] | 3.05 [2.73, 3.42] | 5.1 | 3.13–3.21 |
+     | λ = 3 | 11 | 3.21 [2.82, 3.75] | 3.10 [2.73, 3.72] | 0.5 | 3.17–3.32 |
+     | λ = 5 | 11 | 4.27 [2.13, ≥ 8] | 4.33 [2.00, ≥ 8] | 1.6 | 2.61–5.88 |
+     | all | 35 | **3.18** [3.07, 3.35] | 3.05 [2.76, 3.33] | 2.5 | 3.13–3.21 |
 
-     One α ≈ 3 explains the unfolded and the folded circuits alike. So the
-     extra noise behaves like a uniform rescaling of the calibrated errors,
-     which is the "signal³" rule of the results above, now measured.
+     - One α ≈ 3.2 explains the unfolded and the folded circuits alike. So the
+       extra noise behaves like a uniform rescaling of the calibrated errors,
+       which is the "signal³" rule of the results above, now measured.
+     - λ = 5 sets only a lower limit: at λ = 5 most PUBs are near random, and
+       the profile does not rise past the CI threshold before the grid ends
+       (α = 8). The script's `ci_scaled` prints 8.9 there, a widened width
+       beyond the grid; quote it as "≥ 8".
+     - χ²/dof = 5.1 at λ = 1: a single α does not fit every instance within
+       shot noise (instance-to-instance scatter, e.g. different qubits). The
+       scaled CI absorbs it; the leave-one-record-out range shows no single
+       record drives α.
 4. Hardware tables and figures for the paper (`aggregate.py` covers only the
    simulation data).
 5. Carried over from WP5: the six TEXT TO WRITE paragraphs; the Mitiq section;
