@@ -134,6 +134,11 @@ reporting confident, wrong numbers.
    - Resolved fractions: planned 0.436 → 0.402, odd 0.110 → 0.089, odd7
      0.096 → 0.066.
    - Median signal recovery and the model ranking are unchanged.
+   - Fractions are now also given over the instances **with signal**
+     (`M = 0` and `M = N/2` excluded; 340 of 463 on planned / odd, 130 of
+     197 on odd7). Resolved: planned 0.547, odd 0.121, odd7 0.100. At n = 2
+     the all-instance 0.43 becomes 1.00 (20 of 20); n = 3 planned 0.98, n = 6
+     planned 0.20. The with-signal fraction is the one to quote for ZNE.
    - Hardware: 0 of 75 fit blocks change, so no re-collect is needed. Dry
      run: only P-n2-M2-03 (M = N/2).
 2. Optional second job in this window (516 s left, ends ≈ 2026-11-21): the same

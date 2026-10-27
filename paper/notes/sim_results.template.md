@@ -53,25 +53,31 @@ every instance here except `M = 0` and `M = N/2`, which have no signal to
 resolve and so are never resolved). The records were written under rule v1,
 which was two-sided and so counted a series pushed *below* random guessing as
 resolved; `aggregate.py` re-derives the flags from the stored observations,
-and `sim_per_instance.csv` keeps the v1 flags in `*_v1` columns. All fractions
-below are over every instance on the grid, `M = 0` and `M = N/2` included.
+and `sim_per_instance.csv` keeps the v1 flags in `*_v1` columns.
 
-| grid | resolved | identifiable | reported from extrapolation |
-|---|---|---|---|
-| planned | {{per_grid.planned.fraction_resolved}} | {{per_grid.planned.fraction_identifiable}} | {{per_grid.planned.fraction_reported_from_extrapolation}} |
-| odd | {{per_grid.odd.fraction_resolved}} | {{per_grid.odd.fraction_identifiable}} | {{per_grid.odd.fraction_reported_from_extrapolation}} |
-| odd7 | {{per_grid.odd7.fraction_resolved}} | {{per_grid.odd7.fraction_identifiable}} | {{per_grid.odd7.fraction_reported_from_extrapolation}} |
+Each fraction is given twice: over **every** instance on the grid, and over the
+instances **with signal** (`M = 0` and `M = N/2` excluded, the
+`signal_direction != 0` rows). The first partly counts how many signal-free
+instances the family contains (at `n = 2` that is most of them); the second
+measures ZNE itself. The with-signal column is the one to quote for ZNE.
+
+| grid | N | resolved | identifiable | N with signal | resolved, with signal | identifiable, with signal | reported from extrapolation |
+|---|---|---|---|---|---|---|---|
+| planned | {{per_grid.planned.n_instances}} | {{per_grid.planned.fraction_resolved}} | {{per_grid.planned.fraction_identifiable}} | {{per_grid.planned.n_with_signal}} | {{per_grid.planned.fraction_resolved_with_signal}} | {{per_grid.planned.fraction_identifiable_with_signal}} | {{per_grid.planned.fraction_reported_from_extrapolation}} |
+| odd | {{per_grid.odd.n_instances}} | {{per_grid.odd.fraction_resolved}} | {{per_grid.odd.fraction_identifiable}} | {{per_grid.odd.n_with_signal}} | {{per_grid.odd.fraction_resolved_with_signal}} | {{per_grid.odd.fraction_identifiable_with_signal}} | {{per_grid.odd.fraction_reported_from_extrapolation}} |
+| odd7 | {{per_grid.odd7.n_instances}} | {{per_grid.odd7.fraction_resolved}} | {{per_grid.odd7.fraction_identifiable}} | {{per_grid.odd7.n_with_signal}} | {{per_grid.odd7.fraction_resolved_with_signal}} | {{per_grid.odd7.fraction_identifiable_with_signal}} | {{per_grid.odd7.fraction_reported_from_extrapolation}} |
 
 Against `n`, odd versus planned (this is the partial-folding result, and
-`fig_sim_grid`):
+`fig_sim_grid`, which plots the all-instance fractions), as resolved /
+identifiable:
 
-| n | odd: resolved / identifiable | planned: resolved / identifiable |
-|---|---|---|
-| 2 | {{grid_comparison.2.odd.fraction_resolved}} / {{grid_comparison.2.odd.fraction_identifiable}} | {{grid_comparison.2.planned.fraction_resolved}} / {{grid_comparison.2.planned.fraction_identifiable}} |
-| 3 | {{grid_comparison.3.odd.fraction_resolved}} / {{grid_comparison.3.odd.fraction_identifiable}} | {{grid_comparison.3.planned.fraction_resolved}} / {{grid_comparison.3.planned.fraction_identifiable}} |
-| 4 | {{grid_comparison.4.odd.fraction_resolved}} / {{grid_comparison.4.odd.fraction_identifiable}} | {{grid_comparison.4.planned.fraction_resolved}} / {{grid_comparison.4.planned.fraction_identifiable}} |
-| 5 | {{grid_comparison.5.odd.fraction_resolved}} / {{grid_comparison.5.odd.fraction_identifiable}} | {{grid_comparison.5.planned.fraction_resolved}} / {{grid_comparison.5.planned.fraction_identifiable}} |
-| 6 | {{grid_comparison.6.odd.fraction_resolved}} / {{grid_comparison.6.odd.fraction_identifiable}} | {{grid_comparison.6.planned.fraction_resolved}} / {{grid_comparison.6.planned.fraction_identifiable}} |
+| n | odd, all | odd, with signal | planned, all | planned, with signal | N all / with signal |
+|---|---|---|---|---|---|
+| 2 | {{grid_comparison.2.odd.fraction_resolved}} / {{grid_comparison.2.odd.fraction_identifiable}} | {{grid_comparison.2.odd.fraction_resolved_with_signal}} / {{grid_comparison.2.odd.fraction_identifiable_with_signal}} | {{grid_comparison.2.planned.fraction_resolved}} / {{grid_comparison.2.planned.fraction_identifiable}} | {{grid_comparison.2.planned.fraction_resolved_with_signal}} / {{grid_comparison.2.planned.fraction_identifiable_with_signal}} | {{grid_comparison.2.planned.n_instances}} / {{grid_comparison.2.planned.n_with_signal}} |
+| 3 | {{grid_comparison.3.odd.fraction_resolved}} / {{grid_comparison.3.odd.fraction_identifiable}} | {{grid_comparison.3.odd.fraction_resolved_with_signal}} / {{grid_comparison.3.odd.fraction_identifiable_with_signal}} | {{grid_comparison.3.planned.fraction_resolved}} / {{grid_comparison.3.planned.fraction_identifiable}} | {{grid_comparison.3.planned.fraction_resolved_with_signal}} / {{grid_comparison.3.planned.fraction_identifiable_with_signal}} | {{grid_comparison.3.planned.n_instances}} / {{grid_comparison.3.planned.n_with_signal}} |
+| 4 | {{grid_comparison.4.odd.fraction_resolved}} / {{grid_comparison.4.odd.fraction_identifiable}} | {{grid_comparison.4.odd.fraction_resolved_with_signal}} / {{grid_comparison.4.odd.fraction_identifiable_with_signal}} | {{grid_comparison.4.planned.fraction_resolved}} / {{grid_comparison.4.planned.fraction_identifiable}} | {{grid_comparison.4.planned.fraction_resolved_with_signal}} / {{grid_comparison.4.planned.fraction_identifiable_with_signal}} | {{grid_comparison.4.planned.n_instances}} / {{grid_comparison.4.planned.n_with_signal}} |
+| 5 | {{grid_comparison.5.odd.fraction_resolved}} / {{grid_comparison.5.odd.fraction_identifiable}} | {{grid_comparison.5.odd.fraction_resolved_with_signal}} / {{grid_comparison.5.odd.fraction_identifiable_with_signal}} | {{grid_comparison.5.planned.fraction_resolved}} / {{grid_comparison.5.planned.fraction_identifiable}} | {{grid_comparison.5.planned.fraction_resolved_with_signal}} / {{grid_comparison.5.planned.fraction_identifiable_with_signal}} | {{grid_comparison.5.planned.n_instances}} / {{grid_comparison.5.planned.n_with_signal}} |
+| 6 | {{grid_comparison.6.odd.fraction_resolved}} / {{grid_comparison.6.odd.fraction_identifiable}} | {{grid_comparison.6.odd.fraction_resolved_with_signal}} / {{grid_comparison.6.odd.fraction_identifiable_with_signal}} | {{grid_comparison.6.planned.fraction_resolved}} / {{grid_comparison.6.planned.fraction_identifiable}} | {{grid_comparison.6.planned.fraction_resolved_with_signal}} / {{grid_comparison.6.planned.fraction_identifiable_with_signal}} | {{grid_comparison.6.planned.n_instances}} / {{grid_comparison.6.planned.n_with_signal}} |
 
 TEXT TO WRITE: the `n` at which the odd grid stops identifying the exponential,
 and that the planned grid still does, at the same shot count. This is the

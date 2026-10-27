@@ -13,7 +13,8 @@ circuit is built) and writes:
 ``paper/data/sim_cells.csv``
     One row per (family, n, M-class, grid, series): the cell statistic, its
     standard error, the number of instances behind it, and
-    ``fraction_resolved`` / ``fraction_identifiable``.
+    ``fraction_resolved`` / ``fraction_identifiable``, over every instance and
+    (``*_with_signal``) over those whose ideal answer is not random guessing.
 ``paper/data/sim_pathology.csv``
     Every ``M = 0`` instance: ``D_TV`` to the uniform reference before and
     after each renormalisation.
@@ -509,6 +510,51 @@ def fraction(rows: Sequence[dict[str, Any]], key: str) -> float | None:
     return sum(present) / len(present) if present else None
 
 
+def with_signal(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    The rows whose noiseless answer differs from random guessing.
+
+    ``M = 0`` (``P_ideal = 0 = P_uniform``) and ``M = N/2``
+    (``P_ideal = P_uniform``) have ``signal_direction == 0``: rule v2 can never
+    resolve them, so a fraction over every instance partly counts how many of
+    them the family contains.  The fraction over this subset measures ZNE.
+
+    Parameters
+    ----------
+    rows:
+        Per-instance rows.
+
+    Returns
+    -------
+    list[dict]
+        The rows with ``signal_direction`` of +1 or -1.
+    """
+    return [r for r in rows if r.get("signal_direction") in (1, -1)]
+
+
+def signal_fractions(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """
+    ``fraction_resolved`` / ``fraction_identifiable`` over the rows with signal.
+
+    Parameters
+    ----------
+    rows:
+        Per-instance rows.
+
+    Returns
+    -------
+    dict
+        ``n_with_signal``, ``fraction_resolved_with_signal``,
+        ``fraction_identifiable_with_signal``.
+    """
+    subset = with_signal(rows)
+    return {
+        "n_with_signal": len(subset),
+        "fraction_resolved_with_signal": fraction(subset, "resolved"),
+        "fraction_identifiable_with_signal": fraction(subset, "identifiable"),
+    }
+
+
 def _cell_members(
     rows: Sequence[dict[str, Any]],
     family: str,
@@ -582,6 +628,7 @@ def build_cells(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         resolved = fraction(members, "resolved")
         identifiable = fraction(members, "identifiable")
         use_median = resolved is not None and resolved < MEDIAN_BELOW
+        signal = signal_fractions(members)
 
         for series in (*PSOL_SERIES, *TV_SERIES, *BIAS_SERIES):
             values = _finite(r.get(series) for r in members)
@@ -599,6 +646,7 @@ def build_cells(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                     **stats,
                     "fraction_resolved": resolved,
                     "fraction_identifiable": identifiable,
+                    **signal,
                 }
             )
     return cells
@@ -754,6 +802,7 @@ def headline(
             "n_instances": len(members),
             "fraction_resolved": fraction(members, "resolved"),
             "fraction_identifiable": fraction(members, "identifiable"),
+            **signal_fractions(members),
             "fraction_reported_from_extrapolation": (
                 sum(1 for r in members if r["reported_source"] == "extrapolation")
                 / len(members)
@@ -795,6 +844,7 @@ def headline(
                 "n_instances": len(subset),
                 "fraction_resolved": fraction(subset, "resolved"),
                 "fraction_identifiable": fraction(subset, "identifiable"),
+                **signal_fractions(subset),
             }
     out["grid_comparison"] = by_n
     return out
@@ -1085,6 +1135,9 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"  [{grid}] resolved={_fmt(block['fraction_resolved'], 2)} "
             f"identifiable={_fmt(block['fraction_identifiable'], 2)} "
+            f"(with signal, N={block['n_with_signal']}: "
+            f"{_fmt(block['fraction_resolved_with_signal'], 2)} / "
+            f"{_fmt(block['fraction_identifiable_with_signal'], 2)}) "
             f"extrapolated={_fmt(block['fraction_reported_from_extrapolation'], 2)} "
             f"signal recovery (median)={_fmt(block['signal_recovery_median'], 3)}"
         )

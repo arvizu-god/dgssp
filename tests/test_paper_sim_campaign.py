@@ -450,6 +450,26 @@ def test_pooled_m_classes_separate_feasible_from_infeasible():
     assert len(aggregate._cell_members(rows, "P", 3, "0", "odd")) == 1
 
 
+def test_with_signal_fractions_leave_out_what_cannot_be_resolved():
+    """M = 0 and M = N/2 (direction 0) and fit-less rows drop out of the denominator."""
+    rows = [
+        {"signal_direction": 1, "resolved": True, "identifiable": True},
+        {"signal_direction": 1, "resolved": False, "identifiable": True},
+        {"signal_direction": -1, "resolved": True, "identifiable": True},
+        {"signal_direction": 0, "resolved": False, "identifiable": False},
+        {"signal_direction": 0, "resolved": False, "identifiable": False},
+        {"signal_direction": None, "resolved": None, "identifiable": None},
+    ]
+    assert aggregate.fraction(rows, "resolved") == pytest.approx(2 / 5)
+    out = aggregate.signal_fractions(rows)
+    assert out["n_with_signal"] == 3
+    assert out["fraction_resolved_with_signal"] == pytest.approx(2 / 3)
+    assert out["fraction_identifiable_with_signal"] == pytest.approx(1.0)
+    empty = aggregate.signal_fractions(rows[3:])
+    assert empty["n_with_signal"] == 0
+    assert empty["fraction_resolved_with_signal"] is None
+
+
 def test_model_comparison_counts_what_it_excluded():
     """A model accurate only where it is identified is more selective, not better."""
     rows = [
