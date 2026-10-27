@@ -1402,6 +1402,7 @@ def build_records(
     device: Any,
     *,
     executor: str,
+    prediction: Mapping[str, Any] | None = None,
 ) -> list[tuple[str, Record, dict[str, Any]]]:
     """
     Every Record of the job, from per-PUB counts.  Pure offline analysis.
@@ -1420,6 +1421,10 @@ def build_records(
         The calibration snapshot backend (error metrics, provenance).
     executor:
         ``"hardware"`` or ``"noise_model_prediction"``.
+    prediction:
+        For a re-prediction on another calibration (``noise_model_check.py``):
+        stored as ``metrics["prediction"]`` -- which calibration, which noise
+        scale.
 
     Returns
     -------
@@ -1439,7 +1444,11 @@ def build_records(
         reference = exact_index_distribution(prepared.instance, prepared.iterations)
         sols = list(prepared.solution_bitstrings)
         job_id = pub_job_ids[pubs[0]]
-        extra = {"hardware": hardware_block(manifest, manifest_sha, jobs_doc, row, job_id)}
+        extra: dict[str, Any] = {
+            "hardware": hardware_block(manifest, manifest_sha, jobs_doc, row, job_id)
+        }
+        if prediction is not None:
+            extra["prediction"] = dict(prediction)
 
         if row["kind"] == "zne":
             run = zne_run_from_rows(row["key"], crow, counts,

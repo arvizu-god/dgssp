@@ -44,6 +44,8 @@ service handed to it.
 | `run_circuit_on_backend` | function |
 | `evaluate_backends_for_circuit` | function |
 | `select_best_backends` | function |
+| `SCALED_ERROR_MAX` | constant |
+| `scale_calibration_errors` | function |
 
 ---
 
@@ -174,3 +176,19 @@ measured probability of a DP-verified solution is recorded.
 
 - **Inputs:** the two result lists.
 - **Output:** keys `best_real_by_error`, `best_fake_by_error`, `best_real_by_probability`, `best_fake_by_probability`. A value is `None` when the corresponding list is empty.
+
+---
+
+### `scale_calibration_errors(backend, alpha, *, max_error=SCALED_ERROR_MAX) -> tuple[CalibrationSnapshotBackend, dict]`
+
+The same device with every calibrated instruction error (gates, `measure`,
+resets) multiplied by `alpha`; durations and qubit `T1` / `T2` unchanged.
+Scaled errors stop at `max_error = 0.5`, and an error already above it (a
+faulty coupler at `1.0`) keeps its value — scaling never lowers an error.
+
+- **Inputs:** a calibrated BackendV2 (live, fake or snapshot); `alpha > 0`.
+- **Output:** the rebuilt snapshot backend (`AerSimulator.from_backend` on it
+  gives the scaled noise model) and `{"alpha", "max_error", "n_scaled",
+  "n_capped"}`.
+- **Used by:** `paper/scripts/noise_model_check.py --fit-alpha`, which fits the
+  `alpha` at which ibm_fez's own calibration reproduces the hardware.

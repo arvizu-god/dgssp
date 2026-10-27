@@ -31,6 +31,7 @@ from dgssp.mitigation.zne import (
     required_scales,
     resolved_scales_mask,
     richardson_weights,
+    signal_direction,
     simplex_renormalise,
     zne_bootstrap,
 )
@@ -223,6 +224,8 @@ def test_resolvability_flag_semantics():
     assert is_resolved([0.5, 0.126], [4000, 4000], 0.125) is False
     assert is_resolved([0.0, 0.0], [4000, 4000], 0.0) is False
     assert is_resolved([0.5], [4000], None) is None
+    # One-sided: far *below* the null is not resolved (rule v2).
+    assert is_resolved([0.01, 0.01], [4000, 4000], 0.125) is False
 
 
 # ---------------------------------------------------------------------------
@@ -390,15 +393,94 @@ def test_scalar_bootstrap_requires_an_observable():
 _DEGENERATE = ([1.0, 3.0, 5.0], [0.2620, 0.1155, 0.1113], 0.125)
 
 
-def test_informative_scales_mask_is_signed():
+def test_masks_are_one_sided():
     """A point k sigma on the *wrong* side of the null is not information."""
     scales, y, null = _DEGENERATE
-    two_sided = resolved_scales_mask(y, [4000] * 3, null)
-    signed = informative_scales_mask(y, [4000] * 3, null)
-    # lambda = 5 sits ~2.8 sigma below the asymptote: "distinguishable", but it
-    # says nothing about a signal decaying from above.
-    assert two_sided == [True, False, True]
-    assert signed == [True, False, False]
+    # lambda = 5 sits ~2.8 sigma below the asymptote: rule v1 called it
+    # resolved; it says nothing about a signal decaying from above.
+    assert resolved_scales_mask(y, [4000] * 3, null) == [True, False, False]
+    assert informative_scales_mask(y, [4000] * 3, null) == [True, False, False]
+
+
+def test_signal_direction():
+    """The ideal's side of the null; no ideal -> above; ideal == null -> none."""
+    assert signal_direction(0.95, 0.125) == 1
+    assert signal_direction(0.05, 0.125) == -1
+    assert signal_direction(0.5, 0.5) == 0
+    assert signal_direction(0.0, 0.0) == 0
+    assert signal_direction(None, 0.125) == 1
+
+
+#: The n = 6 failure of rule v1: noise drives P_sol *below* random guessing at
+#: every scale, so v1's two-sided test called it resolved, its informative
+#: side came from values[0] (below), and the fit extrapolated to ~0 for an
+#: instance whose ideal is ~1.
+_BELOW_NULL = ([1.0, 1.5, 2.0], [0.0050, 0.0030, 0.0020], 1 / 32)
+
+
+def test_a_series_below_random_guessing_is_not_resolved():
+    """Rule v2: below the null with the ideal above it is no signal at all."""
+    scales, y, null = _BELOW_NULL
+    cfg = ZNESamplingConfig(method="exponential", asymptote="p_uniform")
+    fit = fit_scalar_series(scales, y, [8192] * 3, cfg, p_uniform=null, p_ideal=0.999)
+
+    assert fit["signal_direction"] == 1
+    assert fit["resolved_rule"] == "v2"
+    assert fit["resolved_scales"] == [False, False, False]
+    assert fit["n_informative_scales"] == 0
+    assert fit["resolved"] is False
+    assert fit["identifiable"] is False
+    assert fit["reported_source"] == "min_scale"
+    assert fit["reported_value"] == pytest.approx(y[0])
+
+
+def test_an_ideal_below_the_null_resolves_from_below():
+    """Off-optimum iterations can put the ideal under P_uniform; then below is signal."""
+    scales, y, null = _BELOW_NULL
+    cfg = ZNESamplingConfig(method="linear")
+    fit = fit_scalar_series(scales, y, [8192] * 3, cfg, p_uniform=null, p_ideal=0.001)
+    assert fit["signal_direction"] == -1
+    assert fit["resolved"] is True
+    assert fit["identifiable"] is True
+
+
+def test_an_ideal_at_the_null_resolves_nothing():
+    """M = N/2: P_ideal == P_uniform, so no observation can carry signal."""
+    cfg = ZNESamplingConfig(method="linear")
+    fit = fit_scalar_series(
+        [1.0, 3.0, 5.0], [0.9, 0.8, 0.7], [8192] * 3, cfg, p_uniform=0.5, p_ideal=0.5
+    )
+    assert fit["signal_direction"] == 0
+    assert fit["resolved"] is False
+    assert fit["n_resolved_scales"] == 0
+    assert fit["reported_source"] == "min_scale"
+    assert is_resolved([0.9], [8192], 0.5, direction=0) is False
+
+
+def test_analyse_zne_item_takes_the_side_from_the_reference():
+    """The reference's P(solution) sets the side; the counts sit below the null."""
+    sols = ["0101"]
+    counts = {
+        1.0: {"0101": 2, "1111": 998},
+        1.5: {"0101": 1, "1111": 999},
+        2.0: {"0101": 1, "1111": 999},
+    }
+    run = ZNEItemRun(
+        name="below",
+        nominal_scales=[1.0, 1.5, 2.0],
+        realised_scales=[1.0, 1.5, 2.0],
+        realised_scales_exact=[(1, 1), (3, 2), (2, 1)],
+        realised_scales_1q=[1.0, 1.5, 2.0],
+        counts_per_scale=counts,
+    )
+    cfg = ZNESamplingConfig(method="linear", n_bootstrap=20)
+    common = {"solution_bitstrings": sols, "p_uniform": 1 / 16}
+    with_ref = analyse_zne_item(run, cfg, reference={"0101": 0.96, "1111": 0.04}, **common)
+    assert with_ref["scalar"]["signal_direction"] == 1
+    assert with_ref["scalar"]["resolved"] is False
+    low_ref = analyse_zne_item(run, cfg, reference={"0101": 0.001, "1111": 0.999}, **common)
+    assert low_ref["scalar"]["signal_direction"] == -1
+    assert low_ref["scalar"]["resolved"] is True
 
 
 def test_unidentified_exponential_is_flagged_and_never_reported():

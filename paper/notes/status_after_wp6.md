@@ -119,19 +119,46 @@ reporting confident, wrong numbers.
 
 ## Open
 
-1. **"Resolved" must mean above random guessing.** It is two-sided today: at
-   n = 6, 10 planned-grid WP5 fits extrapolate to ≈ 0 (ideal ≈ 1, P_uniform
-   0.016–0.031) and still count as resolved. WP5's resolved fractions at large
-   n are inflated; signal recovery is the honest headline. Fix
-   `is_resolved` (one-sided, value ≤ 1), re-run `aggregate.py` and the
-   figures, re-collect WP6 with `--force`. This also settles the WP4
-   reporting-rule question ("resolved and identified").
+1. **Done (2026-10-26): "resolved" now means on the ideal's side of random
+   guessing** (rule v2, `dgssp.mitigation.zne.RESOLVED_RULE`). Rule v1 was
+   two-sided, and took the informative side from λ = 1. So a series pushed
+   below P_uniform counted as resolved and identified (n = 6 planned: 9 fits
+   extrapolated to ≈ 0 with ideal ≈ 1). M = N/2 instances also counted, though
+   they have nothing to resolve. `aggregate.py` re-derives the flags from the
+   stored observations (records untouched; v1 kept in `*_v1` columns).
+   - 39 of 1123 WP5 fits change, all from "extrapolation" to "λ = 1"; none
+     the other way.
+   - Resolved fractions: planned 0.436 → 0.402, odd 0.110 → 0.089, odd7
+     0.096 → 0.066.
+   - Median signal recovery and the model ranking are unchanged.
+   - Hardware: 0 of 75 fit blocks change, so no re-collect is needed. Dry
+     run: only P-n2-M2-03 (M = N/2).
 2. Optional second job in this window (516 s left, ends ≈ 2026-11-21): the same
    instances on a narrow partial-folding grid (λ = 1, 1.25, 1.5), the one test
    that could change a finding (ZNE at n = 3 on hardware). About 50–75 s.
-3. Noise-model prediction at the execution-time calibration (23:36), to show
-   the 3× gap is not calibration age beyond the probe's evidence. Needs the
-   service (historical target), no QPU.
+3. **In progress: is the gap calibration age, and how big is it?**
+   `paper/scripts/noise_model_check.py`, no QPU time.
+   - `--fetch-calibration` (needs the token) freezes the calibration in force
+     while the job ran (`target_history` at 06:05:15 UTC). It first checks that
+     `target_history` at the plan stamp rebuilds the plan snapshot exactly.
+     *To run.*
+   - `--predict` re-simulates the 47 circuits on it. Accepted: on the plan
+     calibration it reproduces the dry run's counts on all 47 PUBs.
+   - `--fit-alpha` fits α, the factor on every calibrated error (T1/T2 fixed)
+     at which the model matches the hardware P(solution). Against the
+     **plan** calibration (preview; the paper number uses the execution-time
+     one), on the 35 PUBs with signal:
+
+     | fitted on | α | 95 % CI (scaled by √χ²/dof) | χ²/dof | leave-one-record-out |
+     |---|---|---|---|---|
+     | λ = 1 | 3.05 | [2.73, 3.42] | 5.1 | 2.97–3.10 |
+     | λ = 3 | 3.10 | [2.73, 3.72] | 0.6 | 3.07–3.19 |
+     | λ = 5 | 4.33 | [2.00, 8.97] | 1.6 | 3.04–5.03 |
+     | all | 3.05 | [2.76, 3.33] | 2.5 | 2.97–3.10 |
+
+     One α ≈ 3 explains the unfolded and the folded circuits alike. So the
+     extra noise behaves like a uniform rescaling of the calibrated errors,
+     which is the "signal³" rule of the results above, now measured.
 4. Hardware tables and figures for the paper (`aggregate.py` covers only the
    simulation data).
 5. Carried over from WP5: the six TEXT TO WRITE paragraphs; the Mitiq section;

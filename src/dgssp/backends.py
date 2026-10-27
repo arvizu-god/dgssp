@@ -1267,6 +1267,83 @@ def backend_from_calibration(
     )
 
 
+#: Ceiling of a scaled error: past one half a readout is a coin flip, and a
+#: gate error this large is already a fully depolarising channel for the
+#: purposes of this library.
+SCALED_ERROR_MAX = 0.5
+
+
+def scale_calibration_errors(
+    backend: BackendLike,
+    alpha: float,
+    *,
+    max_error: float = SCALED_ERROR_MAX,
+) -> tuple[CalibrationSnapshotBackend, dict[str, Any]]:
+    """
+    The same device with every calibrated error multiplied by ``alpha``.
+
+    Every instruction's ``error`` -- gates, ``measure`` (the readout error
+    ``NoiseModel.from_backend`` uses), resets -- is scaled; durations and the
+    qubits' ``T1`` / ``T2`` are kept.  So ``alpha`` scales the *reported*
+    error of each operation, and the thermal-relaxation part of the noise
+    model stays as calibrated.  This is the one-parameter family the paper
+    fits the hardware against ("the device behaves like its own calibration
+    with every error times alpha"); ``alpha = 1`` is the calibration itself.
+
+    Parameters
+    ----------
+    backend:
+        A calibrated BackendV2 (a live device, a fake twin or a snapshot).
+    alpha:
+        The factor, ``> 0``.
+    max_error:
+        Scaled errors are capped here (an error already above the cap, such
+        as a faulty coupler reported at ``1.0``, keeps its calibrated value:
+        scaling never lowers an error); the capped entries are counted.
+
+    Returns
+    -------
+    tuple
+        ``(scaled_backend, info)``: the rebuilt snapshot backend, and
+        ``{"alpha", "max_error", "n_scaled", "n_capped"}``.
+
+    Raises
+    ------
+    ValueError
+        If ``alpha`` is not positive.
+    """
+    if not alpha > 0:
+        raise ValueError(f"alpha must be positive, got {alpha}.")
+    payload = calibration_payload(backend)
+    n_scaled = n_capped = 0
+    for rows in payload["instructions"].values():
+        for row in rows:
+            if row["error"] is None:
+                continue
+            error = float(row["error"])
+            scaled = error * float(alpha)
+            ceiling = max(float(max_error), error)
+            if scaled > ceiling:
+                scaled = ceiling
+                n_capped += 1
+            row["error"] = scaled
+            n_scaled += 1
+    name = backend_name(backend)
+    scaled_backend = backend_from_calibration(
+        payload,
+        name=f"{name}_x{alpha:g}",
+        source_name=getattr(backend, "source_name", name),
+        calibration_timestamp=calibration_timestamp(backend),
+    )
+    info = {
+        "alpha": float(alpha),
+        "max_error": float(max_error),
+        "n_scaled": n_scaled,
+        "n_capped": n_capped,
+    }
+    return scaled_backend, info
+
+
 @dataclass(frozen=True)
 class SavedNoiseModel:
     """
@@ -1497,6 +1574,8 @@ __all__ = [
     "SavedNoiseModel",
     "calibration_payload",
     "backend_from_calibration",
+    "SCALED_ERROR_MAX",
+    "scale_calibration_errors",
     "save_noise_model",
     "load_noise_model",
 ]

@@ -22,6 +22,7 @@ from dgssp.backends import (
     load_noise_model,
     median_gate_errors,
     save_noise_model,
+    scale_calibration_errors,
 )
 from dgssp.solvers import DGConfig, DGSSPSolver
 
@@ -244,3 +245,58 @@ def test_an_instruction_with_meaning_beyond_its_name_is_still_refused(kind):
 
     with pytest.raises(ValueError, match="no standard definition"):
         calibration_payload(Device())
+
+
+# ---------------------------------------------------------------------------
+# Scaled calibrations (the hardware-vs-model alpha fit)
+# ---------------------------------------------------------------------------
+
+
+def test_scaling_multiplies_every_error_and_keeps_the_rest(device):
+    """alpha scales each error; durations, T1/T2 and the ISA are untouched."""
+    scaled, info = scale_calibration_errors(device, 2.0, max_error=1.0)
+    before, after = calibration_payload(device), calibration_payload(scaled)
+    assert after["qubit_properties"] == before["qubit_properties"]
+    assert set(after["instructions"]) == set(before["instructions"])
+    n = 0
+    for name, rows in before["instructions"].items():
+        for old, new in zip(rows, after["instructions"][name], strict=True):
+            assert new["qubits"] == old["qubits"]
+            assert new["duration"] == old["duration"]
+            if old["error"] is None:
+                assert new["error"] is None
+            else:
+                assert new["error"] == pytest.approx(min(2.0 * old["error"], 1.0))
+                n += 1
+    assert info["n_scaled"] == n
+    assert info["alpha"] == 2.0
+    assert calibration_timestamp(scaled) == calibration_timestamp(device)
+
+
+def test_scaling_caps_and_counts(device):
+    """Errors past the cap stop there, and the report says how many did."""
+    scaled, info = scale_calibration_errors(device, 1e6)
+    pairs = [
+        (old["error"], new["error"])
+        for name, rows in calibration_payload(device)["instructions"].items()
+        for old, new in zip(rows, calibration_payload(scaled)["instructions"][name], strict=True)
+        if old["error"] is not None
+    ]
+    # Never lowered; nothing below the cap goes past it.
+    assert all(new >= old for old, new in pairs)
+    assert all(new == max(0.5, old) for old, new in pairs if old > 0)
+    assert info["n_capped"] == sum(1 for old, _ in pairs if old > 0)
+
+
+def test_alpha_one_is_the_calibration_itself(device):
+    """No change at alpha = 1."""
+    scaled, info = scale_calibration_errors(device, 1.0, max_error=1.0)
+    assert calibration_payload(scaled)["instructions"] == calibration_payload(device)["instructions"]
+    assert info["n_capped"] == 0
+
+
+@pytest.mark.parametrize("alpha", [0.0, -1.0])
+def test_a_non_positive_alpha_is_refused(device, alpha):
+    """alpha must be positive."""
+    with pytest.raises(ValueError, match="positive"):
+        scale_calibration_errors(device, alpha)

@@ -1087,16 +1087,66 @@ def resolve_asymptote(cfg: ZNESamplingConfig, p_uniform: float | None) -> float 
 # ---------------------------------------------------------------------------
 
 
+#: Version of the resolved / informative rule, stamped on every scalar fit.
+#: ``"v1"`` (WP5 and WP6 records, which carry no stamp) was two-sided for
+#: ``resolved`` and took the ``informative`` side from the lowest scale, so a
+#: series sitting *below* random guessing counted as resolved and identified,
+#: and extrapolated to ~0 for an instance whose ideal is ~1.  ``"v2"`` is
+#: one-sided toward the ideal for both; ``paper/scripts/aggregate.py``
+#: re-derives v2 from the stored observations of v1 records.
+RESOLVED_RULE = "v2"
+
+#: ``|P_ideal - P_uniform|`` below this is "no signal to resolve" (``M = 0``,
+#: ``M = N/2``).  The reference is an exact statevector, so only rounding
+#: separates such an ideal from the null.
+SIGNAL_TOL = 1e-9
+
+
+def signal_direction(p_ideal: float | None, null_value: float) -> int:
+    """
+    The side of the null on which the noiseless answer lies: ``+1``, ``-1`` or ``0``.
+
+    Noise pulls the observable from ``P_ideal`` toward ``P_uniform``, so only
+    an observation on ``P_ideal``'s side of the null carries signal.  Without
+    an ideal the side is ``+1``: Grover amplification at ``r_opt`` puts the
+    solutions above random guessing.  ``0`` means the ideal *is* the null
+    (``M = 0`` or ``M = N/2``), so there is nothing to resolve.
+
+    Parameters
+    ----------
+    p_ideal:
+        Noiseless ``P(solution)``, or ``None`` if unknown.
+    null_value:
+        The random-guessing baseline ``P_uniform``.
+
+    Returns
+    -------
+    int
+        ``+1``, ``-1`` or ``0``.
+    """
+    if p_ideal is None:
+        return 1
+    gap = float(p_ideal) - float(null_value)
+    if abs(gap) <= SIGNAL_TOL:
+        return 0
+    return 1 if gap > 0 else -1
+
+
 def resolved_scales_mask(
     values: Sequence[float],
     shots: Sequence[int],
     null_value: float,
     *,
+    direction: int = 1,
     k: float = RESOLVABILITY_K,
 ) -> list[bool]:
     """
-    Per scale: is the observable at least ``k`` standard errors from the null?
+    Per scale: is the observable at least ``k`` standard errors from the null,
+    on the ideal's side?
 
+    One-sided (rule ``"v2"``, :data:`RESOLVED_RULE`): a point ``k`` standard
+    errors on the *other* side of the null is a fluctuation -- or a noise
+    channel that overshoots random guessing -- not signal about the answer.
     How many entries are ``True`` is what decides whether a model is
     *identified*: a fit with fewer informative scales than free parameters is
     determined by noise, and the exponential is then not even bounded (see
@@ -1110,6 +1160,8 @@ def resolved_scales_mask(
         Shots behind each.
     null_value:
         The random-guessing baseline ``P_uniform``.
+    direction:
+        :func:`signal_direction` of the instance; ``0`` resolves nothing.
     k:
         Threshold in standard errors.
 
@@ -1118,8 +1170,10 @@ def resolved_scales_mask(
     list[bool]
         One flag per scale, in the order given.
     """
+    if direction not in (-1, 0, 1):
+        raise ValueError(f"direction must be -1, 0 or +1, got {direction}.")
     return [
-        abs(v - null_value) >= k * proportion_sigma(v, int(n))
+        direction != 0 and direction * (v - null_value) >= k * proportion_sigma(v, int(n))
         for v, n in zip(values, shots, strict=True)
     ]
 
@@ -1129,45 +1183,29 @@ def informative_scales_mask(
     shots: Sequence[int],
     null_value: float,
     *,
+    direction: int = 1,
     k: float = RESOLVABILITY_K,
 ) -> list[bool]:
     """
-    Per scale: does it carry signal *in the direction the model decays from*?
+    Per scale: does it carry signal in the direction the model decays from?
 
-    :func:`resolved_scales_mask` is two-sided -- it asks whether an
-    observation is distinguishable from the null at all.  Identification asks
-    something stricter: under a decaying model every scale lies on the same
-    side of the asymptote as the least-noisy one, so a point that sits ``k``
-    standard errors on the *other* side is a fluctuation, not information
-    about the decay.  Counting it would make a fit look identified when the
-    rate is in fact unconstrained (see :data:`EXP_RATE_MAX`).
-
-    The reference direction is the sign of ``values[0] - null_value`` (the
-    lowest scale, the least attenuated point).
+    Under rule ``"v2"`` this is :func:`resolved_scales_mask`: both ask for a
+    point ``k`` standard errors from the null on the ideal's side.  (Rule
+    ``"v1"`` took the side from ``values[0]``, so a series that started below
+    the null counted its below-null points as informative.)  The two names
+    are kept because records store both masks.
 
     Parameters
     ----------
-    values:
-        Observed proportions, one per scale, lowest scale first.
-    shots:
-        Shots behind each.
-    null_value:
-        The random-guessing baseline ``P_uniform``.
-    k:
-        Threshold in standard errors.
+    values, shots, null_value, direction, k:
+        As for :func:`resolved_scales_mask`.
 
     Returns
     -------
     list[bool]
         One flag per scale, in the order given.
     """
-    if not values:
-        return []
-    sign = 1.0 if values[0] >= null_value else -1.0
-    return [
-        sign * (v - null_value) >= k * proportion_sigma(v, int(n))
-        for v, n in zip(values, shots, strict=True)
-    ]
+    return resolved_scales_mask(values, shots, null_value, direction=direction, k=k)
 
 
 def is_resolved(
@@ -1175,17 +1213,18 @@ def is_resolved(
     shots: Sequence[int],
     null_value: float | None,
     *,
+    direction: int = 1,
     k: float = RESOLVABILITY_K,
 ) -> bool | None:
     """
-    Whether the observable is distinguishable from the null at every scale.
+    Whether the observable carries signal at every scale.
 
-    ``resolved`` iff ``|obs(lam) - null| >= k * SE(lam)`` at *every* scale.
-    ``SE`` is the binomial standard error of :func:`dgssp.metrics.
-    proportion_sigma`, which is the exact standard deviation of the
-    multinomial bootstrap of a proportion (Jeffreys-floored, so an observation
-    of exactly the null never passes by ``0 >= 0``).  Using the closed form
-    keeps the flag deterministic.
+    ``resolved`` iff ``direction * (obs(lam) - null) >= k * SE(lam)`` at
+    *every* scale.  ``SE`` is the binomial standard error of
+    :func:`dgssp.metrics.proportion_sigma`, which is the exact standard
+    deviation of the multinomial bootstrap of a proportion (Jeffreys-floored,
+    so an observation of exactly the null never passes by ``0 >= 0``).  Using
+    the closed form keeps the flag deterministic.
 
     Parameters
     ----------
@@ -1195,6 +1234,8 @@ def is_resolved(
         Shots behind each.
     null_value:
         The random-guessing baseline ``P_uniform``.  ``None`` -> ``None``.
+    direction:
+        :func:`signal_direction` of the instance.
     k:
         Threshold in standard errors.
 
@@ -1205,7 +1246,76 @@ def is_resolved(
     """
     if null_value is None:
         return None
-    return all(resolved_scales_mask(values, shots, null_value, k=k))
+    return all(resolved_scales_mask(values, shots, null_value, direction=direction, k=k))
+
+
+def scalar_flags(
+    observed: Sequence[float],
+    shots: Sequence[int],
+    null_value: float | None,
+    *,
+    n_params: int,
+    fit_ok: bool,
+    p_ideal: float | None = None,
+    k: float = RESOLVABILITY_K,
+) -> dict[str, Any]:
+    """
+    The resolved / identifiable flags of a scalar fit, and whether to report it.
+
+    The one place the rule lives: :func:`fit_scalar_series` calls it on fresh
+    data, and ``paper/scripts/aggregate.py`` calls it on the observations a
+    stored record already carries, to re-derive the flags of records written
+    under an older :data:`RESOLVED_RULE`.
+
+    Parameters
+    ----------
+    observed, shots:
+        The observations and the shots behind each, lowest scale first.
+    null_value:
+        ``P_uniform``; ``None`` leaves every flag ``None``.
+    n_params:
+        Free parameters of the fitted model.
+    fit_ok:
+        Whether the fit converged.
+    p_ideal:
+        Noiseless value (:func:`signal_direction`).
+    k:
+        Threshold in standard errors.
+
+    Returns
+    -------
+    dict
+        ``resolved``, ``resolved_scales``, ``n_resolved_scales``,
+        ``informative_scales``, ``n_informative_scales``, ``identifiable``,
+        ``signal_direction`` and ``use_fit`` (report the extrapolation rather
+        than the lowest-scale observation).
+    """
+    if null_value is None:
+        return {
+            "resolved": None,
+            "resolved_scales": None,
+            "n_resolved_scales": None,
+            "informative_scales": None,
+            "n_informative_scales": None,
+            "identifiable": None,
+            "signal_direction": None,
+            "use_fit": bool(fit_ok),
+        }
+    direction = signal_direction(p_ideal, null_value)
+    mask = resolved_scales_mask(observed, shots, null_value, direction=direction, k=k)
+    informative = informative_scales_mask(observed, shots, null_value, direction=direction, k=k)
+    resolved = all(mask)
+    identifiable = bool(sum(informative) >= n_params)
+    return {
+        "resolved": resolved,
+        "resolved_scales": mask,
+        "n_resolved_scales": int(sum(mask)),
+        "informative_scales": informative,
+        "n_informative_scales": int(sum(informative)),
+        "identifiable": identifiable,
+        "signal_direction": direction,
+        "use_fit": bool(fit_ok) and resolved and identifiable,
+    }
 
 
 def fit_scalar_series(
@@ -1215,6 +1325,7 @@ def fit_scalar_series(
     cfg: ZNESamplingConfig,
     *,
     p_uniform: float | None = None,
+    p_ideal: float | None = None,
 ) -> dict[str, Any]:
     """
     Weighted fit of an observed proportion against noise scale.
@@ -1236,6 +1347,9 @@ def fit_scalar_series(
     p_uniform:
         The random-guessing baseline ``M / 2**n``: the null of the
         resolvability flag and the value of ``asymptote="p_uniform"``.
+    p_ideal:
+        Noiseless ``P(solution)``; sets which side of the null counts as
+        signal (:func:`signal_direction`).  ``None`` -> above the null.
 
     Returns
     -------
@@ -1247,14 +1361,17 @@ def fit_scalar_series(
         ``resolvability_k``, ``value_at_min_scale`` and:
 
         ``resolved`` / ``resolved_scales`` / ``n_resolved_scales``
-            Two-sided: is each observation distinguishable from the null?
+            One-sided (:func:`resolved_scales_mask`): is each observation
+            ``k`` standard errors from the null on the ideal's side?
             ``resolved`` is ``True`` only when every scale is.
         ``identifiable`` / ``informative_scales`` / ``n_informative_scales``
-            Signed (:func:`informative_scales_mask`): are there at least as
-            many scales carrying signal, on the same side of the asymptote as
-            the lowest scale, as the model has free parameters?  A fit that is
-            not identified is determined by noise, and an exponential one is
-            not even bounded -- see :data:`EXP_RATE_MAX`.
+            Are there at least as many such scales as the model has free
+            parameters?  A fit that is not identified is determined by noise,
+            and an exponential one is not even bounded -- see
+            :data:`EXP_RATE_MAX`.
+        ``signal_direction`` / ``resolved_rule``
+            The side used (:func:`signal_direction`) and
+            :data:`RESOLVED_RULE`.
         ``reported_value`` / ``reported_source``
             The extrapolation when the fit is resolved *and* identified (or no
             null was given), otherwise the lowest-scale observation.  An
@@ -1269,21 +1386,14 @@ def fit_scalar_series(
     asymptote = resolve_asymptote(cfg, p_uniform)
 
     fit = _fit_series(cfg.method, x, y, sigma, asymptote, cfg.exp_rate_max)
-    if p_uniform is None:
-        mask: list[bool] | None = None
-        informative: list[bool] | None = None
-        resolved: bool | None = None
-        n_resolved: int | None = None
-        n_informative: int | None = None
-        identifiable: bool | None = None
-    else:
-        mask = resolved_scales_mask(y.tolist(), n.astype(int).tolist(), p_uniform)
-        informative = informative_scales_mask(y.tolist(), n.astype(int).tolist(), p_uniform)
-        resolved = all(mask)
-        n_resolved = int(sum(mask))
-        n_informative = int(sum(informative))
-        identifiable = bool(n_informative >= fit["n_params"])
-    use_fit = fit["fit_ok"] and resolved is not False and identifiable is not False
+    flags = scalar_flags(
+        y.tolist(),
+        n.astype(int).tolist(),
+        p_uniform,
+        n_params=fit["n_params"],
+        fit_ok=fit["fit_ok"],
+        p_ideal=p_ideal,
+    )
     fit.update(
         {
             "scales": x.tolist(),
@@ -1292,17 +1402,19 @@ def fit_scalar_series(
             "shots": n.astype(int).tolist(),
             "asymptote": asymptote,
             "null_value": p_uniform,
-            "resolved": resolved,
-            "resolved_scales": mask,
-            "n_resolved_scales": n_resolved,
-            "informative_scales": informative,
-            "n_informative_scales": n_informative,
-            "identifiable": identifiable,
+            "resolved": flags["resolved"],
+            "resolved_scales": flags["resolved_scales"],
+            "n_resolved_scales": flags["n_resolved_scales"],
+            "informative_scales": flags["informative_scales"],
+            "n_informative_scales": flags["n_informative_scales"],
+            "identifiable": flags["identifiable"],
+            "signal_direction": flags["signal_direction"],
+            "resolved_rule": RESOLVED_RULE,
             "resolvability_k": RESOLVABILITY_K,
             "exp_rate_max": cfg.exp_rate_max if cfg.method == "exponential" else None,
             "value_at_min_scale": float(y[0]),
-            "reported_value": fit["value"] if use_fit else float(y[0]),
-            "reported_source": "extrapolation" if use_fit else "min_scale",
+            "reported_value": fit["value"] if flags["use_fit"] else float(y[0]),
+            "reported_source": "extrapolation" if flags["use_fit"] else "min_scale",
         }
     )
     return fit
@@ -1328,6 +1440,7 @@ def extrapolate_scalar(
     cfg: ZNESamplingConfig,
     *,
     p_uniform: float | None = None,
+    p_ideal: float | None = None,
 ) -> dict[str, Any]:
     """
     Scalar ZNE: extrapolate one proportion to zero noise.
@@ -1345,6 +1458,8 @@ def extrapolate_scalar(
     p_uniform:
         The random-guessing baseline (resolvability null; ``"p_uniform"``
         asymptote).
+    p_ideal:
+        Noiseless value; the side of the null that counts as signal.
 
     Returns
     -------
@@ -1357,7 +1472,9 @@ def extrapolate_scalar(
         If any scale collected zero shots, or the method needs more scales.
     """
     x, y, n = _observed_series(counts_per_scale, observable_fn)
-    return fit_scalar_series(x.tolist(), y.tolist(), n.astype(int).tolist(), cfg, p_uniform=p_uniform)
+    return fit_scalar_series(
+        x.tolist(), y.tolist(), n.astype(int).tolist(), cfg, p_uniform=p_uniform, p_ideal=p_ideal
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1577,6 +1694,7 @@ def zne_bootstrap(
     reference: Mapping[str, float] | None = None,
     solution_bitstrings: Sequence[str] | None = None,
     p_uniform: float | None = None,
+    p_ideal: float | None = None,
     B: int | None = None,
     seed: int | None = None,
     alpha: float = 0.05,
@@ -1606,6 +1724,8 @@ def zne_bootstrap(
     p_uniform:
         Scalar mode: the random-guessing baseline (see
         :func:`fit_scalar_series`).
+    p_ideal:
+        Scalar mode: the noiseless value (see :func:`fit_scalar_series`).
     B, seed:
         Number of resamples and resampling seed.
     alpha:
@@ -1631,7 +1751,9 @@ def zne_bootstrap(
         if observable_fn is None:
             raise ValueError("Scalar-mode bootstrap needs an observable_fn.")
         x, _, shots = _observed_series(counts_per_scale, observable_fn)
-        point = extrapolate_scalar(counts_per_scale, observable_fn, cfg, p_uniform=p_uniform)
+        point = extrapolate_scalar(
+            counts_per_scale, observable_fn, cfg, p_uniform=p_uniform, p_ideal=p_ideal
+        )
         Y = np.empty((n_boot, x.size))
         for j, scale in enumerate(sorted(counts_per_scale)):
             keys, draws = resample_counts(counts_per_scale[scale], rng, n_boot)
@@ -2395,6 +2517,7 @@ def _scalar_block(
     cfg: ZNESamplingConfig,
     observable_fn: Callable[[Mapping[str, int]], float],
     p_uniform: float,
+    p_ideal: float | None = None,
 ) -> dict[str, Any]:
     """
     One method's scalar fit on an item's counts, with its bootstrap interval.
@@ -2409,6 +2532,8 @@ def _scalar_block(
         The proportion to extrapolate.
     p_uniform:
         Resolvability null and ``"p_uniform"`` asymptote.
+    p_ideal:
+        Noiseless value: which side of the null is signal.
 
     Returns
     -------
@@ -2421,6 +2546,7 @@ def _scalar_block(
         _with_mode(cfg, "scalar"),
         observable_fn=observable_fn,
         p_uniform=p_uniform,
+        p_ideal=p_ideal,
     )
     block = dict(boot["fit"])
     block.update(
@@ -2521,7 +2647,10 @@ def analyse_zne_item(
     p_uniform:
         ``M / 2**n``: resolvability null and ``"p_uniform"`` asymptote.
     reference:
-        Noiseless reference distribution for the pointwise diagnostics.
+        Noiseless reference distribution for the pointwise diagnostics.  Its
+        ``P(solution)`` also sets which side of ``p_uniform`` counts as
+        signal for the scalar flags (:func:`signal_direction`); without it
+        the side is "above".
     methods:
         Extrapolation methods to fit, all from the *same* counts -- nothing is
         re-sampled, so model comparison costs no shots.  ``None`` fits only
@@ -2558,6 +2687,9 @@ def analyse_zne_item(
     def p_sol(counts: Mapping[str, int]) -> float:
         return solution_probability(counts, sols)
 
+    p_ideal = (
+        distribution_solution_probability(reference, sols) if reference is not None else None
+    )
     wanted = [cfg.method] if methods is None else [cfg.method, *methods]
     for name in wanted:
         if name not in ZNE_METHODS:
@@ -2571,7 +2703,7 @@ def analyse_zne_item(
         if name != cfg.method and n_scales < needed:
             scalars[name] = _not_applicable_block(run, name, needed, p_sol, p_uniform)
         else:
-            scalars[name] = _scalar_block(run, method_cfg, p_sol, p_uniform)
+            scalars[name] = _scalar_block(run, method_cfg, p_sol, p_uniform, p_ideal)
     scalar = scalars[cfg.method]
 
     pointwise: dict[str, Any] = {}
@@ -2751,6 +2883,8 @@ __all__ = [
     "ZNE_MODES",
     "ZNE_RENORMS",
     "RESOLVABILITY_K",
+    "RESOLVED_RULE",
+    "SIGNAL_TOL",
     "DEFAULT_VIRTUAL_GATES",
     "EXP_RATE_MAX",
     "FoldResult",
@@ -2763,6 +2897,8 @@ __all__ = [
     "zne_fit_single_value",
     "resolve_asymptote",
     "required_scales",
+    "signal_direction",
+    "scalar_flags",
     "is_resolved",
     "informative_scales_mask",
     "resolved_scales_mask",

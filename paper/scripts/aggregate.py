@@ -42,6 +42,16 @@ in separate columns and differ exactly where a fit is unresolved or
 unidentified -- which is the WP4 result the paper is about, so collapsing them
 would hide it.
 
+*The flags are re-derived, not read.*  ``resolved``, ``identifiable`` and the
+reported value follow the library's current rule
+(:data:`dgssp.mitigation.zne.RESOLVED_RULE`, via
+:func:`dgssp.mitigation.zne.scalar_flags`), computed here from the
+observations, shots and ``P_uniform`` every record stores, with the side of
+the null taken from the record's exact reference.  The WP5 records were
+written under rule ``"v1"``, which was two-sided and so counted a series
+sitting *below* random guessing as resolved; the records stay as written, and
+the stored v1 flags are kept beside the v2 ones in ``*_v1`` columns.
+
 Run::
 
     python paper/scripts/aggregate.py
@@ -65,6 +75,7 @@ if str(SCRIPTS_DIR) not in sys.path:  # pragma: no cover - script bootstrap
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from _common import DATA_DIR, TEX_DIR, load_records, record_provenance  # noqa: E402
+from dgssp.mitigation.zne import RESOLVABILITY_K, RESOLVED_RULE, scalar_flags  # noqa: E402
 
 #: The grids the campaign may have run.
 DEFAULT_GRIDS: tuple[str, ...] = ("odd", "planned", "odd7")
@@ -198,6 +209,73 @@ def _get(record: dict[str, Any] | None, *path: str) -> Any:
     return node
 
 
+def exact_p_ideal(record: dict[str, Any] | None) -> float | None:
+    """
+    ``P(solution)`` of a record's exact reference distribution.
+
+    Parameters
+    ----------
+    record:
+        A loaded record, or ``None``.
+
+    Returns
+    -------
+    float | None
+        ``None`` when the record carries no reference or no solution list.
+    """
+    reference = _get(record, "metrics", "reference_distribution")
+    sols = _get(record, "metrics", "solution_bitstrings")
+    if not isinstance(reference, dict) or sols is None:
+        return None
+    return float(sum(float(reference.get(s, 0.0)) for s in sols))
+
+
+def rederive_flags(block: dict[str, Any] | None, p_ideal: float | None) -> dict[str, Any]:
+    """
+    A stored scalar-fit block's flags and reported value under the current rule.
+
+    Parameters
+    ----------
+    block:
+        One ``zne_fit`` / ``zne_fits[method]`` block as stored.
+    p_ideal:
+        The instance's exact ``P(solution)`` (:func:`exact_p_ideal`).
+
+    Returns
+    -------
+    dict
+        ``resolved``, ``identifiable``, ``n_resolved_scales``,
+        ``n_informative_scales``, ``signal_direction``, ``reported_value``,
+        ``reported_source``.  A missing or not-applicable block keeps its
+        stored values (it has no fit to report).
+    """
+    keys = ("resolved", "identifiable", "n_resolved_scales", "n_informative_scales",
+            "reported_value", "reported_source")
+    if not block or block.get("applicable") is False or not block.get("observed"):
+        out = {key: (block or {}).get(key) for key in keys}
+        out["signal_direction"] = None
+        return out
+    flags = scalar_flags(
+        block["observed"],
+        block["shots"],
+        block.get("null_value"),
+        n_params=int(block["n_params"]),
+        fit_ok=bool(block["fit_ok"]),
+        p_ideal=p_ideal,
+        k=float(block.get("resolvability_k") or RESOLVABILITY_K),
+    )
+    use_fit = flags["use_fit"]
+    return {
+        "resolved": flags["resolved"],
+        "identifiable": flags["identifiable"],
+        "n_resolved_scales": flags["n_resolved_scales"],
+        "n_informative_scales": flags["n_informative_scales"],
+        "signal_direction": flags["signal_direction"],
+        "reported_value": block["value"] if use_fit else block["value_at_min_scale"],
+        "reported_source": "extrapolation" if use_fit else "min_scale",
+    }
+
+
 def instance_row(
     name: str,
     ideal: dict[str, Any] | None,
@@ -225,6 +303,8 @@ def instance_row(
     source = zne or noisy or ideal or {}
     campaign = _get(source, "metrics", "campaign") or {}
     fit = _get(zne, "zne_fit") or {}
+    p_ideal_exact = exact_p_ideal(zne)
+    flags = rederive_flags(fit, p_ideal_exact)
     pathology = _get(zne, "pathology") or {}
 
     row: dict[str, Any] = {
@@ -245,19 +325,27 @@ def instance_row(
         "noisy": _get(noisy, "metrics", "solution_probability"),
         "zne_lambda1": _get(zne, "metrics", "solution_probability"),
         "zne_scalar_value": fit.get("value"),
-        "zne_scalar_reported": fit.get("reported_value"),
+        "zne_scalar_reported": flags["reported_value"],
         "zne_scalar_se": fit.get("bootstrap_se"),
         "zne_scalar_lo": (fit.get("ci") or [None, None])[0],
         "zne_scalar_hi": (fit.get("ci") or [None, None])[1],
         "pointwise_clip": _get(zne, "pointwise", "clip", "solution_probability"),
         "pointwise_simplex": _get(zne, "pointwise", "simplex", "solution_probability"),
         "mitiq": _get(zne, "mitiq", "value"),
-        # flags
-        "resolved": fit.get("resolved"),
-        "identifiable": fit.get("identifiable"),
-        "reported_source": fit.get("reported_source"),
-        "n_informative_scales": fit.get("n_informative_scales"),
-        "n_resolved_scales": fit.get("n_resolved_scales"),
+        # flags (re-derived under RESOLVED_RULE; see the module docstring)
+        "resolved_rule": RESOLVED_RULE if fit else None,
+        "p_ideal_exact": p_ideal_exact,
+        "signal_direction": flags["signal_direction"],
+        "resolved": flags["resolved"],
+        "identifiable": flags["identifiable"],
+        "reported_source": flags["reported_source"],
+        "n_informative_scales": flags["n_informative_scales"],
+        "n_resolved_scales": flags["n_resolved_scales"],
+        # the same flags as the record stores them (rule v1), for audit
+        "resolved_v1": fit.get("resolved"),
+        "identifiable_v1": fit.get("identifiable"),
+        "reported_source_v1": fit.get("reported_source"),
+        "zne_scalar_reported_v1": fit.get("reported_value"),
         "chi2_red": fit.get("chi2_red"),
         "dof": fit.get("dof"),
         "method": fit.get("method"),
@@ -274,12 +362,14 @@ def instance_row(
     }
     for method in METHODS:
         block = _get(zne, "metrics", "zne_fits", method) or {}
+        method_flags = rederive_flags(block, p_ideal_exact)
         row[f"fit_{method}"] = block.get("value")
         # Records written before the not-applicable entry existed lack the key.
         row[f"fit_{method}_applicable"] = block.get("applicable", True if block else None)
-        row[f"fit_{method}_identifiable"] = block.get("identifiable")
-        row[f"fit_{method}_resolved"] = block.get("resolved")
-        row[f"fit_{method}_reported"] = block.get("reported_value")
+        row[f"fit_{method}_identifiable"] = method_flags["identifiable"]
+        row[f"fit_{method}_resolved"] = method_flags["resolved"]
+        row[f"fit_{method}_reported"] = method_flags["reported_value"]
+        row[f"fit_{method}_identifiable_v1"] = block.get("identifiable")
 
     # Bias against the same instance's ideal run, which is what every
     # extrapolation is trying to recover.  Computed per instance and only then
@@ -947,6 +1037,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "schema": "dgssp/paper/sim-summary/1",
         "noise": noise,
+        "resolved_rule": RESOLVED_RULE,
         "grids": grids_present,
         "n_instances": len({r["name"] for r in rows}),
         "stages_present": {

@@ -27,6 +27,7 @@ from .mitiq_baseline import (
     mitiq_zne_solution_probability,
 )
 from .zne import (
+    RESOLVED_RULE,
     ZNE_METHODS,
     ZNE_RENORMS,
     FoldResult,
@@ -51,6 +52,7 @@ from .zne import (
     rebase_to_backend,
     run_zne_batch,
     run_zne_scales,
+    signal_direction,
     simplex_renormalise,
     transpile_once,
     transpile_once_seeded,
@@ -73,6 +75,8 @@ __all__ = [
     "fit_scalar_series",
     "extrapolate_scalar",
     "is_resolved",
+    "signal_direction",
+    "RESOLVED_RULE",
     "project_to_simplex",
     "clip_renormalise",
     "simplex_renormalise",

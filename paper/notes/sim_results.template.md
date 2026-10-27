@@ -47,6 +47,15 @@ collapses.
 
 ## 2. Resolved and identifiable
 
+Rule {{resolved_rule}}: a scale counts only if it sits at least 2 standard
+errors from `P_uniform` **on the side of the noiseless answer** (above it, for
+every instance here except `M = 0` and `M = N/2`, which have no signal to
+resolve and so are never resolved). The records were written under rule v1,
+which was two-sided and so counted a series pushed *below* random guessing as
+resolved; `aggregate.py` re-derives the flags from the stored observations,
+and `sim_per_instance.csv` keeps the v1 flags in `*_v1` columns. All fractions
+below are over every instance on the grid, `M = 0` and `M = N/2` included.
+
 | grid | resolved | identifiable | reported from extrapolation |
 |---|---|---|---|
 | planned | {{per_grid.planned.fraction_resolved}} | {{per_grid.planned.fraction_identifiable}} | {{per_grid.planned.fraction_reported_from_extrapolation}} |

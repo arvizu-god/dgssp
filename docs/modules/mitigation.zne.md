@@ -43,6 +43,7 @@ Mitiq's folds of the same circuits) and submits everything through one
 | `richardson_weights`, `zne_fit_single_value` | functions |
 | `fit_scalar_series`, `extrapolate_scalar` | functions |
 | `is_resolved`, `resolved_scales_mask`, `informative_scales_mask` | functions |
+| `signal_direction`, `scalar_flags`, `RESOLVED_RULE`, `SIGNAL_TOL` | functions / constants |
 | `project_to_simplex`, `clip_renormalise`, `simplex_renormalise` | functions |
 | `pointwise_raw`, `extrapolate_distribution` | functions |
 | `zne_bootstrap` | function |
@@ -148,21 +149,34 @@ Returns `value`, `value_se`, `params`, `param_names`, `cov`, `fitted`,
 `rate_at_bound`, `exp_rate_max`, `scales`, `observed`, `sigma`, `shots`,
 `asymptote`, `null_value`, `resolved`, `resolved_scales`,
 `n_resolved_scales`, `identifiable`, `informative_scales`,
-`n_informative_scales`, `resolvability_k`, `value_at_min_scale`,
-`reported_value`, `reported_source`.
+`n_informative_scales`, `signal_direction`, `resolved_rule`,
+`resolvability_k`, `value_at_min_scale`, `reported_value`, `reported_source`.
+
+`fit_scalar_series`, `extrapolate_scalar` and the scalar `zne_bootstrap` take
+`p_ideal=` (the noiseless value); `analyse_zne_item` derives it from
+`reference`.
 
 #### Resolvability and identifiability
 
-Two distinct questions, both answered on every scalar fit:
+Rule `"v2"` (`RESOLVED_RULE`; one function, `scalar_flags`, holds it). Both
+masks are **one-sided toward the noiseless answer**: with
+`d = signal_direction(P_ideal, P_uniform)` (`+1` above, `−1` below, `0` when
+`|P_ideal − P_uniform| ≤ SIGNAL_TOL`, i.e. `M = 0` or `M = N/2`; `+1` when no
+ideal is given), a scale counts only if `d·(obs(λ) − P_uniform) ≥ 2·SE`. SE is
+the closed-form binomial SE, which is the exact multinomial-bootstrap SE of a
+proportion, so the flags are deterministic.
 
-- **`is_resolved` / `resolved_scales_mask`** (two-sided) — `resolved = True`
-  only if **every** scale has `|obs(λ) − P_uniform| ≥ 2·SE`. SE is the
-  closed-form binomial SE, which is the exact multinomial-bootstrap SE of a
-  proportion, so the flag is deterministic.
-- **`informative_scales_mask`** (signed) — a scale is *informative* only if it
-  sits ≥ 2·SE from the asymptote **on the same side as the lowest scale**. A
-  point that far on the other side is a fluctuation, not information about a
-  decay. `identifiable = n_informative_scales ≥ n_params`.
+- **`resolved`** — every scale counts.
+- **`identifiable`** — `n_informative_scales ≥ n_params`. Under v2
+  `informative_scales_mask` equals `resolved_scales_mask`; both names stay
+  because records store both masks.
+
+Rule `"v1"` (WP5 and WP6 records, which carry no `resolved_rule`) made
+`resolved` two-sided and took the informative side from the lowest scale, so a
+series pushed *below* random guessing counted as resolved and identified — at
+`n = 6` it extrapolated to ≈ 0 for an instance whose ideal is ≈ 1.
+`paper/scripts/aggregate.py` re-derives v2 from the stored observations; the
+records are not rewritten.
 
 `reported_value` is the extrapolation only when the fit is resolved **and**
 identified; otherwise it is the lowest-scale observation
