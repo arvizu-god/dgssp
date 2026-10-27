@@ -93,6 +93,26 @@ def test_times_are_written_readably():
     assert hw_aggregate._when(None) == "---"
 
 
+def test_the_limit_band_is_read_off_the_statuses():
+    """Last resolved to the next not identifiable; no-signal records say nothing."""
+    def rec(key, gates, status):
+        return {"key": key, "two_q_count": gates, "zne_status": status}
+
+    records = [
+        rec("a", 50, "resolved"), rec("b", 90, "identified, not resolved"),
+        rec("c", 40, "no signal"), rec("d", 150, "not identifiable"),
+        rec("e", 300, "identified, not resolved"), rec("f", 120, "not identifiable"),
+        rec("g", 30, "not identifiable"),
+    ]
+    band = hw_aggregate.limit_band(records)
+    assert (band["lower"], band["lower_key"]) == (50, "a")
+    assert (band["upper"], band["upper_key"]) == (120, "f")
+    # e succeeds above the band, g fails below it: listed, not moving the edges.
+    assert band["exceptions"] == ["e", "g"]
+    assert hw_aggregate.limit_band([rec("d", 150, "not identifiable")]) is None
+    assert hw_aggregate.limit_band([rec("a", 50, "resolved")]) is None
+
+
 def test_a_figure_legend_lists_each_series_once():
     """A series drawn in every panel appears once, under the whole figure."""
     fig, axes = plotting.figure(ncols=2)
@@ -138,6 +158,15 @@ def test_statuses_follow_the_current_rule(summary):
     declined = by_key["P-n3-M1-17"]
     assert declined["zne_reported"] == pytest.approx(declined["hardware"])
     assert declined["zne_reported_lo"] is None
+
+
+@needs_job
+def test_the_limit_band_of_the_job(summary):
+    """ZNE resolves at 71 two-qubit gates and fails from 194; one record bucks it."""
+    band = summary["limit_band"]
+    assert (band["lower"], band["lower_key"]) == (71, "P-n2-M1-11")
+    assert (band["upper"], band["upper_key"]) == (194, "P-n3-M2-17")
+    assert band["exceptions"] == ["P-n4-M2-02"]
 
 
 @needs_job

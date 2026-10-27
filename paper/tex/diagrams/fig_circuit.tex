@@ -1,0 +1,67 @@
+% Fig. "The Draper--Grover circuit": built by paper/scripts/build_diagrams.py
+% into paper/figures/fig_circuit.pdf.  Mirrors DGSSPSolver.build_circuit
+% (src/dgssp/solvers/draper_grover.py); the counts are paper/notes/resource_model.md.
+\pdfinfoomitdate=1
+\pdftrailerid{}
+\documentclass[border=3pt,varwidth=17.5cm]{standalone}
+\usepackage{amsmath,amssymb,braket}
+\usepackage{tikz}
+\usetikzlibrary{quantikz2}
+\begin{document}
+\small
+\textbf{(a)} One Grover iteration, repeated $r$ times\par\smallskip
+\begin{quantikz}[row sep={0.75cm,between origins}, column sep=0.28cm]
+\lstick{$\ket{0}^{\otimes n}$ items}
+  & \gate{H^{\otimes n}}\qwbundle{n}
+  & \gategroup[2,steps=8,style={dashed,rounded corners,inner xsep=2pt},
+      label style={label position=above,anchor=south,yshift=-0.1cm}]{$\times\, r$}
+  & \gate[2]{\begin{array}{c}\text{add}\\ \sum_k x_k a_k + \omega\end{array}}
+  & & & & \gate[2]{\begin{array}{c}\text{subtract}\\ \text{(inverse)}\end{array}}
+  & & \gate{D}
+  & \meter{}
+\\
+\lstick{$\ket{0}^{\otimes b}$ sum}
+  & \qwbundle{b}
+  & \gate{\mathrm{QFT}}
+  &
+  & \gate{\mathrm{QFT}^\dagger}
+  & \gate{O_{\tilde t}}
+  & \gate{\mathrm{QFT}}
+  &
+  & \gate{\mathrm{QFT}^\dagger}
+  & & \rstick{$\ket{0}^{\otimes b}$}
+\end{quantikz}
+
+\bigskip
+\begin{minipage}[t]{0.4\linewidth}\raggedright
+\textbf{(b)} Item $k$ in the Fourier basis\par\smallskip
+\begin{quantikz}[row sep={0.6cm,between origins}, column sep=0.22cm]
+\lstick{$x_k$} & \ctrl{1} & \ctrl{2} & \ \ldots\ & \ctrl{4} & \\
+\lstick{$s_0$} & \gate{P(\theta_0)} & & & & \\
+\lstick{$s_1$} & & \gate{P(\theta_1)} & & & \\
+\lstick{$\vdots$}\setwiretype{n} & & & \ \ddots\ & & \\
+\lstick{$s_{b-1}$} & & & & \gate{P(\theta_{b-1})} &
+\end{quantikz}\par\smallskip
+$\theta_j = 2\pi a_k / 2^{\,j+1}$; the offset $\omega$ is the same
+rotation, uncontrolled
+\end{minipage}\hfill
+\begin{minipage}[t]{0.27\linewidth}\raggedright
+\textbf{(c)} Oracle $O_{\tilde t}$\par\smallskip
+\begin{quantikz}[row sep={0.6cm,between origins}, column sep=0.25cm]
+\lstick{$s_0$} & \gate{X^{\bar t_0}} & \ctrl{2} & \gate{X^{\bar t_0}} & \\
+\lstick{$\vdots$}\setwiretype{n} & & & & \\
+\lstick{$s_{b-1}$} & \gate{X^{\bar t_{b-1}}} & \control{} & \gate{X^{\bar t_{b-1}}} &
+\end{quantikz}\par\smallskip
+$\bar t_j = 1 - t_j$ for the bits of the encoded target $\tilde t$;
+a $b$-wide multi-controlled $Z$
+\end{minipage}\hfill
+\begin{minipage}[t]{0.27\linewidth}\raggedright
+\textbf{(d)} Diffuser $D$\par\smallskip
+\begin{quantikz}[row sep={0.6cm,between origins}, column sep=0.25cm]
+\lstick{$x_1$} & \gate{H} & \gate{X} & \ctrl{2} & \gate{X} & \gate{H} & \\
+\lstick{$\vdots$}\setwiretype{n} & & & & & & \\
+\lstick{$x_n$} & \gate{H} & \gate{X} & \control{} & \gate{X} & \gate{H} &
+\end{quantikz}\par\smallskip
+an $n$-wide multi-controlled $Z$
+\end{minipage}
+\end{document}

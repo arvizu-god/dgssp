@@ -183,7 +183,7 @@ reporting confident, wrong numbers.
        shot noise (instance-to-instance scatter, e.g. different qubits). The
        scaled CI absorbs it; the leave-one-record-out range shows no single
        record drives α.
-4. **In progress: hardware tables and figures.** `hw_aggregate.py` (tables,
+4. **Done (2026-10-28): hardware tables and figures.** `hw_aggregate.py` (tables,
    `hw_summary.json`) and `make_figures.py --set hw`, from the committed files
    alone; flags under rule v2.
    - Done: Table 3 (run configuration, `tex/hw_table_config.tex`), Table 4
@@ -197,9 +197,37 @@ reporting confident, wrong numbers.
      beside a λ = 1 fallback, and took the flags as stored (rule v1); it now
      re-derives them and draws an interval only for a reported extrapolation.
      The D_TV figure's legend no longer widens one panel.
-   - Left: Fig 1 (circuit, TikZ), Fig 3 (pipeline diagram), Fig 4 (resource
-     scaling with the hardware band, `resource_scaling.py`), Table 2 (closed
-     forms vs measured).
+   - Done: Fig 4 (`fig_resources`, `resource_scaling.py --figure-only`).
+     Panel (a) is now 2Q count vs n, one line per b, on fake_fez (the job's
+     device twin), with the **hardware-limit band** and the hardware records
+     marked by status. Panel (b) keeps the three-device comparison; panel (c)
+     outlines the cells whose one-iteration circuit fits under the band.
+     The band is read off the statuses, no threshold of our own
+     (`hw_aggregate.limit_band`, in `hw_summary.json`): from the largest
+     resolved circuit (P-n2-M1-11, **71** 2Q) to the next larger one that is
+     not identifiable (P-n3-M2-17, **194** 2Q). One exception, listed rather
+     than moving the edges: P-n4-M2-02 (495 2Q) is identified, not resolved.
+     The fake_fez grid matches the hardware cell by cell (82 vs 71 at
+     (n, b) = (2, 3), 106 vs 112, 212 vs 194, 251 vs 233), so only
+     (2, 3), (2, 4) and (3, 3) fit under the band at one iteration.
+   - Done: Table 2 (`tex/resources_table.tex`). Every closed form re-checked
+     from the stored records: 144/144 on qubits, CP, P, H, X, MCZ and the
+     ancilla-free 2Q reference. Measured factors: default synthesis 0.63–1.00×
+     the reference (median 0.78), transpiled 1.25–2.08× (median 1.64),
+     negating an item −15 to 0 2Q (median 0), guard bit 12–44 CP and 29–168
+     2Q. Then the 2Q counts of nine cells (the hardware widths and the grid's
+     corners) on the three devices.
+   - Figure PDFs no longer carry a creation date, so re-running a figure
+     script changes a PDF only when the figure changed.
+   - Done: Fig 1 (`fig_circuit`: one iteration ×r, the item adder in the
+     Fourier basis, the oracle, the diffuser; mirrors
+     `DGSSPSolver.build_circuit`) and Fig 3 (`fig_pipeline`: instances →
+     circuit → transpile once → fold the ISA circuit → three executors
+     through SamplerV2 → three estimators on the same counts → tables and
+     figures from `data/`). TikZ sources in `tex/diagrams/`, built by
+     `build_diagrams.py`.
+   - Every figure and table on the agreed list now exists. Main text:
+     Figs 1–10, Tables 1–4; supplement: S1 (`fig_sim_models`).
 5. Carried over from WP5: the six TEXT TO WRITE paragraphs; the Mitiq section;
    Zenodo deposit, then delete the bucket (on Arturo's OK).
 6. Untracked on purpose: `paper/hardware/account_snapshot.json` (raw account

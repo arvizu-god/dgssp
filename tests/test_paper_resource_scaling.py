@@ -229,3 +229,80 @@ def test_rows_from_records_drops_the_untranspiled_rows():
     assert rows[0]["backend"] == "fake_marrakesh"
     assert rows[0]["two_q_count"] == 300
     assert rows[0]["logical_two_q"] == 100
+
+
+# ---------------------------------------------------------------------------
+# Table "closed forms vs measured" and the figure, from the run of record
+# ---------------------------------------------------------------------------
+
+RESOURCES = REPO_ROOT / "paper" / "data" / "resources.json"
+needs_resources = pytest.mark.skipif(not RESOURCES.exists(), reason="resources.json not checked out")
+
+
+@pytest.fixture(scope="module")
+def stored_records():
+    """The 432 records of the run of record."""
+    import json
+
+    return json.loads(RESOURCES.read_text(encoding="utf-8"))
+
+
+def test_the_fake_twin_of_a_device():
+    """The job ran on ibm_fez; the grid was transpiled on fake_fez."""
+    assert resource_scaling.fake_twin("ibm_fez") == "fake_fez"
+    assert resource_scaling.fake_twin(None) is None
+
+
+@needs_resources
+def test_every_closed_form_matches_every_stored_circuit(stored_records):
+    """The table's "144/144" is re-derived from the records, not typed."""
+    checks = resource_scaling.closed_form_checks(stored_records)
+    assert checks.pop("points") == 144
+    assert set(checks) == {key for key, _, _ in resource_scaling.CLOSED_FORMS}
+    assert all(count == 144 for count in checks.values()), checks
+
+
+@needs_resources
+def test_a_wrong_count_is_caught(stored_records):
+    """One circuit with an extra controlled phase is one disagreement."""
+    import copy
+
+    broken = copy.deepcopy(stored_records[:3])
+    broken[0]["metrics"]["gate_level_counts"]["cp"] += 1
+    checks = resource_scaling.closed_form_checks(broken)
+    assert checks["points"] == 1
+    assert checks["cp"] == 0 and checks["h"] == 1
+
+
+@needs_resources
+def test_the_table_quotes_the_measured_factors(stored_records):
+    """Routing 1.64x and borrowed ancillas 0.78x (median), as in the note SS10."""
+    text = resource_scaling.resources_table(stored_records)
+    assert "& 144/144 \\\\" in text
+    assert "1.25--2.08 (median 1.64)" in text
+    assert "0.63--1.00 (median 0.78)" in text
+    assert "$-15$--0 (median 0)" in text
+    # The hardware cell (2, 3): reference 55, transpiled 82 on fez.
+    assert "2 & 3 & 55 & 55 & 82 & 83 & 83 \\\\" in text
+
+
+@needs_resources
+def test_the_figure_draws_with_and_without_the_hardware_band(stored_records, tmp_path):
+    """No summary: no band. With one: the band and the hardware points are drawn."""
+    rows = resource_scaling.rows_from_records(stored_records)
+    written = resource_scaling.make_figure(rows, directory=tmp_path / "plain")
+    assert all(path.exists() for path in written)
+
+    summary = {
+        "config": {"backend": "ibm_fez"},
+        "limit_band": {"lower": 71, "lower_key": "a", "upper": 194, "upper_key": "b",
+                       "exceptions": []},
+        "records": [
+            {"n_items": 2, "two_q_count": 71, "zne_status": "resolved"},
+            {"n_items": 3, "two_q_count": 194, "zne_status": "not identifiable"},
+            {"n_items": 2, "two_q_count": 80, "zne_status": "no signal"},
+        ],
+    }
+    written = resource_scaling.make_figure(rows, hardware=summary, directory=tmp_path / "band")
+    assert all(path.exists() for path in written)
+    assert resource_scaling.load_hardware_summary(tmp_path / "absent.json") is None

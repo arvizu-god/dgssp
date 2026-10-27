@@ -25,8 +25,10 @@ and writes:
 ``paper/data/hw_summary.json``
     The same per record plus what the figures need (each scale's
     observations, the fitted curve, the worked example's distributions), the
-    drift check, the alpha fit, the run configuration, and provenance.
-    ``make_figures.py --set hw`` reads this file and nothing else from the job.
+    drift check, the alpha fit, the run configuration, the two-qubit band
+    where ZNE stops working (:func:`limit_band`), and provenance.
+    ``make_figures.py --set hw`` and ``resource_scaling.py --figure-only``
+    read this file and nothing else from the job.
 ``paper/tex/hw_table_results.tex``
     Table "hardware results per record".
 ``paper/tex/hw_table_config.tex``
@@ -397,6 +399,50 @@ def drift_entries(
     return out
 
 
+def limit_band(records: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """
+    The two-qubit counts over which ZNE on this device stops working.
+
+    Read off the statuses, with no threshold of its own: the band runs from
+    the largest circuit whose estimate was *resolved* to the smallest larger
+    one that was *not identifiable*.  Records with no signal say nothing about
+    the limit and are left out.  Records that sit on the wrong side (a
+    resolved or identified estimate above the band, a not-identifiable one
+    below it) are listed as exceptions rather than moving the edges.
+
+    Returns
+    -------
+    dict | None
+        ``{"lower", "lower_key", "upper", "upper_key", "exceptions"}``, or
+        ``None`` when no record was resolved or none above it failed.
+    """
+    rows = [r for r in records
+            if r.get("zne_status") not in (None, "no signal") and r.get("two_q_count")]
+    resolved = [r for r in rows if r["zne_status"] == "resolved"]
+    if not resolved:
+        return None
+    lower = max(resolved, key=lambda r: int(r["two_q_count"]))
+    failed = [r for r in rows if r["zne_status"] == "not identifiable"
+              and int(r["two_q_count"]) > int(lower["two_q_count"])]
+    if not failed:
+        return None
+    upper = min(failed, key=lambda r: int(r["two_q_count"]))
+    exceptions = sorted(
+        r["key"] for r in rows
+        if (r["zne_status"] != "not identifiable"
+            and int(r["two_q_count"]) > int(upper["two_q_count"]))
+        or (r["zne_status"] == "not identifiable"
+            and int(r["two_q_count"]) < int(lower["two_q_count"]))
+    )
+    return {
+        "lower": int(lower["two_q_count"]),
+        "lower_key": lower["key"],
+        "upper": int(upper["two_q_count"]),
+        "upper_key": upper["key"],
+        "exceptions": exceptions,
+    }
+
+
 def alpha_block(fit_doc: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """The alpha fit's numbers the text quotes, per fitted group."""
     if not fit_doc:
@@ -517,6 +563,7 @@ def build_summary(inputs: HwInputs) -> dict[str, Any]:
         "alpha_hat": alpha_hat,
         "records": records,
         "statuses": statuses,
+        "limit_band": limit_band(records),
         "drift": drift_entries(manifest, hw),
         "alpha": {
             EXEC_LABEL: alpha_block(fit_doc),
@@ -762,6 +809,10 @@ def main(argv: list[str] | None = None) -> int:
               f"{_num(r['model_exec']):>6} {_num(r['hardware']):>6} "
               f"{_num(kept) if kept is not None else '-':>7} {_num(r['zne_reported']):>7}  "
               f"{r['zne_status']}")
+    band = summary["limit_band"]
+    if band:
+        print(f"limit band: {band['lower']} ({band['lower_key']}) to {band['upper']} "
+              f"({band['upper_key']}) two-qubit gates; exceptions {band['exceptions']}")
     for d in summary["drift"]:
         print(f"drift {d['key']}: {d['p_first']:.4f} -> {d['p_repeat']:.4f} "
               f"(z = {d['z']:+.2f}, p = {d['p_value']:.3f})")

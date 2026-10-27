@@ -18,8 +18,12 @@ What it does
    median calibrated gate errors.
 5. Fits effective power laws in ``b`` (at fixed ``n``) and in ``n`` (at fixed
    ``b``).
-6. Writes ``paper/data/resources.json``, ``paper/data/resources_fits.json`` and
-   ``paper/figures/fig_resources.pdf``.
+6. Writes ``paper/data/resources.json``, ``paper/data/resources_fits.json``,
+   ``paper/figures/fig_resources.pdf`` and ``paper/tex/resources_table.tex``
+   (Table "resource model: closed forms vs measured").  When
+   ``paper/data/hw_summary.json`` exists (``hw_aggregate.py``), the figure
+   also carries the band of two-qubit counts over which ZNE stopped working
+   on the hardware, and the hardware records themselves.
 
 Circuits are built with **one Grover iteration**.  The resource model is
 per-iteration by construction (see the note), the iteration count enters only
@@ -66,7 +70,7 @@ Run
     python paper/scripts/resource_scaling.py
     python paper/scripts/resource_scaling.py --backends fake_marrakesh
     python paper/scripts/resource_scaling.py --logical-only     # no transpilation
-    python paper/scripts/resource_scaling.py --figure-only      # replot existing data
+    python paper/scripts/resource_scaling.py --figure-only      # figure + table from the data
 """
 
 from __future__ import annotations
@@ -80,7 +84,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from _common import DATA_DIR, Record, record_provenance, save_record
+from _common import DATA_DIR, FIGURES_DIR, TEX_DIR, Record, record_provenance, save_record
 from dgssp import (
     DGConfig,
     DGSSPSolver,
@@ -752,14 +756,55 @@ def rows_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def make_figure(rows: list[dict[str, Any]], *, family: str = "dense") -> list[Path]:
+#: How panel (a) of the figure marks each hardware record with signal, by the
+#: status of its ZNE estimate: (marker, filled).
+HARDWARE_STATUS_MARKERS: dict[str, tuple[str, bool]] = {
+    "resolved": ("o", True),
+    "identified, not resolved": ("o", False),
+    "not identifiable": ("x", False),
+}
+
+
+def fake_twin(backend: str | None) -> str | None:
+    """The fake device standing in for a real one: ``ibm_fez`` -> ``fake_fez``."""
+    if not backend:
+        return None
+    return f"fake_{backend.removeprefix('ibm_')}"
+
+
+def load_hardware_summary(path: Path) -> dict[str, Any] | None:
+    """
+    ``paper/data/hw_summary.json`` (written by ``hw_aggregate.py``), or ``None``.
+
+    The figure is drawn without the hardware band when there is no job yet.
+    """
+    if not path.exists():
+        return None
+    summary: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return summary
+
+
+def make_figure(
+    rows: list[dict[str, Any]],
+    *,
+    family: str = "dense",
+    hardware: dict[str, Any] | None = None,
+    directory: Path | None = None,
+) -> list[Path]:
     """
     Build ``paper/figures/fig_resources.pdf`` from the flattened table.
 
-    Panel (a): two-qubit count and two-qubit depth against ``n`` at the widest
-    ``b`` every ``n`` in the grid supports.  Panel (b): the same against ``b``
-    at the largest such ``n``.  Panel (c): survival estimate over the whole
-    ``(n, b)`` grid for the first backend in the table.
+    Panel (a): two-qubit count against ``n``, one line per ``b``, on the twin
+    of the device the hardware job ran on (without a job, the first backend in
+    the table).  With a hardware summary it also carries the band of
+    two-qubit counts over which ZNE stopped working on that device
+    (``hw_aggregate.limit_band``) and every hardware record with signal at
+    its own two-qubit count, marked by its status.  Panel (b): two-qubit count
+    and depth against ``b`` at the largest ``n`` that reaches the top of the
+    ``b`` range, on every device, with the ancilla-free reference.  Panel
+    (c): survival estimate over the whole ``(n, b)`` grid on the panel (a)
+    device; with a band, the cells whose one-iteration circuit fits under the
+    band's top are outlined.
 
     Parameters
     ----------
@@ -767,6 +812,10 @@ def make_figure(rows: list[dict[str, Any]], *, family: str = "dense") -> list[Pa
         Output of :func:`rows_from_records`.
     family:
         Which item family to draw; the other is in the data either way.
+    hardware:
+        ``paper/data/hw_summary.json``, or ``None`` for no hardware band.
+    directory:
+        Output directory; ``paper/figures`` by default.
 
     Returns
     -------
@@ -780,93 +829,115 @@ def make_figure(rows: list[dict[str, Any]], *, family: str = "dense") -> list[Pa
     """
     import numpy as np
     from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch, Rectangle
 
-    from plotting import OKABE_ITO, SEQUENTIAL_CMAP, backend_style, figure, save_figure
+    from plotting import (
+        OKABE_ITO,
+        SEQUENTIAL_CMAP,
+        backend_style,
+        figure,
+        save_figure,
+        style_for,
+    )
 
     table = [r for r in rows if r["family"] == family and r["sign"] == "positive"]
     if not table:
         raise ValueError(f"No rows for family={family!r}.")
 
     backends = sorted({r["backend"] for r in table})
-    primary = backends[0]
+    job_backend = ((hardware or {}).get("config") or {}).get("backend")
+    twin_name = fake_twin(job_backend)
+    primary: str = twin_name if twin_name is not None and twin_name in backends else backends[0]
+    band = (hardware or {}).get("limit_band") if primary == twin_name else None
+    hw_style = style_for("hardware")
 
-    # Panel (a) fixes b at the largest value shared by the most n; panel (b)
-    # fixes n at the largest n that reaches the top of the b range.
-    b_counts = {b: len({r["n"] for r in table if r["b"] == b}) for b in {r["b"] for r in table}}
-    b_fixed = max(b_counts, key=lambda b: (b_counts[b], b))
+    # Panel (b) fixes n at the largest n that reaches the top of the b range.
     n_candidates = {r["n"] for r in table if r["b"] == max(r2["b"] for r2 in table)}
     n_fixed = max(n_candidates)
 
     fig, axes = figure(width=6.9, aspect=0.36, ncols=3)
     ax_a, ax_b, ax_c = axes
 
-    for ax, x_key, fixed_key, fixed_value, x_label in (
-        (ax_a, "n", "b", b_fixed, "items $n$"),
-        (ax_b, "b", "n", n_fixed, "sum-register width $b$"),
-    ):
-        twin = ax.twinx()
-        twin.set_yscale("log")
-        twin.grid(False)
-
-        for backend in backends:
-            series = sorted(
-                (r for r in table if r["backend"] == backend and r[fixed_key] == fixed_value),
-                key=lambda r: r[x_key],
-            )
-            if not series:
-                continue
-            style = backend_style(backend)
-            xs = [r[x_key] for r in series]
-            ax.plot(
-                xs,
-                [r["two_q_count"] for r in series],
-                label=style.label,
-                **style.line_kwargs(),
-            )
-            twin.plot(
-                xs,
-                [r["two_q_depth"] for r in series],
-                **style.line_kwargs(linestyle=":", marker="None", alpha=0.55, zorder=1),
-            )
-
-        reference = sorted(
-            {(r[x_key], r["logical_two_q"]) for r in table if r[fixed_key] == fixed_value}
+    # Panel (a): every b on the job's device, light grey (small b) to black.
+    b_values = sorted({r["b"] for r in table})
+    for index, b in enumerate(b_values):
+        series = sorted(
+            (r for r in table if r["backend"] == primary and r["b"] == b), key=lambda r: r["n"]
         )
-        if reference:
-            style = backend_style("logical")
-            ax.plot(
-                [x for x, _ in reference],
-                [y for _, y in reference],
-                label=style.label,
-                **style.line_kwargs(),
-            )
+        if not series:
+            continue
+        shade = str(round(0.7 - 0.7 * index / max(1, len(b_values) - 1), 3))
+        xs = [r["n"] for r in series]
+        ys = [r["two_q_count"] for r in series]
+        ax_a.plot(xs, ys, color=shade, marker="o", markersize=2.5, linewidth=1.0, zorder=2)
+        # A line that stops short of the largest n ends among the other lines
+        # (and the hardware points): label it below its end, not beside it.
+        short = xs[-1] < max(r["n"] for r in table)
+        ax_a.annotate(f"$b={b}$", (xs[-1], ys[-1]), xytext=(3, -7 if short else 0),
+                      textcoords="offset points", fontsize=6, va="center", color=shade)
 
-        ax.set_yscale("log")
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("2Q gate count")
-        # Only the right-hand panel carries the twin-axis label: with three
-        # panels across a 6.9 in text width, a label on panel (a)'s twin lands
-        # on top of panel (b)'s own y-label.
-        if x_key == "b":
-            twin.set_ylabel("2Q depth")
-        ax.set_title(f"({'a' if x_key == 'n' else 'b'}) {fixed_key} = {fixed_value}", loc="left")
+    band_handles: list[Any] = []
+    if band:
+        ax_a.axhspan(band["lower"], band["upper"], color=hw_style.color, alpha=0.18,
+                     linewidth=0, zorder=0)
+        band_handles.append(Patch(
+            facecolor=hw_style.color, alpha=0.18, linewidth=0,
+            label=f"ZNE limit on {job_backend} ({band['lower']}–{band['upper']} 2Q)",
+        ))
+        for status, (marker, filled) in HARDWARE_STATUS_MARKERS.items():
+            points = [r for r in hardware["records"]  # type: ignore[index]
+                      if r.get("zne_status") == status and r.get("two_q_count")]
+            if not points:
+                continue
+            ax_a.plot(
+                [r["n_items"] for r in points], [r["two_q_count"] for r in points],
+                linestyle="none", marker=marker, markersize=5, color=hw_style.color,
+                markerfacecolor=hw_style.color if filled else "none",
+                markeredgewidth=1.2, zorder=6, label=f"hardware: {status}",
+            )
+    ax_a.set_yscale("log")
+    # Room below the band, whose lower edge is a measured point.
+    lowest = min([r["two_q_count"] for r in table if r["backend"] == primary]
+                 + ([band["lower"]] if band else []))
+    ax_a.set_ylim(bottom=0.75 * lowest)
+    ax_a.set_xlim(min(r["n"] for r in table) - 0.4, max(r["n"] for r in table) + 0.9)
+    ax_a.set_xlabel("items $n$")
+    ax_a.set_ylabel("2Q gate count")
+    ax_a.set_title(f"(a) {backend_style(primary).label}, every $b$", loc="left")
+
+    # Panel (b): every device against b at fixed n, with the reference.
+    twin = ax_b.twinx()
+    twin.set_yscale("log")
+    twin.grid(False)
+    for backend in backends:
+        series = sorted(
+            (r for r in table if r["backend"] == backend and r["n"] == n_fixed),
+            key=lambda r: r["b"],
+        )
+        if not series:
+            continue
+        style = backend_style(backend)
+        xs = [r["b"] for r in series]
+        ax_b.plot(xs, [r["two_q_count"] for r in series], label=style.label,
+                  **style.line_kwargs())
+        twin.plot(xs, [r["two_q_depth"] for r in series],
+                  **style.line_kwargs(linestyle=":", marker="None", alpha=0.55, zorder=1))
+    reference = sorted({(r["b"], r["logical_two_q"]) for r in table if r["n"] == n_fixed})
+    if reference:
+        style = backend_style("logical")
+        ax_b.plot([x for x, _ in reference], [y for _, y in reference], label=style.label,
+                  **style.line_kwargs())
+    ax_b.set_yscale("log")
+    ax_b.set_xlabel("sum-register width $b$")
+    ax_b.set_ylabel("2Q gate count")
+    twin.set_ylabel("2Q depth")
+    ax_b.set_title(f"(b) n = {n_fixed}", loc="left")
 
     depth_proxy = Line2D(
         [], [], color=OKABE_ITO["grey"], linestyle=":", alpha=0.8, label="2Q depth (right axis)"
     )
-    # One legend for the whole figure, below the panels: the curves in (a) and
-    # (b) rise steeply from the bottom-left to the top-right, so every in-axes
-    # position either covers data or covers the logical reference.
-    handles, labels = ax_a.get_legend_handles_labels()
-    fig.legend(
-        [*handles, depth_proxy],
-        [*labels, depth_proxy.get_label()],
-        loc="outside lower center",
-        ncol=len(handles) + 1,
-        fontsize=7,
-    )
 
-    # Panel (c): survival heatmap on the primary backend.
+    # Panel (c): survival heatmap on the panel (a) device.
     heat_rows = [r for r in table if r["backend"] == primary and r["survival"] is not None]
     ns = sorted({r["n"] for r in heat_rows})
     bs = sorted({r["b"] for r in heat_rows})
@@ -890,7 +961,227 @@ def make_figure(rows: list[dict[str, Any]], *, family: str = "dense") -> list[Pa
     colorbar = fig.colorbar(image, ax=ax_c, pad=0.02)
     colorbar.set_label(r"$\log_{10} S$")
 
-    return save_figure(fig, "fig_resources")
+    if band:
+        for row in heat_rows:
+            if row["two_q_count"] <= band["upper"]:
+                ax_c.add_patch(Rectangle((row["n"] - 0.5, row["b"] - 0.5), 1, 1, fill=False,
+                                         edgecolor=OKABE_ITO["black"], linewidth=1.2))
+        band_handles.append(Patch(facecolor="none", edgecolor=OKABE_ITO["black"],
+                                  label=f"(c) one iteration under {band['upper']} 2Q"))
+
+    # One legend for the whole figure, below the panels: the curves rise
+    # steeply from the bottom-left to the top-right, so every in-axes position
+    # either covers data or covers the logical reference.
+    handles, labels = ax_b.get_legend_handles_labels()
+    hw_handles, hw_labels = ax_a.get_legend_handles_labels()
+    extra = [depth_proxy, *band_handles]
+    fig.legend(
+        [*handles, *extra[:1], *hw_handles, *extra[1:]],
+        [*labels, depth_proxy.get_label(), *hw_labels, *(h.get_label() for h in extra[1:])],
+        loc="outside lower center",
+        ncol=len(handles) + 1,
+        fontsize=7,
+    )
+
+    return save_figure(fig, "fig_resources", directory=directory or FIGURES_DIR)
+
+
+# ---------------------------------------------------------------------------
+# Table "resource model: closed forms vs measured"
+# ---------------------------------------------------------------------------
+
+#: Grid cells the table lists one by one: the register widths of the
+#: hardware job's instances, then the corners of the grid (note SS10).
+TABLE_CELLS: tuple[tuple[int, int], ...] = (
+    (2, 3), (3, 3), (3, 4), (4, 4), (4, 5), (5, 5), (5, 8), (8, 5), (8, 8),
+)
+
+#: The closed forms the table states, in its order: (key, quantity, formula).
+#: Per Grover iteration; the circuit adds ``n`` Hadamards and ``n``
+#: measurements once.
+CLOSED_FORMS: tuple[tuple[str, str, str], ...] = (
+    ("qubits", "Qubits", "$n + b$ (no ancilla)"),
+    ("cp", "Controlled phases", "$2b(b-1) + 2n_{+}b$"),
+    ("p", "Phase gates (offset)", "$2b\\,[\\omega \\neq 0]$"),
+    ("h", "Hadamards", "$4b + 2n + 2[b \\geq 3] + 2[n \\geq 3]$"),
+    ("x", "Pauli $X$", "$2z + 2n$"),
+    ("mcz", "Multi-controlled $Z$", "2 (widths $b$ and $n$)"),
+    ("two_q", "2Q gates, ancilla-free reference", "$4b(b-1) + 4n_{+}b + g(b) + g(n)$"),
+)
+
+
+def closed_form_checks(records: list[dict[str, Any]]) -> dict[str, int]:
+    """
+    Re-check every closed form of the table against the stored records.
+
+    The circuit's gate-level counts and the transpiled layouts were written by
+    the run; the closed forms are :func:`dgssp.resource_model` and the pinned
+    reference MCZ cost.  Nothing is rebuilt but the encoding.
+
+    Parameters
+    ----------
+    records:
+        Records as written to ``paper/data/resources.json``.
+
+    Returns
+    -------
+    dict[str, int]
+        For each key of :data:`CLOSED_FORMS`, how many grid points agree, and
+        ``"points"``, how many grid points there are.
+    """
+    points: dict[str, dict[str, Any]] = {}
+    layouts: dict[str, list[int]] = {}
+    for record in records:
+        name = record["instance"]["name"]
+        points.setdefault(name, record)
+        physical = (record.get("transpiled") or {}).get("physical_qubits")
+        if physical is not None:
+            layouts.setdefault(name, []).append(len(physical))
+
+    agree = {key: 0 for key, _, _ in CLOSED_FORMS}
+    for name, record in points.items():
+        metrics = record["metrics"]
+        model = metrics["resource_model"]
+        ops = metrics["gate_level_counts"]
+        width = record["n_items"] + record["n_sum"]
+        encoding = build_encoding(record["instance"]["items"], record["instance"]["target"])
+        reference = resource_model(encoding, ITERATIONS).two_qubit_reference(mcz_noaux_cx_cost)
+        multi = sum(ops.get(gate, 0) for gate in ("mcx", "ccx", "cz", "z"))
+        agree["qubits"] += model["num_qubits"] == width and all(
+            used == width for used in layouts.get(name, [])
+        )
+        agree["cp"] += ops.get("cp", 0) == model["controlled_phase"]
+        agree["p"] += ops.get("p", 0) == model["phase"]
+        agree["h"] += ops.get("h", 0) == model["hadamard"]
+        agree["x"] += ops.get("x", 0) == model["pauli_x"]
+        agree["mcz"] += multi == model["multi_controlled_z"]
+        agree["two_q"] += int(metrics["logical"]["two_q_count"]) == reference
+    return {**agree, "points": len(points)}
+
+
+def _spread(values: list[float], digits: int = 2) -> str:
+    """``min--max (median m)``, for the table."""
+    import statistics
+
+    def text(value: float) -> str:
+        number = f"{value:.{digits}f}" if digits else f"{value:.0f}"
+        return f"${number}$" if value < 0 else number
+
+    return (f"{text(min(values))}--{text(max(values))} "
+            f"(median {text(statistics.median(values))})")
+
+
+def resources_table(records: list[dict[str, Any]]) -> str:
+    """
+    Table "resource model: closed forms vs measured", as LaTeX.
+
+    Two tabulars.  The first states each closed form per Grover iteration and
+    how many of the grid's circuits it matches exactly
+    (:func:`closed_form_checks`), then the measured factors the closed forms
+    do not cover: what Qiskit's default synthesis (borrowed ancillas) and
+    heavy-hex routing do to the reference, and what negating an item and the
+    guard bit cost.  The second lists the two-qubit counts of
+    :data:`TABLE_CELLS` (dense family, all positive, one iteration): the
+    reference, the default synthesis, and the transpiled count on each device.
+
+    Parameters
+    ----------
+    records:
+        Records as written to ``paper/data/resources.json``.
+
+    Returns
+    -------
+    str
+        The LaTeX source.
+    """
+    checks = closed_form_checks(records)
+    total = checks["points"]
+    rows = rows_from_records(records)
+    backends = sorted({r["backend"] for r in rows})
+
+    points: dict[str, dict[str, Any]] = {}
+    for record in records:
+        points.setdefault(record["instance"]["name"], record)
+    hls = [r["metrics"]["logical"]["two_q_count_hls"] / r["metrics"]["logical"]["two_q_count"]
+           for r in points.values()]
+    routing = [r["two_q_count"] / r["logical_two_q"] for r in rows]
+    by_cell = {(r["backend"], r["n"], r["b"], r["family"], r["sign"]): r for r in rows}
+    signed = [
+        by_cell[(backend, n, b, family, "negated")]["two_q_count"] - r["two_q_count"]
+        for (backend, n, b, family, sign), r in by_cell.items()
+        if sign == "positive" and (backend, n, b, family, "negated") in by_cell
+    ]
+    guard_cp = [r["metrics"]["guard_bit_overhead"]["controlled_phase"] for r in points.values()]
+    guard_2q = [r["metrics"]["guard_bit_overhead"]["two_q_reference"] for r in points.values()]
+
+    lines = [
+        "% Generated by paper/scripts/resource_scaling.py -- do not edit.",
+        f"% {total} circuits, {len(rows)} transpilations on {', '.join(backends)}; "
+        f"one Grover iteration, optimization level {OPTIMIZATION_LEVEL}.",
+        "\\begin{tabular}{lll}",
+        "\\hline",
+        "Per Grover iteration & Closed form & Circuit agrees \\\\",
+        "\\hline",
+    ]
+    for key, quantity, formula in CLOSED_FORMS:
+        lines.append(f"{quantity} & {formula} & {checks[key]}/{total} \\\\")
+    lines += [
+        "\\hline",
+        "Measured, not in closed form & Bound & Over the grid \\\\",
+        "\\hline",
+        f"Default synthesis / reference & $\\leq 1$ & {_spread(hls)} \\\\",
+        f"Transpiled / reference & --- & {_spread(routing)} \\\\",
+        f"Negating one item, $\\Delta$2Q transpiled & 0 & {_spread(signed, 0)} \\\\",
+        f"Guard bit, $\\Delta$CP & $4(b-1) + 2n_{{+}}$ & {_spread(guard_cp, 0)} \\\\",
+        f"Guard bit, $\\Delta$2Q reference & $2\\Delta\\mathrm{{CP}} + g(b) - g(b-1)$ "
+        f"& {_spread(guard_2q, 0)} \\\\",
+        "\\hline",
+        "\\end{tabular}",
+        "",
+        "\\medskip",
+        "",
+        "\\begin{tabular}{rr" + "r" * (2 + len(backends)) + "}",
+        "\\hline",
+        f"& & \\multicolumn{{2}}{{c}}{{Logical}} & \\multicolumn{{{len(backends)}}}{{c}}"
+        "{Transpiled} \\\\",
+        "$n$ & $b$ & Reference & Default & "
+        + " & ".join(_tex_name(b) for b in backends) + " \\\\",
+        "\\hline",
+    ]
+    for n, b in TABLE_CELLS:
+        cell = [by_cell.get((backend, n, b, "dense", "positive")) for backend in backends]
+        if not any(cell):
+            continue
+        first = next(r for r in cell if r)
+        lines.append(
+            f"{n} & {b} & {first['logical_two_q']} & {first['logical_two_q_hls']} & "
+            + " & ".join(str(r["two_q_count"]) if r else "---" for r in cell) + " \\\\"
+        )
+    lines += [
+        "\\hline",
+        "\\end{tabular}",
+        "% n_+ = items != 0; omega = the offset; z = zero bits of the encoded target;",
+        "% g(w) = CX cost of a width-w MCZ in the pinned ancilla-free synthesis",
+        "%   (g(1) = 0, g(2) = 1, g(w) = 8w^2 - 32w - 36 for w >= 8).",
+        "% Reference: that synthesis, a function of (n, b) alone. Default: Qiskit's",
+        "%   HighLevelSynthesis, which borrows idle register qubits as ancillas.",
+        "% Second tabular: dense items (all odd), all positive; the first five rows are",
+        "%   the register widths of the hardware job's instances.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _tex_name(backend: str) -> str:
+    """A device name for a table header: ``fake_fez`` -> ``fez``."""
+    return backend.removeprefix("fake_").replace("_", "\\_")
+
+
+def write_table(records: list[dict[str, Any]], tex_dir: Path = TEX_DIR) -> Path:
+    """Write :func:`resources_table` to ``tex/resources_table.tex``."""
+    tex_dir.mkdir(parents=True, exist_ok=True)
+    path = tex_dir / "resources_table.tex"
+    path.write_text(resources_table(records), encoding="utf-8")
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -941,6 +1232,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=sorted(FAMILIES),
         help="Item family drawn in the figure.",
     )
+    parser.add_argument(
+        "--hw-summary",
+        type=Path,
+        default=DATA_DIR / "hw_summary.json",
+        help="hw_aggregate.py's summary, for the hardware band (skipped if absent).",
+    )
+    parser.add_argument("--tex-dir", type=Path, default=TEX_DIR,
+                        help="Where tex/resources_table.tex goes.")
+    parser.add_argument("--figures-dir", type=Path, default=FIGURES_DIR,
+                        help="Where fig_resources goes.")
     return parser.parse_args(argv)
 
 
@@ -981,12 +1282,22 @@ def main(argv: list[str] | None = None) -> int:
         ``0`` on success.
     """
     args = parse_args(argv)
+    hardware = load_hardware_summary(args.hw_summary)
+    band = (hardware or {}).get("limit_band")
+    band_note = (
+        f"hardware band {band['lower']}--{band['upper']} 2Q from {args.hw_summary}"
+        if band else f"no hardware band ({args.hw_summary} absent or without one)"
+    )
 
     if args.figure_only:
         path = newest_resources_file()
         stored = json.loads(path.read_text(encoding="utf-8"))
-        written = make_figure(rows_from_records(stored), family=args.family)
+        written = make_figure(rows_from_records(stored), family=args.family,
+                              hardware=hardware, directory=args.figures_dir)
+        written.append(write_table(stored, args.tex_dir))
         print(f"read  {path}")
+        print(band_note)
+        report_checks(stored)
         for item in written:
             print(f"wrote {item}")
         return 0
@@ -1045,7 +1356,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {fits_path}")
         report_fits(fits)
 
-        written = make_figure(rows, family=args.family)
+        written = make_figure(rows, family=args.family, hardware=hardware,
+                              directory=args.figures_dir)
+        written.append(write_table(payload, args.tex_dir))
+        print(band_note)
         for item in written:
             print(f"wrote {item}")
     else:
@@ -1084,6 +1398,14 @@ def report_fits(fits: dict[str, Any]) -> None:
                 f"exp = {entry['exponent']:.3f} +/- {entry['exponent_stderr']:.3f}  "
                 f"R^2 = {entry['r_squared']:.4f}  ({entry['n_points']} pts)"
             )
+
+
+def report_checks(payload: list[dict[str, Any]]) -> None:
+    """Print how many grid points each closed form of the table matches."""
+    checks = closed_form_checks(payload)
+    total = checks.pop("points")
+    print("closed forms vs the stored circuits: "
+          + ", ".join(f"{key} {count}/{total}" for key, count in checks.items()))
 
 
 def report_overheads(payload: list[dict[str, Any]]) -> None:

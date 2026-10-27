@@ -513,7 +513,10 @@ def save_figure(
     written: list[Path] = []
     for ext in formats:
         path = out_dir / f"{name}.{ext}"
-        fig.savefig(path, format=ext)
+        # No creation date in the PDF: the same data then gives the same bytes,
+        # and a re-run shows as a change in git only when a figure changed.
+        metadata = {"CreationDate": None} if ext == "pdf" else None
+        fig.savefig(path, format=ext, metadata=metadata)
         written.append(path)
 
     if close:

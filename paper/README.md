@@ -86,7 +86,7 @@ grow with every record a campaign writes. The git probe runs once per process.
 | `freeze_versions.py` | `requirements-lock.txt` | environment of record |
 | `describe_account.py` | stdout, feeds `hardware/account_facts.md` | plan limits, devices |
 | `smoke_test.py` | `data/smoke.json` (next free suffix) | wiring check; since WP4 the ZNE leg is the one-job path with schema-2 records |
-| `resource_scaling.py` | `data/resources.json`, `data/resources_fits.json`, `figures/fig_resources.pdf` | WP2 / C1 |
+| `resource_scaling.py` | `data/resources.json`, `data/resources_fits.json`, `figures/fig_resources.pdf`, `tex/resources_table.tex` | WP2 / C1: the closed forms checked against the circuit, the transpiled counts; the figure carries the hardware band from `data/hw_summary.json` when it exists |
 | `build_family.py` | `instances/family.json` (`--check` re-derives it) | WP3 frozen instance family |
 | `select_hardware_subset.py` | `instances/hardware_subset.json` | WP3 hardware subset + edge instance |
 | `build_sweep.py` | `instances/sweep.json` | WP3 iteration-sweep instances |
@@ -98,6 +98,7 @@ grow with every record a campaign writes. The git probe runs once per process.
 | `verify_campaign.py` | stdout; exit 1 on any failure | WP5: every record present, one commit, one environment, shot totals, Mitiq present |
 | `aggregate.py` | `data/sim_*.csv`, `data/sim_summary.json`, `tex/sim_table_<grid>.tex`, `notes/sim_results.md` | WP5: every table the text quotes |
 | `make_figures.py` | `figures/fig_sim_*.pdf` (`--set sim`), `figures/fig_hw_*.pdf` (`--set hw`) | WP5: the five simulation figures; WP6: the hardware figures (worked example, signal kept vs gates, folding, ZNE vs Mitiq, sweep and M = 0 with hardware points); from `data/` alone |
+| `build_diagrams.py` | `figures/fig_circuit.pdf`, `figures/fig_pipeline.pdf` | the two hand-drawn TikZ diagrams (`tex/diagrams/*.tex`: the circuit, the pipeline); needs `pdflatex` |
 | `qpu_budget.py` | stdout, optional `hardware/qpu_budget.json` | QPU minutes a job shape would cost, offline from the device's calibrated durations |
 | `hardware_batch.py` | `hardware/{manifest,circuits,calibration,jobs}_<date>.*`, `data/hw[_dryrun]_<date>/`, `hardware/usage.md` | WP6: the single hardware job: `--plan`, `--dry-run`, `--probe` / `--probe-report` (2-PUB timing job), `--submit` (checklist-gated), `--collect` |
 | `noise_model_check.py` | `hardware/calibration_exec_<date>[_fetch].json`, `data/hw_predict_<label>_<date>/`, `data/hw_alpha_<label>_<date>/fit.json` | WP6: the calibration in force during the job (`--fetch-calibration`, needs the token), the job re-simulated on it (`--predict`), the fitted error scale alpha (`--fit-alpha`); no QPU time |
@@ -106,9 +107,11 @@ grow with every record a campaign writes. The git probe runs once per process.
 `resource_scaling.py` is the C1 measurement: it checks every closed form in
 `notes/resource_model.md` against the circuit the solver builds (144 asserts),
 transpiles the grid on the heavy-hex fake twins of the Open-plan Heron devices,
-and writes the data, the fits and the figure. Roughly six minutes on a laptop.
-`--logical-only` skips transpilation; `--figure-only` replots from the JSON
-without touching a transpiler, which is rule 2 above in executable form.
+and writes the data, the fits, the figure and the table. Roughly six minutes on
+a laptop. `--logical-only` skips transpilation; `--figure-only` redraws the
+figure and rewrites the table from the JSON without touching a transpiler,
+which is rule 2 above in executable form. Run it after `hw_aggregate.py`, so
+the figure picks up the hardware band.
 
 ## Quick check
 
