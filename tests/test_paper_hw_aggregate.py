@@ -264,3 +264,14 @@ def test_without_a_manifest_there_is_nothing_to_aggregate(tmp_path, capsys):
     assert hw_aggregate.main(["--hardware-dir", str(tmp_path), "--data-dir", str(tmp_path),
                               "--tex-dir", str(tmp_path)]) == 1
     assert "nothing to aggregate" in capsys.readouterr().out
+
+
+def test_a_later_job_never_replaces_the_papers_tables(tmp_path):
+    """The job of record is the default; any other date writes beside it."""
+    assert hw_aggregate.output_suffix(hw_aggregate.JOB_OF_RECORD) == ""
+    assert hw_aggregate.output_suffix("2026-10-28") == "_2026-10-28"
+    for date in (hw_aggregate.JOB_OF_RECORD, "2026-10-28"):
+        (tmp_path / f"manifest_{date}.json").write_text("{}", encoding="utf-8")
+    assert hw_aggregate.default_date(tmp_path) == hw_aggregate.JOB_OF_RECORD
+    (tmp_path / f"manifest_{hw_aggregate.JOB_OF_RECORD}.json").unlink()
+    assert hw_aggregate.default_date(tmp_path) == "2026-10-28"

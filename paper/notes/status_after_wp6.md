@@ -141,9 +141,30 @@ reporting confident, wrong numbers.
      planned 0.20. The with-signal fraction is the one to quote for ZNE.
    - Hardware: 0 of 75 fit blocks change, so no re-collect is needed. Dry
      run: only P-n2-M2-03 (M = N/2).
-2. Optional second job in this window (516 s left, ends ≈ 2026-11-21): the same
-   instances on a narrow partial-folding grid (λ = 1, 1.25, 1.5), the one test
-   that could change a finding (ZNE at n = 3 on hardware). About 50–75 s.
+2. **Planned (2026-10-28): second job, gentle grid.** Can ZNE resolve n = 3
+   on hardware when the folding stays gentle (λ = 1, 1.25, 1.5)? On the odd
+   grid λ = 3 already reached random.
+   - Circuits: P-n2-M1-11 (control: resolved on the odd grid), P-n3-M1-17 and
+     its r = 1 variant, P-n3-M2-17; × 3 scales, plus the 2 drift repeats = 14
+     PUBs × 12 288 shots. n = 4 is left out: at r_opt it is at random on
+     hardware, and its r = 1 variant (233 2Q) is above the band.
+   - Flags: `--only P-n2-M1-11 P-n3-M1-17 P-n3-M2-17 --sweep-iterations 1`
+     (`--sweep-iterations` new; the job of record used neither).
+   - Budget: estimate 224.9 s (job 1's measured per-shot time and overhead,
+     × 2) against the 258 s cap (half of 516 s); job 1's actual rate gives
+     about 67 s charged.
+   - Prediction before sending (offline rehearsal on fake_fez, simulated on
+     the 2026-10-25 execution calibration with every error × 3.176):
+     P-n3-M1-17_r1 resolved, 0.686 [0.576, 0.840] (ideal 0.781); P-n3-M1-17
+     0.725 [0.472, 1.263] (ideal 0.945); P-n2-M1-11 0.961 [0.886, 1.046];
+     P-n3-M2-17 "resolved" but uninformative, 1.551 [0.569, 7.626]. At 8192
+     shots the intervals were about 20 % wider. So if the device is as on
+     2026-10-25, the gentle grid resolves n = 3 where the odd grid could not.
+     The live plan's own prediction at α̂ is the one to commit before
+     submission.
+   - `hw_aggregate.py` now aggregates the job of record (2026-10-25) unless
+     `--date` says otherwise; another date writes `hw_*_<date>` files beside
+     the paper's.
 3. **Done (2026-10-26): the gap is not calibration age, and it is α ≈ 3.2.**
    `paper/scripts/noise_model_check.py`, no QPU time; every output stamped
    with the clean commit `687c5a1`.

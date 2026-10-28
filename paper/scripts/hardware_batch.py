@@ -698,6 +698,25 @@ def sweep_variant(
     )
 
 
+def select_sweep_iterations(
+    sweep_rows: Sequence[Mapping[str, Any]], keep: Sequence[int]
+) -> list[dict[str, Any]]:
+    """
+    The sweep rows with only the iteration counts in ``keep``.
+
+    The ``r_opt`` circuit is never a sweep variant (it is the instance's own),
+    so keeping it changes nothing; a row left with no variant is dropped.
+    """
+    wanted = {int(r) for r in keep}
+    out = []
+    for row in sweep_rows:
+        iterations = [r for r in row["iterations"]
+                      if int(r) in wanted and int(r) != int(row["r_opt"])]
+        if iterations:
+            out.append({**row, "iterations": iterations})
+    return out
+
+
 def build_job(
     backend: Any,
     subset_rows: Sequence[Mapping[str, Any]],
@@ -1022,6 +1041,8 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
         sweep_rows = [r for r in sweep_rows if r["name"] in args.only]
     if args.no_sweep:
         sweep_rows = []
+    if args.sweep_iterations:
+        sweep_rows = select_sweep_iterations(sweep_rows, args.sweep_iterations)
 
     cfg = analysis_config(args.shots, args.scales, args.seed_max)
     circuits, record_rows, circuit_rows = build_job(backend, subset_rows, sweep_rows, cfg)
@@ -1121,6 +1142,8 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
                 "bootstrap_seed": BOOTSTRAP_SEED,
             },
             "seed_simulator": SEED_SIMULATOR,
+            "only": list(args.only) if args.only else None,
+            "sweep_iterations": list(args.sweep_iterations) if args.sweep_iterations else None,
             "drift_check": "scale-1 repeat, as the last PUBs, of the two smallest instances "
                            f"whose ideal P_sol exceeds P_uniform by >= {DRIFT_MIN_SIGNAL}",
             "instances_files": {
@@ -2468,6 +2491,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=f"SABRE seeds searched once per instance: {SEED_MIN}..seed_max-1.")
     parser.add_argument("--only", nargs="+", default=None, help="Restrict to these instances.")
     parser.add_argument("--no-sweep", action="store_true")
+    parser.add_argument("--sweep-iterations", type=int, nargs="+", default=None,
+                        help="Keep only these iteration counts of the sweep variants.")
     parser.add_argument("--twirling", choices=("on", "off"), default="on")
     parser.add_argument("--dd", choices=("on", "off"), default="off",
                         help="Dynamical decoupling. Off by design (see DD_SEQUENCE).")

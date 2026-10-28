@@ -46,6 +46,10 @@ Run::
 
     python paper/scripts/hw_aggregate.py
     python paper/scripts/hw_aggregate.py --date 2026-10-25
+
+Without ``--date`` the job of record (:data:`JOB_OF_RECORD`) is aggregated.
+Another job's files carry its date (``hw_summary_<date>.json``, ...), so a
+later job never overwrites the paper's tables.
 """
 
 from __future__ import annotations
@@ -79,6 +83,12 @@ from hardware_batch import (  # noqa: E402
 from noise_model_check import signal_kept  # noqa: E402
 
 SUMMARY_SCHEMA = "dgssp/paper/hardware-summary/1"
+
+#: The job the paper's hardware tables and figures are of.  Without ``--date``
+#: this one is aggregated, not the newest manifest: planning a later job must
+#: not change the paper.  Any other date writes its files with a ``_<date>``
+#: suffix (``hw_summary_<date>.json``, ...), beside the paper's.
+JOB_OF_RECORD = "2026-10-25"
 
 #: The label ``noise_model_check.py`` gives the execution-time calibration.
 EXEC_LABEL = "exec"
@@ -752,11 +762,24 @@ def config_table(summary: Mapping[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def default_date(hardware_dir: Path) -> str | None:
+    """The job of record if its manifest is there, else the newest manifest."""
+    if (hardware_dir / f"manifest_{JOB_OF_RECORD}.json").exists():
+        return JOB_OF_RECORD
+    return latest_manifest_date(hardware_dir)
+
+
+def output_suffix(date: str) -> str:
+    """``""`` for the job of record (the paper's files), ``"_<date>"`` otherwise."""
+    return "" if date == JOB_OF_RECORD else f"_{date}"
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the command line."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[3])
     parser.add_argument("--date", default=None,
-                        help="job date (default: the newest manifest)")
+                        help=f"job date (default: the job of record, {JOB_OF_RECORD}, "
+                             "else the newest manifest)")
     parser.add_argument("--hardware-dir", type=Path, default=HARDWARE_DIR)
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
     parser.add_argument("--tex-dir", type=Path, default=TEX_DIR)
@@ -773,7 +796,7 @@ def main(argv: list[str] | None = None) -> int:
         ``0`` on success, ``1`` when there is no job to aggregate.
     """
     args = parse_args(argv)
-    date = args.date or latest_manifest_date(args.hardware_dir)
+    date = args.date or default_date(args.hardware_dir)
     if date is None:
         print(f"no manifest_<date>.json in {args.hardware_dir}; nothing to aggregate")
         return 1
@@ -787,13 +810,14 @@ def main(argv: list[str] | None = None) -> int:
     missing = [rel(p) for p in (inputs.paths.dryrun_dir, inputs.predict_dir, inputs.alpha_fit)
                if not p.exists()]
     rows = [{k: v for k, v in r.items() if k != "detail"} for r in summary["records"]]
+    suffix = output_suffix(date)
     written = [
-        write_csv(args.data_dir / "hw_records.csv", rows),
-        write_json(args.data_dir / "hw_summary.json", summary),
+        write_csv(args.data_dir / f"hw_records{suffix}.csv", rows),
+        write_json(args.data_dir / f"hw_summary{suffix}.json", summary),
     ]
     args.tex_dir.mkdir(parents=True, exist_ok=True)
-    for name, text in (("hw_table_results.tex", results_table(summary)),
-                       ("hw_table_config.tex", config_table(summary))):
+    for name, text in ((f"hw_table_results{suffix}.tex", results_table(summary)),
+                       (f"hw_table_config{suffix}.tex", config_table(summary))):
         path = args.tex_dir / name
         path.write_text(text, encoding="utf-8")
         written.append(path)

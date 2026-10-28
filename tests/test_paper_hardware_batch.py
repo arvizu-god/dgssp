@@ -483,3 +483,16 @@ def test_hardware_records_carry_an_offline_mitiq_block(rehearsal):
     assert record["metrics"]["hardware"]["mitiq"] == hb.MITIQ_FOLD_SOURCE
     # Same counts, so Mitiq's observed points are dgssp's observed points.
     assert mitiq["values"] == pytest.approx(record["zne_fit"]["observed"])
+
+
+def test_sweep_variants_can_be_restricted_to_some_iterations():
+    """``--sweep-iterations 1``: the r = 1 variants only; r_opt is never a variant."""
+    rows = [
+        {"name": "A", "r_opt": 2, "iterations": [1, 2, 3]},
+        {"name": "B", "r_opt": 3, "iterations": [1, 2, 3, 4]},
+        {"name": "C", "r_opt": 1, "iterations": [1, 2]},
+    ]
+    kept = hb.select_sweep_iterations(rows, [1])
+    assert [(r["name"], r["iterations"]) for r in kept] == [("A", [1]), ("B", [1])]
+    assert rows[0]["iterations"] == [1, 2, 3]  # the input is not modified
+    assert hb.select_sweep_iterations(rows, [2])[0]["iterations"] == [2]
