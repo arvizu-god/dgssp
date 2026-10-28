@@ -1,0 +1,189 @@
+{
+  "instance": {
+    "items": [
+      2,
+      1,
+      2
+    ],
+    "target": 3,
+    "name": "P-n3-M2-17"
+  },
+  "n_items": 3,
+  "n_sum": 4,
+  "iterations": 1,
+  "executor": "hardware",
+  "mitigation_mode": "none",
+  "backend": "ibm_fez",
+  "shots": 12288,
+  "counts": {
+    "1": {
+      "000": 1657,
+      "001": 1776,
+      "111": 1327,
+      "100": 1475,
+      "101": 1383,
+      "010": 1627,
+      "011": 1658,
+      "110": 1385
+    }
+  },
+  "metrics": {
+    "solution_bitstrings": [
+      "011",
+      "110"
+    ],
+    "num_solutions": 2,
+    "p_uniform": 0.25,
+    "solution_probability": 0.24763997395833334,
+    "mitigated_solution_probability": null,
+    "mitiq_solution_probability": null,
+    "n_qubits": 7,
+    "elapsed_s": null,
+    "solution_probability_ci": [
+      0.23941650390625,
+      0.254925537109375
+    ],
+    "tv_to_reference": {
+      "point": 0.7523600260416643
+    },
+    "reference_distribution": {
+      "000": 6.465749009997541e-31,
+      "001": 1.243816766712908e-32,
+      "010": 1.9025478627809867e-30,
+      "011": 0.49999999999999756,
+      "100": 1.3395170027627024e-32,
+      "101": 5.101268278753187e-31,
+      "110": 0.49999999999999756,
+      "111": 8.043743337883359e-30
+    },
+    "hardware": {
+      "date": "2026-10-28",
+      "manifest": "manifest_2026-10-28.json",
+      "manifest_sha256": "d3b1c37dc78ae4c765ec62a5ea70e27debb6358cef4d64e7da4eaf4e785b2245",
+      "circuits_sha256": "6d59335256d4190dfa0664e03c0d8f9ad82c891758f256bef099e434aa94b964",
+      "calibration_file": "paper/hardware/calibration_2026-10-28.json",
+      "source": "hardware",
+      "job_id": "dbgkqq8te5oc738icnfg",
+      "execution_mode": "job",
+      "record_key": "P-n3-M2-17_drift",
+      "role": "drift_repeat",
+      "r_opt": 1,
+      "pub_indices": [
+        13
+      ],
+      "initial_layout": [
+        88,
+        92,
+        78,
+        89,
+        91,
+        98,
+        90
+      ],
+      "sampler_options": {
+        "environment": {
+          "job_tags": [
+            "dgssp",
+            "paper-a",
+            "wp6",
+            "2026-10-28"
+          ]
+        },
+        "max_execution_time": 258,
+        "twirling": {
+          "enable_gates": true,
+          "enable_measure": false,
+          "num_randomizations": 32,
+          "shots_per_randomization": 384,
+          "strategy": "active-accum"
+        },
+        "dynamical_decoupling": {
+          "enable": false
+        }
+      },
+      "ignored_options": [],
+      "drift": {
+        "first_pub": 3,
+        "repeat_pub": 13,
+        "p_first": 0.24593098958333334,
+        "p_repeat": 0.24763997395833334,
+        "diff": 0.001708984375,
+        "z": 0.3107023591886501,
+        "p_value": 0.7560269035939434,
+        "tv_between": 0.0146484375
+      }
+    }
+  },
+  "transpiled": {
+    "two_q_count": 184,
+    "depth": 506,
+    "two_q_depth": 150,
+    "physical_qubits": [
+      92,
+      91,
+      98,
+      90,
+      78,
+      88,
+      89
+    ],
+    "one_q_physical": null,
+    "two_q_physical": null,
+    "virtual_gate_count": null,
+    "survival": null,
+    "best_seed": 23,
+    "seed_source": "sabre_sweep"
+  },
+  "job_id": "dbgkqq8te5oc738icnfg",
+  "provenance": {
+    "timestamp_utc": "2026-10-28T01:21:00Z",
+    "git": {
+      "commit": "4f4380379f54e3ac16cd7d4287b2aceece361e34",
+      "short_commit": "4f43803",
+      "branch": "main",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 44,
+      "untracked_outputs_by_dir": {
+        "paper/data": 37,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 7,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-28T01:20:59Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.16",
+      "implementation": "CPython",
+      "executable": "C:\\Users\\Arturo Arvizu\\.conda\\envs\\dgssp-paper\\python.exe"
+    },
+    "platform": "Windows-10-10.0.26300-SP0",
+    "host": "DESKTOP-893P15V",
+    "user": "Arturo Arvizu",
+    "backend": {
+      "name": "ibm_fez",
+      "num_qubits": 156,
+      "processor_family": null,
+      "heavy_hex": true,
+      "calibration_timestamp": "2026-10-27T18:12:25-06:00"
+    }
+  },
+  "schema_version": 2,
+  "calibration_timestamp": "2026-10-27T18:12:25-06:00",
+  "zne_fit": null,
+  "pathology": null,
+  "mitiq": null,
+  "pointwise": null,
+  "renorm": null,
+  "fold_seed": null
+}

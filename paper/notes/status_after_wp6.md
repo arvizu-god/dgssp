@@ -141,7 +141,43 @@ reporting confident, wrong numbers.
      planned 0.20. The with-signal fraction is the one to quote for ZNE.
    - Hardware: 0 of 75 fit blocks change, so no re-collect is needed. Dry
      run: only P-n2-M2-03 (M = N/2).
-2. **Planned (2026-10-28): second job, gentle grid.** Can ZNE resolve n = 3
+2. **Done (2026-10-28): second job, gentle grid. n = 3 resolved; P-n3-M2-17
+   fell to random.** Job `dbgkqq8te5oc738icnfg` on ibm_fez, submitted
+   2026-10-28T01:18Z at 4f43803, 51 s charged (estimate 224.9 s); about
+   465 s left. Results in `paper/data/hw_2026-10-28`, tables in
+   `hw_*_2026-10-28` (the paper's Tables 3 and 4 stay on job 1).
+
+   | Record | 2Q (job 1 / job 2) | Ideal | Odd grid, job 1 | Gentle grid, job 2 | Predicted at α̂ |
+   |---|---|---|---|---|---|
+   | P-n2-M1-11 | 71 / 71 | 1.000 | 0.953 [0.890, 1.026] resolved | 0.981 [0.928, 1.049] resolved | 0.930 [0.874, 0.985] |
+   | P-n3-M1-17 (r = 2) | 212 / 235 | 0.945 | not identifiable | 0.821 [0.660, 1.089] resolved | 0.670 [0.507, 0.862] |
+   | P-n3-M1-17_r1 | 112 / 126 | 0.781 | identified, not resolved | 0.730 [0.633, 0.831] resolved | 0.609 [0.508, 0.719] |
+   | P-n3-M2-17 | 194 / 184 | 1.000 | not identifiable | not identifiable (P_sol 0.246, random 0.25) | 0.806 [0.613, 1.107] |
+
+   - Signal kept at λ = 1 (job 2 / job 1 / predicted): P-n2-M1-11 0.53 /
+     0.47 / 0.51; P-n3-M1-17 0.15 / 0.16 / 0.13; r = 1 0.31 / 0.29 / 0.24;
+     P-n3-M2-17 −0.01 / 0.14 / 0.14. On the three M = 1 records the device
+     did as well as or better than the α̂ model; both ZNE intervals for n = 3
+     contain the ideal.
+   - P-n3-M2-17 is flat: at λ = 1 all 8 outcomes have 1313–1853 of 12 288
+     counts, and each measured bit is 0.46–0.51 ones, so no single stuck
+     qubit. Both drift repeats agree (0.246, 0.248; z = +0.31). The planning
+     calibration (18:12 local) shows nothing unusual on its layout [88, 92,
+     78, 89, 91, 98, 90] (CZ errors 0.0016–0.0028, T1 92–156 µs); P-n2-M1-11
+     shares qubits 90, 91, 92, 98 and was fine. The device recalibrated at
+     19:08, between plan and submit; that calibration was not saved. The
+     cause is not identified, so report it as a failure the calibration
+     model did not predict.
+   - Reading: the folding grid decides whether n = 3 resolves (odd grid no,
+     gentle grid yes, same instances); a layout that the calibration rates
+     as fine can still be at random on the day.
+   - The aggregator's model column is empty for this date (it reads
+     `hw_predict_exec_<date>`, not `hw_predict_plan_x3.176_<date>`); the
+     predicted column above is from the latter.
+
+   The plan, as written before submission:
+
+   Can ZNE resolve n = 3
    on hardware when the folding stays gentle (λ = 1, 1.25, 1.5)? On the odd
    grid λ = 3 already reached random.
    - Circuits: P-n2-M1-11 (control: resolved on the odd grid), P-n3-M1-17 and
