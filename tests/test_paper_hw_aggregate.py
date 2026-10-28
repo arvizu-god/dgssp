@@ -36,6 +36,11 @@ DATA = REPO_ROOT / "paper" / "data"
 HARDWARE = REPO_ROOT / "paper" / "hardware"
 HAVE_JOB = (HARDWARE / f"manifest_{DATE}.json").exists() and (DATA / f"hw_{DATE}").exists()
 needs_job = pytest.mark.skipif(not HAVE_JOB, reason="the job of record is not checked out")
+LATER = "2026-10-28"
+LATER_PREDICTION = DATA / f"hw_predict_plan_x3.176_{LATER}"
+HAVE_LATER = HAVE_JOB and (HARDWARE / f"manifest_{LATER}.json").exists() and (
+    DATA / f"hw_{LATER}").exists() and LATER_PREDICTION.exists()
+needs_later = pytest.mark.skipif(not HAVE_LATER, reason="the gentle-grid job is not checked out")
 
 
 @pytest.fixture(scope="module")
@@ -266,6 +271,39 @@ def test_without_a_manifest_there_is_nothing_to_aggregate(tmp_path, capsys):
     assert "nothing to aggregate" in capsys.readouterr().out
 
 
+def test_a_prediction_is_called_earlier_only_when_its_timestamp_is():
+    """"before the job ran" is read off the two timestamps, never assumed."""
+    predicted = {"a": {"backend": "fake_x2", "calibration_timestamp": "2026-10-27T18:12:25-06:00",
+                       "provenance": {"timestamp_utc": "2026-10-28T01:04:37Z"}}}
+    where = Path("paper/data/hw_predict_x")
+    assert "before the job ran" in hw_aggregate.prediction_note(
+        predicted, where, "2026-10-28T01:18:35Z")
+    assert "before the job ran" not in hw_aggregate.prediction_note(
+        predicted, where, "2026-10-28T01:00:00Z")
+    assert "before the job ran" not in hw_aggregate.prediction_note(predicted, where, None)
+
+
+@needs_later
+def test_the_grid_table_sets_the_gentle_grid_beside_the_odd_grid(tmp_path, capsys):
+    """Same records, both grids, the prediction made before the job; only the one file."""
+    tex = tmp_path / "tex"
+    assert hw_aggregate.main(["--grids", LATER, "--grids-prediction", str(LATER_PREDICTION),
+                              "--tex-dir", str(tex)]) == 0
+    assert [p.name for p in tex.iterdir()] == [hw_aggregate.GRID_TABLE]
+    assert "before the job ran" in capsys.readouterr().out
+    text = (tex / hw_aggregate.GRID_TABLE).read_text(encoding="utf-8")
+    rows = {line.split(" & ")[0]: line for line in text.splitlines() if " & " in line}
+    assert "\\{1, 3, 5\\}" in text and "\\{1, 1.25, 1.5\\}" in text
+    assert set(rows) - {"", "Record"} == {
+        "P-n2-M1-11", "P-n3-M1-17", "P-n3-M2-17", "P-n3-M1-17\\_r1"}
+    # Odd grid: not identifiable; gentle grid: resolved, interval holding the ideal.
+    assert "n.i. & 235 & 0.15 & 0.821 [0.660, 1.089]" in rows["P-n3-M1-17"]
+    assert "id. & 126 & 0.31 & 0.730 [0.633, 0.831] & 0.609 [0.508, 0.719]" in rows[
+        "P-n3-M1-17\\_r1"]
+    # The M = 2 record fell to random on the day; a negative kept is typeset as a number.
+    assert "$-0.01$ & n.i. & 0.806 [0.613, 1.107]" in rows["P-n3-M2-17"]
+
+
 def test_a_later_job_never_replaces_the_papers_tables(tmp_path):
     """The job of record is the default; any other date writes beside it."""
     assert hw_aggregate.output_suffix(hw_aggregate.JOB_OF_RECORD) == ""
@@ -275,3 +313,130 @@ def test_a_later_job_never_replaces_the_papers_tables(tmp_path):
     assert hw_aggregate.default_date(tmp_path) == hw_aggregate.JOB_OF_RECORD
     (tmp_path / f"manifest_{hw_aggregate.JOB_OF_RECORD}.json").unlink()
     assert hw_aggregate.default_date(tmp_path) == "2026-10-28"
+
+
+# ---------------------------------------------------------------------------
+# WP7: model vs hardware, survival, drift distance, the later job's model
+# ---------------------------------------------------------------------------
+
+
+def test_the_drift_distance_is_judged_against_shot_noise():
+    """Identical histograms are no drift; a moved peak is; the distance is drift_metrics'."""
+    from hardware_batch import drift_metrics
+
+    same = {"00": 1000, "01": 1000, "10": 1000, "11": 1096}
+    moved = {"00": 1300, "01": 900, "10": 900, "11": 996}
+    flat = hw_aggregate.tv_bootstrap(same, dict(same), B=500)
+    assert flat["tv"] == 0.0 and flat["tv_p_value"] == pytest.approx(1.0)
+    assert flat["tv_null_mean"] > 0.0  # two samples of one distribution are still apart
+    shifted = hw_aggregate.tv_bootstrap(same, moved, B=500)
+    assert shifted["tv"] == pytest.approx(drift_metrics(same, moved, ["11"])["tv_between"])
+    assert shifted["tv_p_value"] < 0.01
+    assert shifted["tv_ci"][0] <= shifted["tv"] <= shifted["tv_ci"][1]
+    assert shifted == hw_aggregate.tv_bootstrap(same, moved, B=500)  # seeded
+
+
+def test_counts_are_found_at_a_fractional_realised_scale():
+    """The gentle grid keys its counts by the realised scale, not the nominal one."""
+    record = {"counts": {"1": {"0": 1}, "1.2535211267605635": {"1": 2}, "3": {"0": 3}}}
+    assert hw_aggregate._counts_at(record, 1.2535211267605635) == {"1": 2}
+    assert hw_aggregate._counts_at(record, 3.0) == {"0": 3}
+    assert hw_aggregate._counts_at(record, 1.25) is None
+    assert hw_aggregate._counts_at(None, 1.0) is None
+
+
+def test_deviation_stats_keep_the_sign_and_skip_what_has_no_signal():
+    rows = [
+        {"scale": 1.0, "signal": True, "d": -0.2},
+        {"scale": 1.0, "signal": True, "d": -0.1},
+        {"scale": 3.0, "signal": True, "d": 0.1},
+        {"scale": 3.0, "signal": False, "d": 5.0},
+        {"scale": 3.0, "signal": True, "d": None},
+    ]
+    stats = hw_aggregate.deviation_stats(rows, "d", signal_only=True)
+    assert stats["all"]["n"] == 3
+    assert stats["all"]["mean_signed"] == pytest.approx(-0.2 / 3)
+    assert stats["all"]["mean_abs"] == pytest.approx(0.4 / 3)
+    assert (stats["all"]["n_negative"], stats["all"]["n_positive"]) == (2, 1)
+    assert stats["lambda=1"]["mean_signed"] == pytest.approx(-0.15)
+    assert hw_aggregate.deviation_stats(rows, "d", signal_only=False)["lambda=3"]["n"] == 2
+
+
+@needs_job
+def test_the_interpolated_distribution_is_the_cached_one_on_a_grid_point():
+    """Between grid points it is interpolated; on one it is that point's counts."""
+    manifest = json.loads((HARDWARE / f"manifest_{DATE}.json").read_text(encoding="utf-8"))
+    cache = DATA / f"hw_alpha_exec_{DATE}"
+    dists = hw_aggregate.alpha_distributions(manifest, cache, 3.0)
+    stored = json.loads((cache / "counts_alpha_3.json").read_text(encoding="utf-8"))["counts"]
+    for c in manifest["circuits"]:
+        counts = stored[int(c["pub_index"])]
+        total = sum(counts.values())
+        dist = dists[(c["key"], float(c["nominal_scale"]))]
+        assert sum(dist.values()) == pytest.approx(1.0)
+        for k, v in counts.items():
+            assert dist[k] == pytest.approx(v / total, abs=1e-12)
+    assert hw_aggregate.alpha_distributions(manifest, cache, None) == {}
+
+
+@needs_job
+def test_every_pub_is_compared_with_both_models(summary):
+    """47 PUBs; at alpha = 1 the device is below the model on every lambda = 1 PUB."""
+    mvh = summary["model_vs_hardware"]
+    assert len(mvh["pubs"]) == 47
+    assert mvh["model_alpha"]["source"] == "fit" and mvh["model_alpha"]["in_sample"]
+    at_1, at_hat = mvh["p_solution"]["alpha_1"], mvh["p_solution"]["alpha_hat"]
+    assert at_1["all"]["n"] == 35  # the PUBs the alpha fit used
+    assert at_1["lambda=1"]["n_negative"] == at_1["lambda=1"]["n"]
+    assert at_hat["all"]["mean_abs"] < at_1["all"]["mean_abs"] / 5
+    # P(solution) at alpha-hat is exactly the fit's interpolation.
+    by_key = {r["key"]: r for r in summary["records"]}
+    for p in mvh["pubs"]:
+        if p["scale"] == 1.0 and p["key"] in by_key and by_key[p["key"]]["model_alpha"]:
+            assert p["model_alpha"] == pytest.approx(by_key[p["key"]]["model_alpha"])
+    floor = mvh["tv_hardware_model"]["alpha_hat"]
+    assert floor["mean_shot_floor"] < floor["mean"] < mvh["tv_hardware_model"]["alpha_1"]["mean"]
+
+
+@needs_job
+def test_the_survival_estimate_scaled_by_alpha_hat_places_the_upper_edge(summary):
+    block = summary["survival"]
+    assert block["calibration"].endswith(f"calibration_exec_{DATE}.json")
+    m1, mhat = block["medians"]["alpha_1"], block["medians"]["alpha_hat"]
+    assert mhat["two_qubit"] == pytest.approx(summary["alpha_hat"] * m1["two_qubit"], rel=1e-6)
+    assert block["bands"]["measured"]["upper"] == block["bands"]["alpha_hat"]["upper"] == 194
+    assert block["bands"]["alpha_1"]["upper"] > 194  # unscaled, it is optimistic
+    for r in block["records"]:
+        assert r["survival_alpha_hat"] < r["survival_alpha_1"] <= 1.0
+        assert len(r["kept_predicted_alpha_1"]) == len(r["scales"])
+
+
+@needs_later
+def test_the_later_jobs_model_columns_are_filled_and_say_from_where():
+    """The execution model once fetched, else the plan's; and the prediction at alpha."""
+    later = hw_aggregate.build_summary(hw_aggregate.HwInputs(LATER, HARDWARE, DATA))
+    fetched = (DATA / f"hw_predict_exec_{LATER}").exists()
+    source = "exec" if fetched else "plan"
+    assert later["model_source"] == source
+    assert later["model_alpha"]["source"] == "prediction"
+    assert later["model_alpha"]["alpha"] == pytest.approx(3.176)
+    assert later["model_alpha"]["in_sample"] is False
+    for r in later["records"]:
+        assert r["model"] == r[f"model_{source}"] is not None
+        assert r["model_alpha"] is not None
+    assert len(later["model_vs_hardware"]["pubs"]) == 14  # fractional scales found
+    text = hw_aggregate.results_table(later)
+    assert ("in force" if fetched else "plan's calibration") in text
+    # No calibration entry changed between plan and execution: same value either way.
+    row = next(line for line in text.splitlines() if line.startswith("P-n2-M1-11 &"))
+    assert " & 0.859 & " in row
+
+
+def test_the_console_table_prints_the_model_the_tex_table_uses(capsys):
+    """The printed model column is ``model`` (exec or plan), not ``model_exec`` alone."""
+    record = {"key": "R", "two_q_count": 71, "p_ideal": 1.0, "model": 0.859,
+              "model_exec": None, "hardware": 0.646, "kept_hardware": 0.528,
+              "zne_reported": 0.981, "zne_status": "resolved"}
+    hw_aggregate.print_records({"records": [record], "alpha_hat": None,
+                                "limit_band": None})
+    assert " 0.859 " in capsys.readouterr().out

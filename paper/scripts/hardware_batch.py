@@ -24,6 +24,11 @@ Modes
     * ``paper/hardware/calibration_<date>.json`` -- the noise model's
       calibration (BackendV2 target) plus the raw ``properties()``.
 
+    ``--pin-layout KEY:TAG=<date>`` adds a record ``KEY_TAG``: record ``KEY``'s
+    scale-1 ISA circuit from ``circuits_<date>.qpy`` (same device), the very
+    circuit that job sent, folded and submitted like the rest.  ``--drift KEY ...`` names the drift repeats instead of the
+    automatic choice.
+
     Nothing is submitted.  ``--offline-backend fake_marrakesh`` does the same
     against a bundled fake device without the service (rehearsal only:
     ``--submit`` refuses such a manifest).
@@ -674,17 +679,8 @@ def sweep_variant(
     """
     layout = base.transpiled.layout.initial_index_layout(filter_ancillas=True)
     circuit = DGSSPSolver(DGConfig(iterations=int(r))).build_circuit(base.instance)
-    tqc = generate_preset_pass_manager(
-        backend=backend,
-        optimization_level=3,
-        seed_transpiler=base.best_seed,
-        initial_layout=list(layout),
-    ).run(circuit)
-    got = tqc.layout.initial_index_layout(filter_ancillas=True)
-    if list(got) != list(layout):
-        raise RuntimeError(
-            f"{base.name} r={r}: transpiler moved the layout {list(layout)} -> {list(got)}."
-        )
+    tqc = transpile_on_layout(circuit, backend, seed=base.best_seed, layout=layout,
+                              label=f"{base.name} r={r}")
     return PreparedInstance(
         instance=base.instance,
         solution_bitstrings=list(base.solution_bitstrings),
@@ -695,6 +691,217 @@ def sweep_variant(
         seed_source="sweep_fixed_layout",
         scales=list(base.scales),
         p_uniform=base.p_uniform,
+    )
+
+
+def transpile_on_layout(
+    circuit: QuantumCircuit, backend: Any, *, seed: int, layout: Sequence[int], label: str
+) -> QuantumCircuit:
+    """
+    Transpile once at opt level 3 with a given seed on a given initial layout.
+
+    Raises
+    ------
+    RuntimeError
+        If the transpiler did not keep the requested initial layout.
+    """
+    tqc = generate_preset_pass_manager(
+        backend=backend,
+        optimization_level=3,
+        seed_transpiler=int(seed),
+        initial_layout=[int(q) for q in layout],
+    ).run(circuit)
+    got = tqc.layout.initial_index_layout(filter_ancillas=True)
+    if list(got) != [int(q) for q in layout]:
+        raise RuntimeError(
+            f"{label}: transpiler moved the layout {list(layout)} -> {list(got)}."
+        )
+    return tqc
+
+
+_PIN_RE = re.compile(r"^(?P<key>[\w-]+):(?P<tag>[A-Za-z0-9]+)=(?P<source>.+)$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_LAYOUT_RE = re.compile(r"^(?P<qubits>\d+(?:,\d+)*)(?:@(?P<seed>\d+))?$")
+
+
+def parse_pin(spec: str) -> dict[str, Any]:
+    """
+    One ``--pin-layout`` value.
+
+    ``KEY:TAG=YYYY-MM-DD`` reuses record ``KEY``'s scale-1 ISA circuit from
+    that date's ``circuits_<date>.qpy``: the very circuit that job sent, so
+    layout *and* routing are the same, and it is not transpiled again.
+    ``KEY:TAG=q0,q1,...[@SEED]`` transpiles instance ``KEY`` at ``r_opt`` once
+    on an explicit initial layout (virtual qubit ``i`` on physical ``q_i``, the
+    manifest's ``initial_layout`` order -- not ``physical_qubits``, which is
+    ordered differently) with seed ``SEED`` (default :data:`SEED_MIN`).
+    Re-transpiling on a seed-searched job's layout with its seed does *not*
+    reproduce that job's circuit: there SABRE chose layout and routing
+    together, here only the routing is searched.
+
+    Returns
+    -------
+    dict
+        ``{"key", "tag", "record_key", "date", "layout", "seed"}``; ``date`` or
+        ``layout`` is ``None``.
+
+    Raises
+    ------
+    ValueError
+        On a malformed value.
+    """
+    match = _PIN_RE.match(spec.strip())
+    if match is None:
+        raise ValueError(f"--pin-layout {spec!r}: expected KEY:TAG=YYYY-MM-DD or "
+                         "KEY:TAG=q0,q1,...[@SEED].")
+    key, tag, source = match["key"], match["tag"], match["source"]
+    pin: dict[str, Any] = {"key": key, "tag": tag, "record_key": f"{key}_{tag}",
+                           "date": None, "layout": None, "seed": None}
+    if _DATE_RE.match(source):
+        pin["date"] = source
+        return pin
+    explicit = _LAYOUT_RE.match(source)
+    if explicit is None:
+        raise ValueError(f"--pin-layout {spec!r}: {source!r} is neither a date nor a layout.")
+    pin["layout"] = [int(q) for q in explicit["qubits"].split(",")]
+    if len(set(pin["layout"])) != len(pin["layout"]):
+        raise ValueError(f"--pin-layout {spec!r}: a physical qubit appears twice.")
+    pin["seed"] = int(explicit["seed"]) if explicit["seed"] is not None else SEED_MIN
+    return pin
+
+
+def resolve_pins(
+    specs: Sequence[str],
+    instance_rows: Mapping[str, Mapping[str, Any]],
+    hardware_dir: Path,
+    device: str,
+) -> list[dict[str, Any]]:
+    """
+    Every ``--pin-layout`` value, checked and filled in.
+
+    Parameters
+    ----------
+    specs:
+        The raw values.
+    instance_rows:
+        Every row of ``hardware_subset.json`` and ``sweep.json`` by name,
+        before ``--only``: a pinned record need not be among the fresh ones.
+    hardware_dir:
+        Where ``manifest_<date>.json`` lives.
+    device:
+        The planned device; a layout from another device's manifest is refused.
+
+    Returns
+    -------
+    list[dict]
+        Per pin: ``record_key``, the instance row, ``iterations``, ``seed``,
+        ``layout``, ``isa`` (the source job's scale-1 circuit, or ``None``)
+        and ``pinned_from`` (the manifest's path and hashes, record key, PUB
+        index and device, or ``"explicit"``).
+
+    Raises
+    ------
+    ValueError
+        On a duplicate record key, an unknown instance or record, another
+        device, a source whose files changed since its plan, or a source
+        record whose problem differs from the instance file.
+    """
+    out: list[dict[str, Any]] = []
+    for spec in specs:
+        pin = parse_pin(spec)
+        if pin["date"] is not None:
+            path = hardware_dir / f"manifest_{pin['date']}.json"
+            if not path.exists():
+                raise ValueError(f"--pin-layout {spec}: {rel(path)} does not exist.")
+            try:
+                manifest, manifest_sha, circuits = load_manifest(path)
+            except SystemExit as exc:
+                raise ValueError(f"--pin-layout {spec}: {exc}") from None
+            source = manifest["backend"]["name"]
+            if source != device:
+                raise ValueError(f"--pin-layout {spec}: that layout is on {source}, "
+                                 f"not on {device}.")
+            record = next((r for r in manifest["records"]
+                           if r["key"] == pin["key"] and r["kind"] == "zne"), None)
+            if record is None:
+                raise ValueError(f"--pin-layout {spec}: no ZNE record {pin['key']!r} in "
+                                 f"{rel(path)}.")
+            name = record["instance"]
+            row = instance_rows.get(name)
+            if row is None:
+                raise ValueError(f"--pin-layout {spec}: instance {name!r} is in no "
+                                 "instance file.")
+            for field_name in ("items", "target", "solution_bitstrings"):
+                if row[field_name] != record[field_name]:
+                    raise ValueError(f"--pin-layout {spec}: {field_name} of {name} differ "
+                                     "between the instance file and the manifest.")
+            first = record["pub_indices"][record["nominal_scales"].index(1.0)]
+            iterations, seed = int(record["iterations"]), int(record["best_seed"])
+            layout = [int(q) for q in record["initial_layout"]]
+            isa: QuantumCircuit | None = circuits[first]
+            pinned_from: Any = {
+                "manifest": rel(path),
+                "manifest_sha256": manifest_sha,
+                "circuits_sha256": manifest["circuits_sha256"],
+                "record_key": record["key"],
+                "pub_index": first,
+                "device": source,
+            }
+        else:
+            row = instance_rows.get(pin["key"])
+            if row is None:
+                raise ValueError(f"--pin-layout {spec}: instance {pin['key']!r} is in no "
+                                 "instance file.")
+            iterations, seed, layout = int(row["r_opt"]), pin["seed"], pin["layout"]
+            isa, pinned_from = None, "explicit"
+        if any(p["record_key"] == pin["record_key"] for p in out):
+            raise ValueError(f"--pin-layout: record {pin['record_key']} is pinned twice.")
+        out.append({"record_key": pin["record_key"], "row": row, "iterations": iterations,
+                    "seed": seed, "layout": layout, "isa": isa, "pinned_from": pinned_from})
+    return out
+
+
+def pinned_variant(
+    pin: Mapping[str, Any], backend: Any, scales: Sequence[float]
+) -> PreparedInstance:
+    """
+    A resolved pin as a foldable item: the source job's ISA circuit, or the
+    instance transpiled once on the explicit layout with its seed.
+
+    Raises
+    ------
+    ValueError
+        If the layout does not have one physical qubit per logical qubit.
+    RuntimeError
+        If the circuit is not on the layout the pin names.
+    """
+    row = pin["row"]
+    instance = SubsetSumInstance(items=list(row["items"]), target=row["target"],
+                                 name=row["name"])
+    circuit = DGSSPSolver(DGConfig(iterations=int(pin["iterations"]))).build_circuit(instance)
+    if len(pin["layout"]) != circuit.num_qubits:
+        raise ValueError(f"{pin['record_key']}: layout has {len(pin['layout'])} qubits, the "
+                         f"circuit {circuit.num_qubits}.")
+    if pin["isa"] is None:
+        tqc = transpile_on_layout(circuit, backend, seed=pin["seed"], layout=pin["layout"],
+                                  label=pin["record_key"])
+    else:
+        tqc = pin["isa"].copy()
+        got = tqc.layout.initial_index_layout(filter_ancillas=True)
+        if list(got) != list(pin["layout"]):
+            raise RuntimeError(f"{pin['record_key']}: the saved circuit is on {list(got)}, "
+                               f"its manifest says {pin['layout']}.")
+    scale_list = [float(s) for s in scales]
+    return PreparedInstance(
+        instance=instance,
+        solution_bitstrings=list(row["solution_bitstrings"]),
+        iterations=int(pin["iterations"]),
+        circuit=circuit,
+        transpiled=tqc,
+        best_seed=int(pin["seed"]),
+        seed_source="pinned_layout",
+        scales=scale_list if 1.0 in scale_list else [1.0, *scale_list],
+        p_uniform=int(row["M"]) / 2 ** int(row["n_items"]),
     )
 
 
@@ -724,14 +931,17 @@ def build_job(
     cfg: ZNESamplingConfig,
     *,
     n_drift: int = 2,
+    pins: Sequence[Mapping[str, Any]] = (),
+    drift_keys: Sequence[str] | None = None,
 ) -> tuple[list[QuantumCircuit], list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Every circuit of the job, in submission order, plus the manifest rows.
 
-    Order: the drift instances first (so their scale-1 circuit is among the
-    first PUBs), the rest of the subset in file order, the sweep variants, and
-    finally the drift repeats (the last PUBs).  The drift instances are the
-    smallest (fewest items, then fewest two-qubit gates on this device) whose
+    Order: the drift records first (so their scale-1 circuit is among the
+    first PUBs), the rest of the subset in file order, the pinned records, the
+    sweep variants, and finally the drift repeats (the last PUBs).  Unless
+    ``drift_keys`` names them, the drift records are the smallest subset
+    instances (fewest items, then fewest two-qubit gates on this device) whose
     ideal ``P(solution)`` exceeds ``P_uniform`` by :data:`DRIFT_MIN_SIGNAL`.
 
     Parameters
@@ -745,12 +955,24 @@ def build_job(
     cfg:
         Seed range, optimization level, scales and folding seed.
     n_drift:
-        How many instances get a repeated scale-1 circuit.
+        How many instances get a repeated scale-1 circuit (automatic choice).
+    pins:
+        :func:`resolve_pins` output: records transpiled once on a given
+        layout with a given seed, keyed ``<KEY>_<TAG>``.
+    drift_keys:
+        Record keys to repeat instead of the automatic choice; each must clear
+        :data:`DRIFT_MIN_SIGNAL`.
 
     Returns
     -------
     tuple
         ``(circuits, record_rows, circuit_rows)``.
+
+    Raises
+    ------
+    ValueError
+        If a drift key names no record, or one with too little signal to show
+        drift.
     """
     prepared: dict[str, PreparedInstance] = {}
     rows_by_name: dict[str, Mapping[str, Any]] = {}
@@ -761,22 +983,20 @@ def build_job(
         )
         rows_by_name[row["name"]] = row
 
-    eligible = [
-        p for p in prepared.values()
-        if grover_success_probability(
+    def informative(p: PreparedInstance) -> bool:
+        return grover_success_probability(
             p.instance.n_items, len(p.solution_bitstrings), p.iterations
         ) - p.p_uniform >= DRIFT_MIN_SIGNAL
-    ]
-    drift = sorted(
-        eligible,
-        key=lambda p: (p.instance.n_items, two_qubit_count(p.transpiled), p.name),
-    )[:n_drift]
-    drift_names = [p.name for p in drift]
-    ordered = drift_names + [n for n in prepared if n not in drift_names]
 
     entries: list[tuple[str, str, PreparedInstance, int]] = [
-        (name, "subset", prepared[name], int(rows_by_name[name]["r_opt"])) for name in ordered
+        (name, "subset", prepared[name], int(rows_by_name[name]["r_opt"])) for name in prepared
     ]
+    pinned_from: dict[str, Any] = {}
+    for pin in pins:
+        print(f"  pinned {pin['record_key']} on {pin['layout']} (seed {pin['seed']})")
+        entries.append((pin["record_key"], "pinned",
+                        pinned_variant(pin, backend, cfg.scales), int(pin["row"]["r_opt"])))
+        pinned_from[pin["record_key"]] = pin["pinned_from"]
     for srow in sweep_rows:
         name = srow["name"]
         r_opt = int(srow["r_opt"])
@@ -791,6 +1011,25 @@ def build_job(
                 continue  # the r_opt circuit is the instance's own; never sent twice
             print(f"  sweep {name} r={r} on the r_opt layout")
             entries.append((f"{name}_r{r}", "sweep", sweep_variant(base, int(r), backend), r_opt))
+
+    if drift_keys is None:
+        drift = sorted(
+            (p for p in prepared.values() if informative(p)),
+            key=lambda p: (p.instance.n_items, two_qubit_count(p.transpiled), p.name),
+        )[:n_drift]
+        drift_names = [p.name for p in drift]
+    else:
+        by_key = {key: item for key, _, item, _ in entries}
+        for key in drift_keys:
+            if key not in by_key:
+                raise ValueError(f"--drift {key}: no such record in this job "
+                                 f"({', '.join(by_key)}).")
+            if not informative(by_key[key]):
+                raise ValueError(f"--drift {key}: ideal P_sol is within {DRIFT_MIN_SIGNAL} of "
+                                 "P_uniform, so a repeat cannot show drift.")
+        drift_names = list(dict.fromkeys(drift_keys))
+    entries.sort(key=lambda e: drift_names.index(e[0]) if e[0] in drift_names
+                 else len(drift_names))
 
     items = [
         ZNEItem(
@@ -827,6 +1066,7 @@ def build_job(
                 "nominal_scales": [float(s) for s in plan["nominal"]],
                 "pub_indices": list(plan["dgssp_idx"]),
                 "drift_check": key in drift_names,
+                **({"pinned_from": pinned_from[key]} if key in pinned_from else {}),
             }
         )
         for fold, idx, one_q in zip(
@@ -1036,6 +1276,13 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
     sweep = json.loads((args.instances_dir / "sweep.json").read_text(encoding="utf-8"))
     subset_rows = list(subset["selected"])
     sweep_rows = list(sweep["instances"])
+    instance_rows = {r["name"]: r for r in [*sweep_rows, *subset_rows]}
+    try:
+        pins = resolve_pins(args.pin_layout or [], instance_rows, args.hardware_dir,
+                            backend_name(backend))
+    except ValueError as exc:
+        print(f"REFUSED: {exc}")
+        return 1
     if args.only:
         subset_rows = [r for r in subset_rows if r["name"] in args.only]
         sweep_rows = [r for r in sweep_rows if r["name"] in args.only]
@@ -1045,7 +1292,13 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
         sweep_rows = select_sweep_iterations(sweep_rows, args.sweep_iterations)
 
     cfg = analysis_config(args.shots, args.scales, args.seed_max)
-    circuits, record_rows, circuit_rows = build_job(backend, subset_rows, sweep_rows, cfg)
+    try:
+        circuits, record_rows, circuit_rows = build_job(
+            backend, subset_rows, sweep_rows, cfg, pins=pins, drift_keys=args.drift
+        )
+    except ValueError as exc:
+        print(f"REFUSED: {exc}")
+        return 1
     for row in circuit_rows:
         row["shots"] = args.shots
 
@@ -1144,8 +1397,15 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
             "seed_simulator": SEED_SIMULATOR,
             "only": list(args.only) if args.only else None,
             "sweep_iterations": list(args.sweep_iterations) if args.sweep_iterations else None,
-            "drift_check": "scale-1 repeat, as the last PUBs, of the two smallest instances "
-                           f"whose ideal P_sol exceeds P_uniform by >= {DRIFT_MIN_SIGNAL}",
+            "drift_check": (
+                "scale-1 repeat, as the last PUBs, of the two smallest instances "
+                f"whose ideal P_sol exceeds P_uniform by >= {DRIFT_MIN_SIGNAL}"
+                if args.drift is None else
+                "scale-1 repeat, as the last PUBs, of the records named with --drift "
+                f"({', '.join(args.drift)}); each clears P_uniform by >= {DRIFT_MIN_SIGNAL}"
+            ),
+            "drift_keys": list(args.drift) if args.drift else None,
+            "pin_layout": list(args.pin_layout) if args.pin_layout else None,
             "instances_files": {
                 "hardware_subset": rel(args.instances_dir / "hardware_subset.json"),
                 "hardware_subset_sha256": sha256_file(args.instances_dir / "hardware_subset.json"),
@@ -2493,6 +2753,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-sweep", action="store_true")
     parser.add_argument("--sweep-iterations", type=int, nargs="+", default=None,
                         help="Keep only these iteration counts of the sweep variants.")
+    parser.add_argument("--pin-layout", nargs="+", default=None, metavar="KEY:TAG=SRC",
+                        help="Add record KEY_TAG on a fixed layout. SRC is a date (record "
+                             "KEY's scale-1 ISA circuit from that job, reused as sent) or "
+                             "q0,q1,...[@SEED] (instance KEY at r_opt transpiled once on that "
+                             "initial_layout).")
+    parser.add_argument("--drift", nargs="+", default=None, metavar="KEY",
+                        help="Record keys to repeat at scale 1 for the drift check, instead "
+                             "of the two smallest informative instances.")
     parser.add_argument("--twirling", choices=("on", "off"), default="on")
     parser.add_argument("--dd", choices=("on", "off"), default="off",
                         help="Dynamical decoupling. Off by design (see DD_SEQUENCE).")

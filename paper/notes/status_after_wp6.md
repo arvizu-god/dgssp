@@ -1,8 +1,10 @@
 # Project status after WP6
 
-As of 2026-10-26. WP6 (the hardware run) is done: one job on ibm_fez, from one
-clean commit, with every input frozen by hash, and the data committed
-(`3c9cad9`). Nothing has been pushed yet.
+As of 2026-10-28. WP6 (the hardware run) is done: the job of record on
+ibm_fez, from one clean commit, with every input frozen by hash, and the data
+committed (`3c9cad9`); a second, smaller job on the gentle grid (Open item 2,
+data `09b9c46`, Table S2). About 465 s of QPU time are left in the window
+(ends ≈ 2026-11-21). Nothing has been pushed yet.
 
 WP1–WP5: see `status_after_wp3.md`, `status_after_wp4.md`, `status_after_wp5.md`.
 The tool is `paper/scripts/hardware_batch.py` (`--plan`, `--dry-run`,
@@ -174,6 +176,18 @@ reporting confident, wrong numbers.
    - The aggregator's model column is empty for this date (it reads
      `hw_predict_exec_<date>`, not `hw_predict_plan_x3.176_<date>`); the
      predicted column above is from the latter.
+   - **In the paper: Table S2** (`tex/hw_table_grids.tex`, from
+     `hw_aggregate.py --grids 2026-10-28 --grids-prediction
+     paper/data/hw_predict_plan_x3.176_2026-10-28`). Job 1 stays the job of
+     record for Tables 3 and 4 and every hardware figure. The footer's
+     "before the job ran" is read off the timestamps (prediction 01:04:36
+     UTC, job 01:18:35 UTC).
+   - Sentence for the C2 discussion (draft): "With the same instances on the
+     same device, a gentler fold grid, λ ∈ {1, 1.25, 1.5}, resolved both
+     n = 3, M = 1 records that the odd grid λ ∈ {1, 3, 5} could not, with
+     intervals that contain the ideal (Table S2); the third n = 3 record was at
+     random on that day although the calibration rated its layout as
+     ordinary."
 
    The plan, as written before submission:
 
@@ -284,7 +298,8 @@ reporting confident, wrong numbers.
      figures from `data/`). TikZ sources in `tex/diagrams/`, built by
      `build_diagrams.py`.
    - Every figure and table on the agreed list now exists. Main text:
-     Figs 1–10, Tables 1–4; supplement: S1 (`fig_sim_models`).
+     Figs 1–10, Tables 1–4; supplement: S1 (`fig_sim_models`), S2
+     (`hw_table_grids`, odd grid vs gentle grid, added 2026-10-28).
 5. Carried over from WP5: the six TEXT TO WRITE paragraphs; the Mitiq section;
    Zenodo deposit, then delete the bucket (on Arturo's OK).
 6. Untracked on purpose: `paper/hardware/account_snapshot.json` (raw account

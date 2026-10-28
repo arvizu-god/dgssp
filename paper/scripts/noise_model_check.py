@@ -81,6 +81,7 @@ from dgssp.backends import (  # noqa: E402
     CalibrationSnapshotBackend,
     calibration_payload,
     load_noise_model,
+    median_gate_errors,
     save_noise_model,
     scale_calibration_errors,
 )
@@ -329,6 +330,23 @@ def noise_device(calibration: Path, alpha: float) -> tuple[Any, Any, dict[str, A
         return snapshot, snapshot.backend, {"alpha": 1.0, "n_scaled": 0, "n_capped": 0}
     device, info = scale_calibration_errors(snapshot.backend, alpha)
     return snapshot, device, info
+
+
+def median_errors(calibration: Path, alpha: float = 1.0) -> dict[str, Any]:
+    """
+    The device's median gate errors on ``calibration``, every error times ``alpha``.
+
+    What :func:`dgssp.metrics.survival_estimate` takes.  Built from the same
+    snapshot and the same scaling (with its cap) as :func:`noise_device`, so a
+    survival at ``alpha`` describes the device the alpha fit describes.
+
+    Returns
+    -------
+    dict
+        :func:`dgssp.backends.median_gate_errors` of the (scaled) device.
+    """
+    _, device, _ = noise_device(calibration, alpha)
+    return median_gate_errors(device)
 
 
 def default_calibration(paths: Paths) -> Path:

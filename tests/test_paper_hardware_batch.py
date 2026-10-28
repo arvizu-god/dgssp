@@ -496,3 +496,153 @@ def test_sweep_variants_can_be_restricted_to_some_iterations():
     assert [(r["name"], r["iterations"]) for r in kept] == [("A", [1]), ("B", [1])]
     assert rows[0]["iterations"] == [1, 2, 3]  # the input is not modified
     assert hb.select_sweep_iterations(rows, [2])[0]["iterations"] == [2]
+
+
+PIN_DATE = "2099-03-04"
+
+
+@pytest.fixture(scope="module")
+def pinned(rehearsal, tmp_path_factory):
+    """A plan whose n = 3 records are pinned to the rehearsal's layouts, then dry run + collect."""
+    root = tmp_path_factory.mktemp("wp6_pinned")
+    hw = root / "hw"
+    hw.mkdir()
+    source = rehearsal["paths"].manifest
+    (hw / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    fresh = next(r for r in rehearsal["manifest"]["records"] if r["key"] == "P-n2-M1-11")
+    explicit = ",".join(str(q) for q in fresh["initial_layout"]) + f"@{fresh['best_seed']}"
+    common = ["--hardware-dir", str(hw), "--data-dir", str(root / "data")]
+    plan = hb.main([
+        "--plan", "--offline-backend", "fake_marrakesh", "--only", "P-n2-M1-11", "--no-sweep",
+        "--pin-layout", f"P-n3-M1-17:L1={DATE}", f"P-n3-M1-17_r1:L1={DATE}",
+        f"P-n2-M1-11:E={explicit}",
+        "--drift", "P-n2-M1-11", "P-n3-M1-17_L1",
+        "--scales", "1", "1.25", "1.5",
+        "--seed-max", "2", "--shots", str(SHOTS), "--date", PIN_DATE, *common,
+    ])
+    dry = hb.main(["--dry-run", "--date", PIN_DATE, *common])
+    paths = hb.Paths(PIN_DATE, hw, root / "data")
+    collect = hb.main(["--collect", "--jobs", str(paths.jobs_dryrun), *common])
+    manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+    return {"paths": paths, "manifest": manifest, "status": (plan, dry, collect),
+            "common": common, "source": rehearsal}
+
+
+def test_a_pinned_plan_runs_end_to_end(pinned):
+    """Plan, dry run and collect all exit 0; 4 records x 3 scales + 2 drift repeats."""
+    assert pinned["status"] == (0, 0, 0)
+    manifest = pinned["manifest"]
+    assert manifest["totals"]["circuits"] == 4 * 3 + 2
+    assert manifest["totals"]["by_role"]["pinned"] == 3 * 3
+    assert manifest["settings"]["drift_keys"] == ["P-n2-M1-11", "P-n3-M1-17_L1"]
+
+
+def test_a_pinned_record_is_the_source_records_circuit(pinned):
+    """Same layout, seed and r as the source record, and the same scale-1 ISA circuit."""
+    _, _, source_circuits = hb.load_manifest(pinned["source"]["paths"].manifest)
+    _, _, circuits = hb.load_manifest(pinned["paths"].manifest)
+    source = {r["key"]: r for r in pinned["source"]["manifest"]["records"]}
+    records = {r["key"]: r for r in pinned["manifest"]["records"] if r["kind"] == "zne"}
+    for key, origin in (("P-n3-M1-17_L1", "P-n3-M1-17"), ("P-n3-M1-17_r1_L1", "P-n3-M1-17_r1")):
+        row, src = records[key], source[origin]
+        assert row["role"] == "pinned" and row["seed_source"] == "pinned_layout"
+        assert row["instance"] == "P-n3-M1-17"
+        assert (row["initial_layout"], row["best_seed"], row["iterations"]) == (
+            src["initial_layout"], src["best_seed"], src["iterations"])
+        assert row["pinned_from"]["record_key"] == origin
+        assert row["pinned_from"]["manifest"].endswith(f"manifest_{DATE}.json")
+        new = circuits[row["pub_indices"][row["nominal_scales"].index(1.0)]]
+        old = source_circuits[src["pub_indices"][src["nominal_scales"].index(1.0)]]
+        assert new == old  # the circuit that job sent, not a re-transpilation
+        assert row["pinned_from"]["pub_index"] == src["pub_indices"][0]
+
+
+def test_an_explicit_layout_is_kept_in_initial_layout_order(pinned):
+    """The typed layout and seed are the ones used, virtual qubit i on the i-th entry."""
+    _, _, circuits = hb.load_manifest(pinned["paths"].manifest)
+    records = {r["key"]: r for r in pinned["manifest"]["records"]}
+    fresh, typed = records["P-n2-M1-11"], records["P-n2-M1-11_E"]
+    assert typed["pinned_from"] == "explicit"
+    assert typed["seed_source"] == "pinned_layout"
+    assert (typed["initial_layout"], typed["best_seed"]) == (
+        fresh["initial_layout"], fresh["best_seed"])
+    circuit = circuits[typed["pub_indices"][0]]
+    assert circuit.layout.initial_index_layout(filter_ancillas=True) == fresh["initial_layout"]
+
+
+def test_named_drift_records_lead_and_are_repeated_last(pinned):
+    """--drift puts the named records first and their scale-1 copies last."""
+    manifest = pinned["manifest"]
+    zne = [r for r in manifest["records"] if r["kind"] == "zne"]
+    assert [r["key"] for r in zne[:2]] == ["P-n2-M1-11", "P-n3-M1-17_L1"]
+    drift = [r for r in manifest["records"] if r["kind"] == "drift"]
+    assert [r["key"] for r in drift] == ["P-n2-M1-11_drift", "P-n3-M1-17_L1_drift"]
+    assert drift[-1]["pub_indices"] == [manifest["totals"]["circuits"] - 1]
+    assert drift[1]["seed_source"] == "pinned_layout"
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ("P-n3-M2-17:L1=2026-10-25",
+         {"key": "P-n3-M2-17", "tag": "L1", "record_key": "P-n3-M2-17_L1",
+          "date": "2026-10-25", "layout": None, "seed": None}),
+        ("P-n4-M1-10_r1:L1=2026-10-25",
+         {"key": "P-n4-M1-10_r1", "tag": "L1", "record_key": "P-n4-M1-10_r1_L1",
+          "date": "2026-10-25", "layout": None, "seed": None}),
+        ("P-n2-M1-11:X=98,93,92,90,91@23",
+         {"key": "P-n2-M1-11", "tag": "X", "record_key": "P-n2-M1-11_X",
+          "date": None, "layout": [98, 93, 92, 90, 91], "seed": 23}),
+        ("P-n2-M1-11:X=98,93,92,90,91",
+         {"key": "P-n2-M1-11", "tag": "X", "record_key": "P-n2-M1-11_X",
+          "date": None, "layout": [98, 93, 92, 90, 91], "seed": hb.SEED_MIN}),
+    ],
+)
+def test_pin_values_are_parsed(spec, expected):
+    """Both forms of --pin-layout."""
+    assert hb.parse_pin(spec) == expected
+
+
+@pytest.mark.parametrize(
+    ("spec", "message"),
+    [
+        ("P-n3-M2-17=2026-10-25", "expected KEY:TAG"),
+        ("P-n3-M2-17:L_1=2026-10-25", "expected KEY:TAG"),
+        ("P-n3-M2-17:L1=yesterday", "neither a date nor a layout"),
+        ("P-n3-M2-17:L1=1,2,2", "appears twice"),
+    ],
+)
+def test_malformed_pin_values_are_refused(spec, message):
+    """A tag is alphanumeric (it becomes part of a file name); a layout has no repeats."""
+    with pytest.raises(ValueError, match=message):
+        hb.parse_pin(spec)
+
+
+def test_pins_are_refused_when_they_cannot_reproduce_the_source(rehearsal):
+    """Another device, an unknown record, a missing manifest, or the same key twice."""
+    hw = rehearsal["paths"].manifest.parent
+    device = rehearsal["manifest"]["backend"]["name"]
+    subset = json.loads((hb.INSTANCES_DIR / "hardware_subset.json").read_text(encoding="utf-8"))
+    rows = {r["name"]: r for r in subset["selected"]}
+    with pytest.raises(ValueError, match="not on ibm_fez"):
+        hb.resolve_pins([f"P-n3-M1-17:L1={DATE}"], rows, hw, "ibm_fez")
+    with pytest.raises(ValueError, match="no ZNE record"):
+        hb.resolve_pins([f"P-n4-M1-10:L1={DATE}"], rows, hw, device)
+    with pytest.raises(ValueError, match="does not exist"):
+        hb.resolve_pins(["P-n3-M1-17:L1=2000-01-01"], rows, hw, device)
+    with pytest.raises(ValueError, match="pinned twice"):
+        hb.resolve_pins([f"P-n3-M1-17:L1={DATE}", "P-n3-M1-17:L1=1,2,3,4,5,6"], rows, hw, device)
+    with pytest.raises(ValueError, match="in no instance file"):
+        hb.resolve_pins(["P-n9-M1-99:L1=1,2"], rows, hw, device)
+
+
+def test_a_drift_key_must_be_a_record_with_signal(tmp_path, capsys):
+    """--drift on a missing record, or on M = N/2 (always at P_uniform), refuses the plan."""
+    common = ["--hardware-dir", str(tmp_path / "hw"), "--data-dir", str(tmp_path / "data")]
+    base = ["--plan", "--offline-backend", "fake_marrakesh", "--no-sweep", "--seed-max", "1",
+            "--shots", str(SHOTS), "--date", DATE, *common]
+    assert hb.main([*base, "--only", "P-n2-M1-11", "--drift", "P-n2-M1-10"]) == 1
+    assert "no such record" in capsys.readouterr().out
+    assert hb.main([*base, "--only", "P-n2-M2-03", "--drift", "P-n2-M2-03"]) == 1
+    assert "cannot show drift" in capsys.readouterr().out
+    assert not (tmp_path / "hw" / f"manifest_{DATE}.json").exists()
