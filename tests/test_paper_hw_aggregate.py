@@ -166,6 +166,25 @@ def test_statuses_follow_the_current_rule(summary):
 
 
 @needs_job
+def test_report_bounds_clip_moves_only_the_interval_past_one(summary):
+    """Step 5: clip vs flag on the job of record -- same statuses, one interval end."""
+    assert summary["report_bounds"] == "clip"
+    flagged = hw_aggregate.build_summary(hw_aggregate.HwInputs(DATE, HARDWARE, DATA), "flag")
+    assert flagged["report_bounds"] == "flag"
+    assert flagged["statuses"] == summary["statuses"]
+    clip = {r["key"]: r for r in summary["records"]}
+    flag = {r["key"]: r for r in flagged["records"]}
+    assert flag["P-n2-M1-11"]["zne_reported_hi"] > 1.0
+    assert clip["P-n2-M1-11"]["zne_reported_hi"] == 1.0
+    assert clip["P-n2-M1-11"]["ci_out_of_range"] and not clip["P-n2-M1-11"]["out_of_range"]
+    for key, r in clip.items():
+        for column in ("zne_status", "resolved", "identifiable", "reported_source", "zne_value"):
+            assert r[column] == flag[key][column]
+        if key != "P-n2-M1-11":
+            assert r["zne_reported_hi"] == flag[key]["zne_reported_hi"]
+
+
+@needs_job
 def test_the_limit_band_of_the_job(summary):
     """ZNE resolves at 71 two-qubit gates and fails from 194; one record bucks it."""
     band = summary["limit_band"]
@@ -230,7 +249,7 @@ def test_the_configuration_is_read_from_the_files(summary):
 def test_the_results_table_marks_declined_and_unphysical_values(summary):
     """Dagger: reported at lambda = 1; double dagger: Mitiq outside [0, 1]."""
     text = hw_aggregate.results_table(summary)
-    assert "0.953 [0.890, 1.026] & res." in text
+    assert "0.953 [0.890, 1.000] & res." in text
     assert "3.547$^\\ddagger$" in text
     assert "0.257$^\\dagger$ & n.i." in text
     assert "P-n3-M1-17\\_r1" in text
@@ -297,11 +316,11 @@ def test_the_grid_table_sets_the_gentle_grid_beside_the_odd_grid(tmp_path, capsy
     assert set(rows) - {"", "Record"} == {
         "P-n2-M1-11", "P-n3-M1-17", "P-n3-M2-17", "P-n3-M1-17\\_r1"}
     # Odd grid: not identifiable; gentle grid: resolved, interval holding the ideal.
-    assert "n.i. & 235 & 0.15 & 0.821 [0.660, 1.089]" in rows["P-n3-M1-17"]
+    assert "n.i. & 235 & 0.15 & 0.821 [0.660, 1.000]" in rows["P-n3-M1-17"]
     assert "id. & 126 & 0.31 & 0.730 [0.633, 0.831] & 0.609 [0.508, 0.719]" in rows[
         "P-n3-M1-17\\_r1"]
     # The M = 2 record fell to random on the day; a negative kept is typeset as a number.
-    assert "$-0.01$ & n.i. & 0.806 [0.613, 1.107]" in rows["P-n3-M2-17"]
+    assert "$-0.01$ & n.i. & 0.806 [0.613, 1.000]" in rows["P-n3-M2-17"]
 
 
 def test_a_later_job_never_replaces_the_papers_tables(tmp_path):

@@ -309,11 +309,38 @@ def recovery_median(rows: Sequence[dict[str, Any]], n_items: int, *, exact: bool
     return float(headline(subset, [], ["planned"])["per_grid"]["planned"]["signal_recovery_median"])
 
 
-def strict_outside(facts: Facts) -> list[float]:
-    """Planned grid, instances with signal: strict-rule values outside [0, 1]."""
+def strict_values(facts: Facts, *, reported: bool) -> list[float]:
+    """
+    Planned grid, instances with signal: the strict rule's value per instance.
+
+    ``reported=False`` is the fit before ``REPORT_BOUNDS`` (the extrapolation
+    as fitted where it is reported, else the lambda = 1 value);
+    ``reported=True`` is the value the tables report.
+    """
     planned = with_signal([r for r in facts.sim_rows if r["grid"] == "planned"])
-    return [r["zne_scalar_reported"] for r in planned
-            if r["zne_scalar_reported"] is not None and not 0.0 <= r["zne_scalar_reported"] <= 1.0]
+    key = "zne_scalar_reported"
+    return [
+        r[key] if reported or r["reported_source"] != "extrapolation" else r["zne_scalar_value"]
+        for r in planned if r[key] is not None
+    ]
+
+
+def strict_outside(facts: Facts, *, reported: bool = False) -> list[float]:
+    """Planned grid, instances with signal: strict-rule values outside [0, 1]."""
+    return [v for v in strict_values(facts, reported=reported) if not 0.0 <= v <= 1.0]
+
+
+def strict_median_bias(facts: Facts) -> float:
+    """Median of reported minus ideal (the ideal run), planned, with signal."""
+    planned = with_signal([r for r in facts.sim_rows if r["grid"] == "planned"])
+    return statistics.median(r["bias_zne_scalar_reported"] for r in planned
+                             if r["bias_zne_scalar_reported"] is not None)
+
+
+def clipped_interval(facts: Facts, job: int, key: str) -> list[str]:
+    """A resolved hardware record's reported value and interval, at 3 decimals."""
+    r = facts.rec(job, key)
+    return [fmt(r["zne_reported"]), fmt(r["zne_reported_lo"]), fmt(r["zne_reported_hi"])]
 
 
 def relaxed_outside(facts: Facts) -> list[float]:
@@ -485,12 +512,27 @@ def claims(facts: Facts) -> list[Claim]:
               "hw_summary*.json: records[] with signal, zne_status != resolved"),
         *[_a(label, r) for label, r in unresolved_with_signal(facts)],
         Claim("B", HW, "§2",
-              r"strict rule still reports (\d+) of (\d+) planned-grid values outside \[0, 1\], "
-              rf"(\d+) of them above 1 \(max ({NUM})\)",
+              r"strict rule's fit still lands outside \[0, 1\] on (\d+) of (\d+) planned-grid "
+              rf"values, (\d+) of them above 1 \(max ({NUM})\)",
               lambda f: (lambda o: [str(len(o)),
                                     str(len(with_signal([r for r in f.sim_rows if r["grid"] == "planned"]))),
                                     str(sum(1 for v in o if v > 1)), fmt(max(o), 2)])(strict_outside(f)),
-              f"{sim}: zne_scalar_reported, planned, signal_direction != 0"),
+              f"{sim}: reported_source == extrapolation ? zne_scalar_value : zne_scalar_reported, "
+              "planned, signal_direction != 0"),
+        Claim("B3", HW, "§2", r"reported clipped to \[P_uniform, 1\]: (\d+) reported values outside",
+              lambda f: [str(len(strict_outside(f, reported=True)))],
+              f"{sim}: zne_scalar_reported (REPORT_BOUNDS = clip), planned, with signal"),
+        Claim("B4", HW, "§7", rf"\| Strict rule \| ({NUM}) \|",
+              lambda f: [fmt(strict_median_bias(f), 2)],
+              f"{sim}: median bias_zne_scalar_reported, planned, with signal"),
+        Claim("B5", HW, "§2",
+              rf"\| P-n3-M1-17 \|[^\n]*\| ({NUM}) \[({NUM}), ({NUM})\], resolved \|",
+              lambda f: clipped_interval(f, 2, "P-n3-M1-17"),
+              f"{j2}: records[P-n3-M1-17].zne_reported, _lo, _hi"),
+        Claim("B6", HW, "§6",
+              rf"\| 13 \|[^\n]*\| ({NUM}) \[({NUM}), ({NUM})\] vs ({NUM}) \[({NUM}), ({NUM})\] \|",
+              lambda f: [*clipped_interval(f, 1, "P-n2-M1-11"), *clipped_interval(f, 2, "P-n2-M1-11")],
+              f"{j1} and {j2}: records[P-n2-M1-11].zne_reported, _lo, _hi"),
         Claim("B2", HW, "§7", rf"relaxed rule adds (\d+) more \(max ({NUM})\)",
               lambda f: [str(len(relaxed_outside(f)) - len(strict_outside(f))),
                          fmt(max(relaxed_outside(f)), 0)],

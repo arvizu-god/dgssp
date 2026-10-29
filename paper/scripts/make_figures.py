@@ -745,9 +745,11 @@ def _sweep_panel(ax: Any, sweeps: dict[str, dict[str, Any]], name: str) -> None:
             analytic_drawn = True
         if executor == "zne":
             # Flags and reported value under the current rule (the analytic
-            # line is the exact P_ideal); an interval is drawn only for a
-            # reported extrapolation -- a lambda = 1 fallback has the shot
-            # interval of that observation, not the fit's (unbounded) one.
+            # line is the exact P_ideal) and REPORT_BOUNDS; an interval is
+            # drawn only for a reported extrapolation -- a lambda = 1 fallback
+            # has the shot interval of that observation, not the fit's
+            # (unbounded) one.  The sweep rows carry no counts, so
+            # REPORT_BOUNDS = "bounded" is refused here (rederive_flags raises).
             flags = [
                 rederive_flags(row["zne"], row.get("analytic")) if row.get("zne") else {}
                 for row in rows
@@ -757,10 +759,10 @@ def _sweep_panel(ax: Any, sweeps: dict[str, dict[str, Any]], name: str) -> None:
             )
             ci = np.array(
                 [
-                    ((row["zne"] or {}).get("ci") or [np.nan, np.nan])
+                    (f.get("reported_ci") or [np.nan, np.nan])
                     if f.get("reported_source") == "extrapolation"
                     else [np.nan, np.nan]
-                    for row, f in zip(rows, flags, strict=True)
+                    for f in flags
                 ],
                 dtype=float,
             )

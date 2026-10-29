@@ -665,6 +665,7 @@ def _exp_fixed_many(
     W: np.ndarray,
     asymptote: float,
     rate_max: float = EXP_RATE_MAX,
+    amp_bounds: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Weighted fit of ``a + b exp(-c x)`` with ``a`` fixed, for many series.
@@ -675,6 +676,14 @@ def _exp_fixed_many(
     search followed by a vectorised golden-section refinement, so a whole
     bootstrap (thousands of series) is fitted in a few array operations and
     never depends on an initial guess.
+
+    With ``amp_bounds = (b_lo, b_hi)`` the amplitude is constrained to that
+    box.  ``chi2`` is quadratic in ``b``, so for each ``c`` the constrained
+    minimiser is ``clip(S_yg / S_gg, b_lo, b_hi)`` and the profile is
+    ``S_yy - 2 b S_yg + b^2 S_gg``; the rate is then re-optimised on that
+    profile (the ``"bounded"`` option of :data:`REPORT_BOUNDS_OPTIONS`).
+    ``None`` (the default) is the unconstrained fit, computed exactly as
+    before.
 
     Parameters
     ----------
@@ -688,6 +697,8 @@ def _exp_fixed_many(
         The fixed ``a``.
     rate_max:
         Upper bound of the rate search; see :data:`EXP_RATE_MAX`.
+    amp_bounds:
+        Optional ``(b_lo, b_hi)`` box for the amplitude.
 
     Returns
     -------
@@ -699,15 +710,24 @@ def _exp_fixed_many(
     WD = W * D
     Syy = np.sum(WD * D, axis=1)
 
+    def profile(syg: np.ndarray, sgg: np.ndarray) -> np.ndarray:
+        if amp_bounds is None:
+            return Syy - syg**2 / sgg
+        b = np.clip(syg / sgg, amp_bounds[0], amp_bounds[1])
+        return Syy - 2.0 * b * syg + b * b * sgg
+
     def chi2(c: np.ndarray) -> np.ndarray:
         g = np.exp(-np.outer(c, x))
-        syg = np.sum(WD * g, axis=1)
-        sgg = np.sum(W * g * g, axis=1)
-        return Syy - syg**2 / sgg
+        return profile(np.sum(WD * g, axis=1), np.sum(W * g * g, axis=1))
 
     rates = _rate_grid(float(rate_max))
     G = np.exp(-np.outer(rates, x))
-    grid = Syy[:, None] - (WD @ G.T) ** 2 / (W @ (G * G).T)
+    if amp_bounds is None:
+        grid = Syy[:, None] - (WD @ G.T) ** 2 / (W @ (G * G).T)
+    else:
+        syg_grid, sgg_grid = WD @ G.T, W @ (G * G).T
+        b_grid = np.clip(syg_grid / sgg_grid, amp_bounds[0], amp_bounds[1])
+        grid = Syy[:, None] - 2.0 * b_grid * syg_grid + b_grid**2 * sgg_grid
     best = np.argmin(grid, axis=1)
     last = rates.size - 1
     lo = rates[np.maximum(best - 1, 0)]
@@ -724,6 +744,8 @@ def _exp_fixed_many(
 
     g = np.exp(-np.outer(c, x))
     b = np.sum(WD * g, axis=1) / np.sum(W * g * g, axis=1)
+    if amp_bounds is not None:
+        b = np.clip(b, amp_bounds[0], amp_bounds[1])
     return b, c
 
 
@@ -799,12 +821,19 @@ def _fit_series(
     sigma: np.ndarray | None = None,
     asymptote: float | None = None,
     rate_max: float = EXP_RATE_MAX,
+    value_bounds: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """
     Fit one series and extrapolate it to zero noise, with full diagnostics.
 
     Weighted least squares when ``sigma`` is given (``chi2`` uses it), plain
     least squares otherwise (``cov`` and ``chi2`` are then ``None``).
+
+    ``value_bounds = (lo, hi)`` constrains the zero-noise value ``a + b`` of a
+    fixed-asymptote exponential to ``[lo, hi]`` inside the fit (see
+    :func:`_exp_fixed_many`); any other method refuses it.  The result then
+    also carries ``value_bounds`` and ``value_at_bound``, and ``value_se`` is
+    ``None`` at the bound, where the linearised covariance is not an SE.
 
     Returns
     -------
@@ -815,11 +844,14 @@ def _fit_series(
     """
     if method not in ZNE_METHODS:
         raise ValueError(f"Unknown method '{method}'. Use one of {', '.join(ZNE_METHODS)}.")
+    if value_bounds is not None and (method != "exponential" or asymptote is None):
+        raise ValueError("value_bounds needs the fixed-asymptote exponential.")
     n = x.size
     weights = None if sigma is None else 1.0 / sigma**2
     cov: np.ndarray | None = None
     value_se: float | None = None
     rate_at_bound: bool | None = None
+    value_at_bound = False
     fit_ok = True
 
     if method in _POLYNOMIAL_DEGREE:
@@ -858,7 +890,10 @@ def _fit_series(
         if n < n_params:
             raise ValueError(f"Exponential with a fixed asymptote needs >= 2 scales, got {n}.")
         w_row = (np.ones(n) if weights is None else weights)[None, :]
-        b_arr, c_arr = _exp_fixed_many(x, y[None, :], w_row, float(asymptote), rate_max)
+        amp_bounds = _amp_bounds(value_bounds, float(asymptote))
+        b_arr, c_arr = _exp_fixed_many(
+            x, y[None, :], w_row, float(asymptote), rate_max, amp_bounds
+        )
         b, c = float(b_arr[0]), float(c_arr[0])
         g = np.exp(-c * x)
         fitted = asymptote + b * g
@@ -866,10 +901,11 @@ def _fit_series(
         value = float(asymptote + b)
         names = ["amplitude", "rate"]
         rate_at_bound = bool(c >= rate_max * (1.0 - 1e-9))
+        value_at_bound = amp_bounds is not None and (b <= amp_bounds[0] or b >= amp_bounds[1])
         if sigma is not None:
             jac = np.column_stack([g, -b * x * g]) / sigma[:, None]
             cov = _safe_inverse(jac.T @ jac)
-            if cov is not None:
+            if cov is not None and not value_at_bound:
                 value_se = float(np.sqrt(cov[0, 0]))
 
     else:
@@ -897,7 +933,7 @@ def _fit_series(
     residuals = y - fitted
     dof = n - n_params
     chi2 = float(np.sum((residuals / sigma) ** 2)) if sigma is not None and fit_ok else None
-    return {
+    out = {
         "method": method,
         "value": value,
         "value_se": value_se,
@@ -913,6 +949,22 @@ def _fit_series(
         "fit_ok": fit_ok,
         "rate_at_bound": rate_at_bound,
     }
+    if value_bounds is not None:
+        out["value_bounds"] = [float(value_bounds[0]), float(value_bounds[1])]
+        out["value_at_bound"] = bool(value_at_bound)
+    return out
+
+
+def _amp_bounds(
+    value_bounds: tuple[float, float] | None, asymptote: float
+) -> tuple[float, float] | None:
+    """Bounds on ``a + b`` as bounds on the amplitude ``b``."""
+    if value_bounds is None:
+        return None
+    lo, hi = float(value_bounds[0]), float(value_bounds[1])
+    if not lo <= hi:
+        raise ValueError(f"value_bounds must satisfy lo <= hi, got {value_bounds}.")
+    return lo - asymptote, hi - asymptote
 
 
 def _sigma_matrix(Y: np.ndarray, shots: np.ndarray) -> np.ndarray:
@@ -928,14 +980,18 @@ def _extrapolate_many(
     S: np.ndarray | None,
     asymptote: float | None,
     rate_max: float = EXP_RATE_MAX,
+    value_bounds: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """
     Zero-noise values of many series at once (the bootstrap's inner loop).
 
     Same estimator as :func:`_fit_series`, row by row of ``Y`` (shape
     ``(B, n)``) with standard errors ``S`` (``None`` = unweighted).
-    Non-converged free-asymptote fits come back as ``nan``.
+    Non-converged free-asymptote fits come back as ``nan``.  ``value_bounds``
+    as in :func:`_fit_series`.
     """
+    if value_bounds is not None and (method != "exponential" or asymptote is None):
+        raise ValueError("value_bounds needs the fixed-asymptote exponential.")
     if method in _POLYNOMIAL_DEGREE:
         X = np.vander(x, _POLYNOMIAL_DEGREE[method] + 1)
         if S is None:
@@ -948,7 +1004,8 @@ def _extrapolate_many(
         return Y @ richardson_weights(x)
     if asymptote is not None:
         W = np.ones_like(Y) if S is None else 1.0 / S**2
-        b, _ = _exp_fixed_many(x, Y, W, float(asymptote), rate_max)
+        amp_bounds = _amp_bounds(value_bounds, float(asymptote))
+        b, _ = _exp_fixed_many(x, Y, W, float(asymptote), rate_max, amp_bounds)
         return asymptote + b
     out = np.full(Y.shape[0], np.nan)
     for i, row in enumerate(Y):
@@ -1327,6 +1384,7 @@ def fit_scalar_series(
     *,
     p_uniform: float | None = None,
     p_ideal: float | None = None,
+    value_bounds: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """
     Weighted fit of an observed proportion against noise scale.
@@ -1351,6 +1409,10 @@ def fit_scalar_series(
     p_ideal:
         Noiseless ``P(solution)``; sets which side of the null counts as
         signal (:func:`signal_direction`).  ``None`` -> above the null.
+    value_bounds:
+        Constrain the extrapolation to ``[lo, hi]`` inside the fit (fixed-
+        asymptote exponential only; :func:`report_bounded`).  The flags do
+        not depend on it: they are computed from the observations.
 
     Returns
     -------
@@ -1386,7 +1448,7 @@ def fit_scalar_series(
     sigma = np.array([proportion_sigma(v, int(s)) for v, s in zip(y, n, strict=True)])
     asymptote = resolve_asymptote(cfg, p_uniform)
 
-    fit = _fit_series(cfg.method, x, y, sigma, asymptote, cfg.exp_rate_max)
+    fit = _fit_series(cfg.method, x, y, sigma, asymptote, cfg.exp_rate_max, value_bounds)
     flags = scalar_flags(
         y.tolist(),
         n.astype(int).tolist(),
@@ -1442,6 +1504,7 @@ def extrapolate_scalar(
     *,
     p_uniform: float | None = None,
     p_ideal: float | None = None,
+    value_bounds: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """
     Scalar ZNE: extrapolate one proportion to zero noise.
@@ -1461,6 +1524,8 @@ def extrapolate_scalar(
         asymptote).
     p_ideal:
         Noiseless value; the side of the null that counts as signal.
+    value_bounds:
+        See :func:`fit_scalar_series`.
 
     Returns
     -------
@@ -1474,7 +1539,13 @@ def extrapolate_scalar(
     """
     x, y, n = _observed_series(counts_per_scale, observable_fn)
     return fit_scalar_series(
-        x.tolist(), y.tolist(), n.astype(int).tolist(), cfg, p_uniform=p_uniform, p_ideal=p_ideal
+        x.tolist(),
+        y.tolist(),
+        n.astype(int).tolist(),
+        cfg,
+        p_uniform=p_uniform,
+        p_ideal=p_ideal,
+        value_bounds=value_bounds,
     )
 
 
@@ -1699,6 +1770,7 @@ def zne_bootstrap(
     B: int | None = None,
     seed: int | None = None,
     alpha: float = 0.05,
+    value_bounds: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """
     Bootstrap confidence intervals of a ZNE estimate.
@@ -1731,6 +1803,11 @@ def zne_bootstrap(
         Number of resamples and resampling seed.
     alpha:
         ``1 - confidence``.
+    value_bounds:
+        Scalar mode: constrain the point *and every replicate* to
+        ``[lo, hi]`` (:func:`report_bounded`).  The resamples do not depend on
+        it, so the same seed gives the bounded and unbounded estimators the
+        same replicates.
 
     Returns
     -------
@@ -1753,7 +1830,12 @@ def zne_bootstrap(
             raise ValueError("Scalar-mode bootstrap needs an observable_fn.")
         x, _, shots = _observed_series(counts_per_scale, observable_fn)
         point = extrapolate_scalar(
-            counts_per_scale, observable_fn, cfg, p_uniform=p_uniform, p_ideal=p_ideal
+            counts_per_scale,
+            observable_fn,
+            cfg,
+            p_uniform=p_uniform,
+            p_ideal=p_ideal,
+            value_bounds=value_bounds,
         )
         Y = np.empty((n_boot, x.size))
         for j, scale in enumerate(sorted(counts_per_scale)):
@@ -1768,6 +1850,7 @@ def zne_bootstrap(
             _sigma_matrix(Y, shots),
             resolve_asymptote(cfg, p_uniform),
             cfg.exp_rate_max,
+            value_bounds,
         )
         lo, hi = percentile_interval(values, alpha)
         finite = values[np.isfinite(values)]
@@ -3368,6 +3451,290 @@ def exp_fixed_monte_carlo(
     }
 
 
+# ---------------------------------------------------------------------------
+# 12) Reporting bounds of the scalar extrapolation
+# ---------------------------------------------------------------------------
+#
+# P(solution) is a probability, and under the depolarising model of section 11
+# the noiseless value lies on the ideal's side of P_uniform: P(0) in
+# [P_uniform, 1] when the signal is above random guessing.  The unconstrained
+# fit can land outside that range (shot noise, a rate learned too large).
+# Three ways to report it (paper/data/report_bounds.json compares them); the
+# one in force is :data:`REPORT_BOUNDS`, applied where the flags are
+# re-derived (``paper/scripts/aggregate.py`` and ``hw_aggregate.py``, via
+# :func:`report_extrapolation`).  Records keep the fit as fitted:
+#
+#   "flag"     the fit unchanged, plus ``out_of_range``;
+#   "clip"     point and interval clipped to the range after fitting;
+#   "bounded"  the range imposed inside the fit (``value_bounds``), and the
+#              bootstrap re-run with it, so the interval is the bounded
+#              estimator's own.
+#
+# Only an *extrapolated* value is subject to this.  The lambda = 1
+# observation reported for an unresolved fit is a measurement and is never
+# clipped.  The resolved / identifiable flags come from the observations
+# (:func:`scalar_flags`) and do not depend on the option.
+
+#: The options, in the order the comparison reports them.
+REPORT_BOUNDS_OPTIONS: tuple[str, ...] = ("flag", "clip", "bounded")
+
+#: The option in force, stamped on every re-derived row (as
+#: :data:`RESOLVED_RULE` is).  ``"clip"``: on every resolved simulated fit it
+#: gives the same coverage as ``"flag"`` and never a larger error, and
+#: ``"bounded"`` gives the same point (``P(0) = a + b`` depends on ``b`` alone,
+#: and ``chi2`` is quadratic in ``b``) at the cost of a bootstrap re-run.
+#: ``"flag"`` is the behaviour before Step 5.
+REPORT_BOUNDS: str = "clip"
+
+
+def physical_bounds(p_uniform: float, direction: int) -> tuple[float, float]:
+    """
+    The range the noiseless ``P(solution)`` lies in, given the signal's side.
+
+    Parameters
+    ----------
+    p_uniform:
+        ``M / 2**n``.
+    direction:
+        :func:`signal_direction`: ``+1`` -> ``[P_uniform, 1]``, ``-1`` ->
+        ``[0, P_uniform]``, ``0`` (no signal) -> ``[0, 1]``.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(lo, hi)``.
+    """
+    if direction not in (-1, 0, 1):
+        raise ValueError(f"direction must be -1, 0 or +1, got {direction}.")
+    p_u = float(p_uniform)
+    if direction > 0:
+        return p_u, 1.0
+    if direction < 0:
+        return 0.0, p_u
+    return 0.0, 1.0
+
+
+def _outside(value: float, bounds: tuple[float, float]) -> bool:
+    return bool(value < bounds[0] or value > bounds[1])
+
+
+def report_flag(
+    value: float, ci: Sequence[float], bounds: tuple[float, float]
+) -> dict[str, Any]:
+    """
+    Option ``"flag"``: the fit and its interval unchanged, plus range flags.
+
+    Parameters
+    ----------
+    value:
+        The unconstrained extrapolation.
+    ci:
+        Its bootstrap interval ``[lo, hi]``.
+    bounds:
+        :func:`physical_bounds`.
+
+    Returns
+    -------
+    dict
+        ``report_bounds``, ``value``, ``ci``, ``bounds``, ``out_of_range``
+        (the point is outside ``bounds``) and ``ci_out_of_range`` (the
+        interval reaches outside).
+    """
+    lo, hi = float(ci[0]), float(ci[1])
+    return {
+        "report_bounds": "flag",
+        "value": float(value),
+        "ci": [lo, hi],
+        "bounds": [float(bounds[0]), float(bounds[1])],
+        "out_of_range": _outside(float(value), bounds),
+        "ci_out_of_range": bool(lo < bounds[0] or hi > bounds[1]),
+    }
+
+
+def report_clip(
+    value: float, ci: Sequence[float], bounds: tuple[float, float]
+) -> dict[str, Any]:
+    """
+    Option ``"clip"``: point and interval clipped to ``bounds`` after fitting.
+
+    Clipping is the projection onto an interval that contains the truth, so
+    it never moves the point farther from it.  An interval with ``hi`` past
+    the bound ends *at* the bound and therefore covers a truth sitting on it
+    (``P_ideal = 1``) by construction.
+
+    Parameters
+    ----------
+    value, ci, bounds:
+        As for :func:`report_flag`.
+
+    Returns
+    -------
+    dict
+        The keys of :func:`report_flag`, with ``value`` and ``ci`` clipped;
+        ``out_of_range`` / ``ci_out_of_range`` describe the *input*.
+    """
+    out = report_flag(value, ci, bounds)
+    lo_b, hi_b = float(bounds[0]), float(bounds[1])
+    out["report_bounds"] = "clip"
+    out["value"] = float(min(max(float(value), lo_b), hi_b))
+    out["ci"] = [float(min(max(c, lo_b), hi_b)) for c in out["ci"]]
+    return out
+
+
+def report_bounded(
+    counts_per_scale: Mapping[float, Mapping[str, int]],
+    observable_fn: Callable[[Mapping[str, int]], float],
+    cfg: ZNESamplingConfig,
+    *,
+    p_uniform: float,
+    p_ideal: float | None = None,
+    B: int | None = None,
+    seed: int | None = None,
+    alpha: float = 0.05,
+) -> dict[str, Any]:
+    """
+    Option ``"bounded"``: ``a + b`` constrained to the physical range in the fit.
+
+    The amplitude of the fixed-asymptote exponential is boxed so that
+    ``P(0) = a + b`` lies in :func:`physical_bounds`; the rate is re-fitted on
+    the constrained profile (:func:`_exp_fixed_many`), and the bootstrap
+    re-runs the bounded estimator on every resample.
+
+    Parameters
+    ----------
+    counts_per_scale:
+        Counts keyed by realised scale.
+    observable_fn:
+        The proportion (``P(solution)``).
+    cfg:
+        Must be ``method="exponential"`` with a fixed asymptote;
+        ``n_bootstrap`` / ``bootstrap_seed`` are the defaults of ``B`` /
+        ``seed``.
+    p_uniform, p_ideal:
+        As for :func:`fit_scalar_series`; the direction of
+        :func:`signal_direction` picks the range.
+    B, seed, alpha:
+        Bootstrap settings.
+
+    Returns
+    -------
+    dict
+        ``report_bounds``, ``value``, ``ci``, ``bounds``, ``value_at_bound``,
+        ``rate``, ``se`` (bootstrap), ``B``, ``seed`` and the flags
+        ``resolved`` / ``identifiable`` / ``reported_source`` of the bounded
+        fit.
+    """
+    if resolve_asymptote(cfg, p_uniform) is None:
+        raise ValueError("report_bounded needs method='exponential' with a fixed asymptote.")
+    bounds = physical_bounds(p_uniform, signal_direction(p_ideal, p_uniform))
+    boot = zne_bootstrap(
+        counts_per_scale,
+        cfg,
+        observable_fn=observable_fn,
+        p_uniform=p_uniform,
+        p_ideal=p_ideal,
+        B=B,
+        seed=seed,
+        alpha=alpha,
+        value_bounds=bounds,
+    )
+    fit = boot["fit"]
+    return {
+        "report_bounds": "bounded",
+        "value": float(fit["value"]),
+        "ci": [float(boot["lo"]), float(boot["hi"])],
+        "bounds": [float(bounds[0]), float(bounds[1])],
+        "value_at_bound": bool(fit["value_at_bound"]),
+        "rate": float(fit["params"][1]),
+        "se": boot["se"],
+        "B": boot["B"],
+        "seed": boot["seed"],
+        "resolved": fit["resolved"],
+        "identifiable": fit["identifiable"],
+        "reported_source": fit["reported_source"],
+    }
+
+
+def fit_block_config(block: Mapping[str, Any]) -> ZNESamplingConfig:
+    """
+    The scalar configuration a stored fixed-asymptote exponential block used.
+
+    Parameters
+    ----------
+    block:
+        A record's ``zne_fit`` block (``asymptote``, ``B``,
+        ``bootstrap_seed``, ``exp_rate_max``).
+
+    Returns
+    -------
+    ZNESamplingConfig
+        ``method="exponential"`` with that asymptote, bootstrap size and seed.
+    """
+    return ZNESamplingConfig(
+        method="exponential",
+        asymptote=float(block["asymptote"]),
+        n_bootstrap=int(block["B"]),
+        bootstrap_seed=int(block["bootstrap_seed"]),
+        exp_rate_max=float(block.get("exp_rate_max") or EXP_RATE_MAX),
+    )
+
+
+def report_extrapolation(
+    value: float,
+    ci: Sequence[float],
+    p_uniform: float,
+    p_ideal: float | None = None,
+    *,
+    option: str | None = None,
+    counts_per_scale: Mapping[float, Mapping[str, int]] | None = None,
+    observable_fn: Callable[[Mapping[str, int]], float] | None = None,
+    cfg: ZNESamplingConfig | None = None,
+) -> dict[str, Any]:
+    """
+    Report one extrapolated value under a :data:`REPORT_BOUNDS_OPTIONS` option.
+
+    The one place the choice lives.  Apply it to an *extrapolation* only (a
+    fit that is resolved and identifiable), never to the lambda = 1
+    observation reported in its place.
+
+    Parameters
+    ----------
+    value, ci:
+        The unconstrained fit and its bootstrap interval.
+    p_uniform, p_ideal:
+        The null and the noiseless value (:func:`physical_bounds` of
+        :func:`signal_direction`).
+    option:
+        ``"flag"``, ``"clip"`` or ``"bounded"``; ``None`` -> :data:`REPORT_BOUNDS`.
+    counts_per_scale, observable_fn, cfg:
+        ``"bounded"`` only: what :func:`report_bounded` re-fits
+        (:func:`fit_block_config` builds ``cfg`` from a stored block).
+
+    Returns
+    -------
+    dict
+        ``report_bounds``, ``value``, ``ci``, ``bounds``, and
+        ``out_of_range`` / ``ci_out_of_range`` of the *unconstrained* fit.
+    """
+    option = REPORT_BOUNDS if option is None else option
+    if option not in REPORT_BOUNDS_OPTIONS:
+        raise ValueError(f"Unknown report option {option!r}. Use one of {REPORT_BOUNDS_OPTIONS}.")
+    bounds = physical_bounds(p_uniform, signal_direction(p_ideal, p_uniform))
+    flagged = report_flag(value, ci, bounds)
+    if option == "flag":
+        return flagged
+    if option == "clip":
+        return report_clip(value, ci, bounds)
+    if counts_per_scale is None or observable_fn is None or cfg is None:
+        raise ValueError("report option 'bounded' needs the counts, the observable and the config.")
+    bounded = report_bounded(counts_per_scale, observable_fn, cfg, p_uniform=p_uniform,
+                             p_ideal=p_ideal)
+    return {
+        **{k: flagged[k] for k in ("bounds", "out_of_range", "ci_out_of_range")},
+        **{k: bounded[k] for k in ("report_bounds", "value", "ci", "value_at_bound")},
+    }
+
+
 __all__ = [
     "ZNESamplingConfig",
     "ZNE_METHODS",
@@ -3429,6 +3796,14 @@ __all__ = [
     "plan_scales_spacing",
     "pointwise_fit_rates",
     "exp_fixed_monte_carlo",
+    "REPORT_BOUNDS_OPTIONS",
+    "REPORT_BOUNDS",
+    "fit_block_config",
+    "report_extrapolation",
+    "physical_bounds",
+    "report_flag",
+    "report_clip",
+    "report_bounded",
 ]
 
 

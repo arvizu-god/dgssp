@@ -221,9 +221,11 @@ What we explain (fake_marrakesh, 463 instances; this is the method study):
   n = 6: 3 / 20 %, at equal shots.
 - **Recovery.** Median share of the gap closed (planned): 0.81, 0.89, 0.58 at
   n = 2, 3, 4; 0 at n = 5, 6. Odd grid: 0 everywhere. Do not quote the pooled 0.25.
-- **The reporting rule.** Strict: median bias −0.44, 19 of 340 outside [0, 1]
-  (max 4.17). Relaxed: −0.34, 26 outside (one at 298). Raw: −0.17, 71 outside,
-  mean bias +16.7. Why we keep strict.
+- **The reporting rule.** Strict: median bias −0.44, 19 of 340 fits outside
+  [0, 1] (max 4.17), reported clipped to [P_u, 1] since Step 5 (0 reported
+  outside). Relaxed: −0.34, 26 fits outside (one at 298). Raw: −0.17, 71
+  outside, mean bias +16.7. Why we keep strict: with clipping, range no longer
+  separates the rules (`hw_results.md` §7, "Open (Step 5)").
 - **Model choice** (odd7): exponential 0.113 median error on 75 fits; Richardson
   0.057 but on only 13; quadratic 0.32; linear 0.55. Richardson is more selective,
   not more accurate.

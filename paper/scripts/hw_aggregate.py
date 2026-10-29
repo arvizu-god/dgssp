@@ -56,7 +56,11 @@ later job before it ran.
 
 The flags are re-derived, not read: ``resolved``, ``identifiable`` and the
 reported value follow the library's current rule via
-:func:`aggregate.rederive_flags`, exactly as the simulation tables do.
+:func:`aggregate.rederive_flags`, exactly as the simulation tables do.  A
+reported extrapolation and its interval are handled by
+:data:`dgssp.mitigation.zne.REPORT_BOUNDS` (``"clip"``: clipped to
+``[P_u, 1]``; ``--report-bounds flag`` reproduces the tables before Step 5);
+``zne_value`` stays the fit as fitted.
 
 "Signal kept" is ``(P_sol - P_uniform) / (P_ideal - P_uniform)`` at
 ``lambda = 1``: 1 is the noiseless answer, 0 is random guessing.  It is
@@ -100,6 +104,8 @@ from dgssp.metrics import (  # noqa: E402
     total_variation,
 )
 from dgssp.mitigation.zne import (  # noqa: E402
+    REPORT_BOUNDS,
+    REPORT_BOUNDS_OPTIONS,
     RESOLVABILITY_K,
     RESOLVED_RULE,
     plan_scales,
@@ -364,6 +370,7 @@ def record_entry(
     alpha_pred: Mapping[tuple[str, float], float],
     *,
     model_source: str = EXEC_LABEL,
+    report_bounds: str | None = None,
 ) -> dict[str, Any]:
     """
     Everything the tables and figures say about one ``zne`` record.
@@ -379,6 +386,8 @@ def record_entry(
         :func:`alpha_predictions`.
     model_source:
         Which of ``plan`` / ``exec_`` is "the model" (:meth:`HwInputs.model_source`).
+    report_bounds:
+        :func:`aggregate.rederive_flags`; ``None`` -> ``REPORT_BOUNDS``.
 
     Returns
     -------
@@ -389,7 +398,7 @@ def record_entry(
     p_uniform = float(row["p_uniform"])
     p_ideal = exact_p_ideal(dict(hw))
     fit = hw.get("zne_fit") or {}
-    flags = rederive_flags(fit, p_ideal)
+    flags = rederive_flags(fit, p_ideal, report_bounds=report_bounds, record=dict(hw))
     status = status_of(flags)
     scales = [float(s) for s in row["nominal_scales"]]
 
@@ -404,7 +413,7 @@ def record_entry(
     alpha_1 = alpha_pred.get((key, scales[0]))
     model = p_sol(exec_ if model_source == EXEC_LABEL else plan)
     use_fit = status == "resolved"
-    zne_ci = fit.get("ci") if use_fit else None
+    zne_ci = flags["reported_ci"] if use_fit else None
     mitiq = hw.get("mitiq") or {}
     pathology = hw.get("pathology") or {}
 
@@ -447,6 +456,9 @@ def record_entry(
         "zne_reported_lo": zne_ci[0] if zne_ci else None,
         "zne_reported_hi": zne_ci[1] if zne_ci else None,
         "zne_value": fit.get("value"),
+        "report_bounds": flags["report_bounds"],
+        "out_of_range": flags["out_of_range"],
+        "ci_out_of_range": flags["ci_out_of_range"],
         "zne_chi2_red": fit.get("chi2_red"),
         "n_informative_scales": flags["n_informative_scales"],
         # Mitiq, offline on the same folded counts
@@ -487,7 +499,9 @@ def record_entry(
 
 
 def prediction_entries(
-    manifest: Mapping[str, Any], predicted: Mapping[str, Mapping[str, Any]]
+    manifest: Mapping[str, Any],
+    predicted: Mapping[str, Mapping[str, Any]],
+    report_bounds: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
     A model run's ``zne`` records, flagged exactly as the hardware's are.
@@ -498,6 +512,8 @@ def prediction_entries(
         The job's manifest (its ``records`` say which keys are ``zne``).
     predicted:
         :func:`load_records` of ``hw_predict_<label>_<date>``.
+    report_bounds:
+        As for :func:`record_entry`.
 
     Returns
     -------
@@ -506,7 +522,8 @@ def prediction_entries(
         slot, so its status and interval follow the same rule.
     """
     return {
-        row["key"]: record_entry(row, predicted[row["key"]], None, None, {})
+        row["key"]: record_entry(row, predicted[row["key"]], None, None, {},
+                                 report_bounds=report_bounds)
         for row in manifest["records"]
         if row["kind"] == "zne" and row["key"] in predicted
     }
@@ -1139,9 +1156,11 @@ def config_block(
     }
 
 
-def build_summary(inputs: HwInputs) -> dict[str, Any]:
+def build_summary(inputs: HwInputs, report_bounds: str | None = None) -> dict[str, Any]:
     """
     Every number the hardware tables and figures need, from the files alone.
+
+    ``report_bounds`` as for :func:`record_entry` (``None`` -> ``REPORT_BOUNDS``).
 
     Raises
     ------
@@ -1162,7 +1181,7 @@ def build_summary(inputs: HwInputs) -> dict[str, Any]:
 
     records = [
         record_entry(row, hw[row["key"]], plan.get(row["key"]), exec_.get(row["key"]),
-                     alpha_pred, model_source=model_source)
+                     alpha_pred, model_source=model_source, report_bounds=report_bounds)
         for row in manifest["records"]
         if row["kind"] == "zne" and row["key"] in hw
     ]
@@ -1185,6 +1204,7 @@ def build_summary(inputs: HwInputs) -> dict[str, Any]:
         "schema": SUMMARY_SCHEMA,
         "date": inputs.date,
         "resolved_rule": RESOLVED_RULE,
+        "report_bounds": REPORT_BOUNDS if report_bounds is None else report_bounds,
         "alpha_group": ALPHA_GROUP,
         "alpha_hat": alpha_hat,
         "model_source": model_source,
@@ -1262,7 +1282,8 @@ def results_table(summary: Mapping[str, Any]) -> str:
     """
     lines = [
         "% Generated by paper/scripts/hw_aggregate.py -- do not edit.",
-        f"% job date: {summary['date']}; flags under rule {summary['resolved_rule']}",
+        f"% job date: {summary['date']}; flags under rule {summary['resolved_rule']}; "
+        f"reported ZNE: {_bounds_note(summary)}",
         "\\begin{tabular}{lrrrrrrrlllr}",
         "\\hline",
         "Record & $n$ & $M$ & $r$ & 2q & $P_\\mathrm{unif}$ & Ideal & Model "
@@ -1387,6 +1408,16 @@ def config_table(summary: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _bounds_note(summary: Mapping[str, Any]) -> str:
+    """What :data:`REPORT_BOUNDS` did to the reported ZNE values, for a table header."""
+    option = summary.get("report_bounds")
+    if option == "clip":
+        return "point and interval clipped to [P_unif, 1] (REPORT_BOUNDS = clip)"
+    if option == "bounded":
+        return "fit constrained to [P_unif, 1] (REPORT_BOUNDS = bounded)"
+    return f"as fitted (REPORT_BOUNDS = {option})"
+
+
 def _estimate(r: Mapping[str, Any] | None) -> str:
     """A ZNE cell: the extrapolation with its interval when resolved, else the status."""
     if r is None:
@@ -1435,7 +1466,7 @@ def grid_table(
     lines = [
         "% Generated by paper/scripts/hw_aggregate.py --grids -- do not edit.",
         f"% jobs: {of_record['date']} (of record) and {later['date']}; "
-        f"flags under rule {later['resolved_rule']}",
+        f"flags under rule {later['resolved_rule']}; reported ZNE: {_bounds_note(later)}",
         "\\begin{tabular}{lrrrrrlrrll}",
         "\\hline",
         f" & & & & \\multicolumn{{3}}{{c}}{{{_grid(of_record)}}} "
@@ -1500,6 +1531,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=f"write only tex/{GRID_TABLE}: this later job beside --date's")
     parser.add_argument("--grids-prediction", type=Path, default=None, metavar="DIR",
                         help="hw_predict_<label>_<date> made for the --grids job")
+    parser.add_argument("--report-bounds", choices=REPORT_BOUNDS_OPTIONS, default=REPORT_BOUNDS,
+                        help="how a reported extrapolation outside [P_u, 1] is handled "
+                             f"(default {REPORT_BOUNDS})")
     return parser.parse_args(argv)
 
 
@@ -1528,8 +1562,9 @@ def write_grid_table(args: argparse.Namespace, date: str) -> int:
     """``--grids``: the later job beside the job ``date``; writes only :data:`GRID_TABLE`."""
     later_inputs = HwInputs(args.grids, args.hardware_dir, args.data_dir)
     try:
-        of_record = build_summary(HwInputs(date, args.hardware_dir, args.data_dir))
-        later = build_summary(later_inputs)
+        of_record = build_summary(HwInputs(date, args.hardware_dir, args.data_dir),
+                                  args.report_bounds)
+        later = build_summary(later_inputs, args.report_bounds)
     except FileNotFoundError as exc:
         print(exc)
         return 1
@@ -1541,7 +1576,7 @@ def write_grid_table(args: argparse.Namespace, date: str) -> int:
             print(f"no records in {args.grids_prediction}")
             return 1
         manifest = json.loads(later_inputs.paths.manifest.read_text(encoding="utf-8"))
-        predicted = prediction_entries(manifest, raw)
+        predicted = prediction_entries(manifest, raw, args.report_bounds)
         note = prediction_note(raw, args.grids_prediction, later["config"].get("running_utc"))
 
     args.tex_dir.mkdir(parents=True, exist_ok=True)
@@ -1638,7 +1673,7 @@ def main(argv: list[str] | None = None) -> int:
         return write_grid_table(args, date)
     inputs = HwInputs(date, args.hardware_dir, args.data_dir)
     try:
-        summary = build_summary(inputs)
+        summary = build_summary(inputs, args.report_bounds)
     except FileNotFoundError as exc:
         print(exc)
         return 1
@@ -1658,7 +1693,8 @@ def main(argv: list[str] | None = None) -> int:
         path.write_text(text, encoding="utf-8")
         written.append(path)
 
-    print(f"job {date}: {len(summary['records'])} records; statuses {summary['statuses']}")
+    print(f"job {date}: {len(summary['records'])} records; statuses {summary['statuses']}; "
+          f"report bounds {summary['report_bounds']}")
     print_records(summary)
     for d in summary["drift"]:
         print(f"drift {d['key']}: {d['p_first']:.4f} -> {d['p_repeat']:.4f} "

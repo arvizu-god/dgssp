@@ -27,6 +27,7 @@ from .mitiq_baseline import (
     mitiq_zne_solution_probability,
 )
 from .zne import (
+    REPORT_BOUNDS,
     RESOLVED_RULE,
     ZNE_METHODS,
     ZNE_RENORMS,
@@ -76,6 +77,7 @@ __all__ = [
     "extrapolate_scalar",
     "is_resolved",
     "signal_direction",
+    "REPORT_BOUNDS",
     "RESOLVED_RULE",
     "project_to_simplex",
     "clip_renormalise",

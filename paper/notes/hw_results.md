@@ -77,10 +77,12 @@ The table above says the same in one line. Proposed text:
 
 | Record | 2Q (job 1 / 2) | Ideal | Odd grid, job 1 | Gentle grid, job 2 | Recovery on gentle grid |
 |---|---|---|---|---|---|
-| P-n2-M1-11 | 71 / 71 | 1.000 | 0.953 [0.890, 1.026], resolved | 0.981 [0.928, 1.049], resolved | 0.95 |
+| P-n2-M1-11 | 71 / 71 | 1.000 | 0.953 [0.890, 1.000], resolved | 0.981 [0.928, 1.000], resolved | 0.95 |
 | P-n3-M1-17_r1 | 112 / 126 | 0.781 | identified, not resolved | 0.730 [0.633, 0.831], resolved | 0.89 |
-| P-n3-M1-17 | 212 / 235 | 0.945 | not identifiable | 0.821 [0.660, 1.089], resolved | 0.82 |
+| P-n3-M1-17 | 212 / 235 | 0.945 | not identifiable | 0.821 [0.660, 1.000], resolved | 0.82 |
 | P-n3-M2-17 | 194 / 184 | 1.000 | not identifiable | not identifiable (at random) | — |
+
+Values and intervals are reported clipped to [P_uniform, 1] (`REPORT_BOUNDS = "clip"`, Step 5; `hw_summary*.json`, `records[].zne_reported`, `_lo`, `_hi`). Clipping moved only the three upper ends, which were above 1; their values as fitted are in `paper/data/report_bounds_diff.json`, `json.<file>.changes`.
 
 **Recovery** = `(ZNE − P(λ=1)) / (ideal − P(λ=1))`.
 
@@ -100,7 +102,7 @@ The table above says the same in one line. Proposed text:
 - On job 2's flat P-n3-M2-17 it returns 0.239, a plausible-looking number, with an interval of [−1.1e7, 1.4e5].
 - Mitiq's intervals show the problem; its point estimates do not.
 
-**Our raw fit is no better without the gate.** It returns 376.6 on P-n4-M2-02 (identified, not resolved) and 2275 on P-n3-M2-17. So the gate, not the model, removes these catastrophic values. It does not remove every unphysical one: in simulation the strict rule still reports 19 of 340 planned-grid values outside [0, 1], 19 of them above 1 (max 4.17), all from fits that passed the gate. This is also the hardware argument for keeping the strict reporting rule (§7, paragraph 3).
+**Our raw fit is no better without the gate.** It returns 376.6 on P-n4-M2-02 (identified, not resolved) and 2275 on P-n3-M2-17. So the gate, not the model, removes these catastrophic values. It does not remove every unphysical one: in simulation the strict rule's fit still lands outside [0, 1] on 19 of 340 planned-grid values, 19 of them above 1 (max 4.17), all from fits that passed the gate. Since Step 5 they are reported clipped to [P_uniform, 1]: 0 reported values outside [0, 1] remain (`sim_per_instance.csv`: `zne_scalar_reported`; the fit as fitted is `zne_scalar_value`, flagged by `out_of_range`). This is also the hardware argument for keeping the strict reporting rule (§7, paragraph 3).
 
 **Pointwise ZNE** (one exponential per bitstring):
 
@@ -261,7 +263,7 @@ If you would rather not spend the time: **no use** is defensible. Nothing in C1�
 | 8 | Every n ≥ 3 record at λ = 3 and 5 on the odd grid (except P-n3-M1-17_r1 at λ = 3, z = 5.2, and P-n4-M2-02 at λ = 5, z = 2.8, see §3) | \|z\| ≤ 2.3 vs P_uniform | folded signal gone |
 | 11 | Model at α̂ vs job 1, D_TV to ideal | mean dev. −0.002, p = 0.24 | no residual bias (in-sample) |
 | 12 | Our ZNE vs Mitiq where we resolve | \|Δ\| ≤ 0.027, inside both intervals | the estimators agree |
-| 13 | Odd vs gentle grid on P-n2-M1-11 | 0.953 [0.890, 1.026] vs 0.981 [0.928, 1.049] | grid does not matter at n = 2 |
+| 13 | Odd vs gentle grid on P-n2-M1-11 | 0.953 [0.890, 1.000] vs 0.981 [0.928, 1.000] | grid does not matter at n = 2 |
 | 14 | Every resolved hardware ZNE interval vs the ideal | 4 of 4 contain it | no detectable ZNE bias (also no power to see a small one) |
 | 15 | M = N/2 control P-n2-M2-03 | 0.494 vs 0.5 | as it must |
 
@@ -296,7 +298,7 @@ On instances with signal, planned grid:
 
 | Reported value | Median bias vs ideal | Values outside [0, 1] |
 |---|---|---|
-| Strict rule | −0.44 | 19 of 340 |
+| Strict rule | −0.44 | 19 of 340 as fitted; 0 as reported (clipped, §2) |
 | Relaxed rule | −0.34 | 26 of 340 |
 | Raw extrapolation | −0.17 | 71 of 340 (mean bias +16.7) |
 
@@ -312,9 +314,11 @@ On the identified-but-not-resolved fits, the extrapolation is closer to the idea
 
 On hardware, the one identified-not-resolved record would have reported **376.6** (P-n4-M2-02).
 
-The strict rule does not keep every unphysical value out: its 19 values outside [0, 1] are all above 1, up to 4.17 (§2). The relaxed rule adds 7 more (max 298). So the strict rule pays its higher median bias (table above) to remove the worst tail, not every unphysical value.
+The strict rule does not keep every unphysical fit out: its 19 fits outside [0, 1] are all above 1, up to 4.17 (§2), and are reported clipped to 1. The relaxed rule adds 7 more (max 298). So the strict rule pays its higher median bias (table above) to remove the worst tail, not every unphysical value.
 
-> "We report the extrapolation only when resolved; the relaxed rule lowers the median bias from −0.44 to −0.34 on the planned grid but admits 26 values outside [0, 1] in simulation, against 19 for the strict rule, and a value of 376.6 on hardware."
+> "We report the extrapolation only when resolved; the relaxed rule lowers the median bias from −0.44 to −0.34 on the planned grid but admits 26 fits outside [0, 1] in simulation, against 19 for the strict rule, and a value of 376.6 on hardware."
+
+Open (Step 5): with clipping, "admits values outside [0, 1]" no longer separates the two rules, since a relaxed-rule fit would be clipped too (376.6 would be reported as 1). The argument for the strict rule has to rest on what an unresolved fit's value is (set by the rate cap, `zne_theory.md` §4), not on its range.
 
 **4. M = 0 pathology.**
 
@@ -340,7 +344,7 @@ Proposed text:
 >
 > These estimates are closer to the ideal than the unmitigated value we fall back to in most cases (260 of 299 on the odd grid), because any upward extrapolation is. But they cannot be told apart from the wrong ones without the information the gate uses. On hardware this produced 3.547 for a probability, and a value of 0.239 whose interval spans [−1.1·10⁷, 1.4·10⁵].
 >
-> Our fallback is not a better estimate of the ideal. It is the unmitigated value, flagged as such, and a lower bound. The gate's contribution is to remove the catastrophic failures; a fit that passes it can still exceed 1 (§2).
+> Our fallback is not a better estimate of the ideal. It is the unmitigated value, flagged as such, and a lower bound. The gate's contribution is to remove the catastrophic failures; a fit that passes it can still exceed 1 (§2), and is then reported clipped to 1.
 
 ---
 
@@ -375,3 +379,12 @@ From `hw_review_wp7.md` §1–§2. Ids are `check_claims.py`'s; each value is th
 - S1, S2 (`status_after_wp6.md`): n = 4 is "detectable but useless for search", with its σ above random.
 
 Where `check_claims.py` disagrees with the review at the last digit, the note uses the script's value: G2 0.026 (review 0.027), H.P-n3-M2-17 −0.109 (review −0.110), F2.r2 standard error 0.09 (review 0.08), A maximum 0.998 (review "0.99").
+
+## Step 5 changes (2026-10-29)
+
+Reported scalar ZNE values outside the physical range are now clipped to [P_uniform, 1] at aggregation time (`REPORT_BOUNDS = "clip"` in `mitigation/zne.py`; comparison of the options in `paper/data/report_bounds.json`; every derived number that moved in `paper/data/report_bounds_diff.json`). Records are unchanged. Ids are `check_claims.py`'s.
+
+- B (§2): "still reports 19 of 340 … outside [0, 1]" → the strict rule's *fit* lands outside on 19 of 340; B3: 0 reported values outside after clipping.
+- B4 (§7): strict-rule median bias −0.44 unchanged by clipping.
+- B5 (§2), B6 (§6, row 13): the three hardware interval upper ends above 1 now end at 1.000.
+- B2 (§7), §8: "values" → "fits" where the unclipped fit is meant; the Methods quote and the open point on the strict-rule argument (§7).

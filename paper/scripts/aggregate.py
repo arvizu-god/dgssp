@@ -53,6 +53,16 @@ written under rule ``"v1"``, which was two-sided and so counted a series
 sitting *below* random guessing as resolved; the records stay as written, and
 the stored v1 flags are kept beside the v2 ones in ``*_v1`` columns.
 
+*A reported extrapolation is reported inside its physical range.*  The noiseless
+``P(solution)`` lies in ``[P_u, 1]``; an extrapolation that lands outside is
+handled by :data:`dgssp.mitigation.zne.REPORT_BOUNDS` (``"clip"``: point and
+interval clipped after fitting; ``--report-bounds flag`` reproduces the tables
+before Step 5).  ``zne_scalar_value`` / ``zne_scalar_lo`` / ``zne_scalar_hi``
+stay the fit as fitted; ``zne_scalar_reported`` and
+``zne_scalar_reported_lo`` / ``_hi`` carry the option, and ``out_of_range`` /
+``ci_out_of_range`` say where it acted.  The model-comparison columns
+(``fit_<method>*``) are the fits as fitted.
+
 Run::
 
     python paper/scripts/aggregate.py
@@ -68,6 +78,7 @@ import math
 import statistics
 import sys
 from collections.abc import Iterable, Sequence
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +87,16 @@ if str(SCRIPTS_DIR) not in sys.path:  # pragma: no cover - script bootstrap
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from _common import DATA_DIR, TEX_DIR, load_records, record_provenance  # noqa: E402
-from dgssp.mitigation.zne import RESOLVABILITY_K, RESOLVED_RULE, scalar_flags  # noqa: E402
+from dgssp.metrics import solution_probability  # noqa: E402
+from dgssp.mitigation.zne import (  # noqa: E402
+    REPORT_BOUNDS,
+    REPORT_BOUNDS_OPTIONS,
+    RESOLVABILITY_K,
+    RESOLVED_RULE,
+    fit_block_config,
+    report_extrapolation,
+    scalar_flags,
+)
 
 #: The grids the campaign may have run.
 DEFAULT_GRIDS: tuple[str, ...] = ("odd", "planned", "odd7")
@@ -231,7 +251,13 @@ def exact_p_ideal(record: dict[str, Any] | None) -> float | None:
     return float(sum(float(reference.get(s, 0.0)) for s in sols))
 
 
-def rederive_flags(block: dict[str, Any] | None, p_ideal: float | None) -> dict[str, Any]:
+def rederive_flags(
+    block: dict[str, Any] | None,
+    p_ideal: float | None,
+    *,
+    report_bounds: str | None = None,
+    record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     A stored scalar-fit block's flags and reported value under the current rule.
 
@@ -241,21 +267,34 @@ def rederive_flags(block: dict[str, Any] | None, p_ideal: float | None) -> dict[
         One ``zne_fit`` / ``zne_fits[method]`` block as stored.
     p_ideal:
         The instance's exact ``P(solution)`` (:func:`exact_p_ideal`).
+    report_bounds:
+        How a reported extrapolation outside the physical range is handled
+        (:func:`dgssp.mitigation.zne.report_extrapolation`); ``None`` ->
+        :data:`~dgssp.mitigation.zne.REPORT_BOUNDS`.  The flags do not depend
+        on it.
+    record:
+        The record the block belongs to: ``"bounded"`` re-fits its counts.
 
     Returns
     -------
     dict
         ``resolved``, ``identifiable``, ``n_resolved_scales``,
         ``n_informative_scales``, ``signal_direction``, ``reported_value``,
-        ``reported_source``.  A missing or not-applicable block keeps its
-        stored values (it has no fit to report).
+        ``reported_source``, and ``report_bounds``, ``reported_ci`` (the
+        interval of a reported extrapolation, else ``None``), ``out_of_range``
+        / ``ci_out_of_range`` (of the unconstrained fit; ``None`` when no
+        extrapolation is reported).  A missing or not-applicable block keeps
+        its stored values (it has no fit to report).
     """
+    option = REPORT_BOUNDS if report_bounds is None else report_bounds
     keys = ("resolved", "identifiable", "n_resolved_scales", "n_informative_scales",
             "reported_value", "reported_source")
+    not_reported = {"report_bounds": option, "reported_ci": None, "out_of_range": None,
+                    "ci_out_of_range": None}
     if not block or block.get("applicable") is False or not block.get("observed"):
         out = {key: (block or {}).get(key) for key in keys}
         out["signal_direction"] = None
-        return out
+        return {**out, **not_reported}
     flags = scalar_flags(
         block["observed"],
         block["shots"],
@@ -266,7 +305,7 @@ def rederive_flags(block: dict[str, Any] | None, p_ideal: float | None) -> dict[
         k=float(block.get("resolvability_k") or RESOLVABILITY_K),
     )
     use_fit = flags["use_fit"]
-    return {
+    out = {
         "resolved": flags["resolved"],
         "identifiable": flags["identifiable"],
         "n_resolved_scales": flags["n_resolved_scales"],
@@ -274,7 +313,32 @@ def rederive_flags(block: dict[str, Any] | None, p_ideal: float | None) -> dict[
         "signal_direction": flags["signal_direction"],
         "reported_value": block["value"] if use_fit else block["value_at_min_scale"],
         "reported_source": "extrapolation" if use_fit else "min_scale",
+        **not_reported,
     }
+    if use_fit and block.get("ci") and block.get("null_value") is not None:
+        bounded_inputs: dict[str, Any] = {}
+        if option == "bounded":
+            if record is None:
+                raise ValueError("report_bounds='bounded' needs the record (its counts).")
+            bounded_inputs = {
+                "counts_per_scale": {float(k): dict(v) for k, v in record["counts"].items()},
+                "observable_fn": partial(
+                    solution_probability,
+                    solution_states=record["metrics"]["solution_bitstrings"],
+                ),
+                "cfg": fit_block_config(block),
+            }
+        report = report_extrapolation(
+            float(block["value"]), block["ci"], float(block["null_value"]), p_ideal,
+            option=option, **bounded_inputs,
+        )
+        out.update(
+            reported_value=report["value"],
+            reported_ci=report["ci"],
+            out_of_range=report["out_of_range"],
+            ci_out_of_range=report["ci_out_of_range"],
+        )
+    return out
 
 
 def instance_row(
@@ -283,6 +347,7 @@ def instance_row(
     noisy: dict[str, Any] | None,
     zne: dict[str, Any] | None,
     grid: str,
+    report_bounds: str | None = None,
 ) -> dict[str, Any]:
     """
     One row of the per-instance table.
@@ -295,6 +360,8 @@ def instance_row(
         That instance's records from the three stages; any may be ``None``.
     grid:
         The scale grid the ZNE record used.
+    report_bounds:
+        :func:`rederive_flags`; ``None`` -> ``REPORT_BOUNDS``.
 
     Returns
     -------
@@ -305,7 +372,7 @@ def instance_row(
     campaign = _get(source, "metrics", "campaign") or {}
     fit = _get(zne, "zne_fit") or {}
     p_ideal_exact = exact_p_ideal(zne)
-    flags = rederive_flags(fit, p_ideal_exact)
+    flags = rederive_flags(fit, p_ideal_exact, report_bounds=report_bounds, record=zne)
     pathology = _get(zne, "pathology") or {}
 
     row: dict[str, Any] = {
@@ -330,6 +397,10 @@ def instance_row(
         "zne_scalar_se": fit.get("bootstrap_se"),
         "zne_scalar_lo": (fit.get("ci") or [None, None])[0],
         "zne_scalar_hi": (fit.get("ci") or [None, None])[1],
+        # the interval of the reported value: REPORT_BOUNDS applied to the
+        # extrapolation's interval; empty when the lambda = 1 value is reported
+        "zne_scalar_reported_lo": (flags["reported_ci"] or [None, None])[0],
+        "zne_scalar_reported_hi": (flags["reported_ci"] or [None, None])[1],
         "pointwise_clip": _get(zne, "pointwise", "clip", "solution_probability"),
         "pointwise_simplex": _get(zne, "pointwise", "simplex", "solution_probability"),
         "mitiq": _get(zne, "mitiq", "value"),
@@ -342,6 +413,9 @@ def instance_row(
         "reported_source": flags["reported_source"],
         "n_informative_scales": flags["n_informative_scales"],
         "n_resolved_scales": flags["n_resolved_scales"],
+        "report_bounds": flags["report_bounds"] if fit else None,
+        "out_of_range": flags["out_of_range"],
+        "ci_out_of_range": flags["ci_out_of_range"],
         # the same flags as the record stores them (rule v1), for audit
         "resolved_v1": fit.get("resolved"),
         "identifiable_v1": fit.get("identifiable"),
@@ -363,7 +437,8 @@ def instance_row(
     }
     for method in METHODS:
         block = _get(zne, "metrics", "zne_fits", method) or {}
-        method_flags = rederive_flags(block, p_ideal_exact)
+        # The model comparison compares the fits as fitted.
+        method_flags = rederive_flags(block, p_ideal_exact, report_bounds="flag")
         row[f"fit_{method}"] = block.get("value")
         # Records written before the not-applicable entry existed lack the key.
         row[f"fit_{method}_applicable"] = block.get("applicable", True if block else None)
@@ -375,8 +450,11 @@ def instance_row(
     # Bias against the same instance's ideal run, which is what every
     # extrapolation is trying to recover.  Computed per instance and only then
     # aggregated: a difference of cell means would hide the pairing.
-    for series in ("noisy", "zne_lambda1", *UNBOUNDED_SERIES, "pointwise_clip",
-                   "pointwise_simplex"):
+    # The base series only, in a fixed order.  (Iterating the module-level
+    # UNBOUNDED_SERIES, which also holds the ``bias_*`` names, wrote two
+    # ``bias_bias_*`` columns whose values followed the set's hash order.)
+    for series in ("noisy", "zne_lambda1", "zne_scalar_value", "zne_scalar_reported", "mitiq",
+                   "pointwise_clip", "pointwise_simplex"):
         value, reference = row.get(series), row["ideal"]
         row[f"bias_{series}"] = (
             float(value) - float(reference)
@@ -397,7 +475,9 @@ def instance_row(
     return row
 
 
-def build_rows(data_dir: Path, grids: Sequence[str], noise: str) -> list[dict[str, Any]]:
+def build_rows(
+    data_dir: Path, grids: Sequence[str], noise: str, report_bounds: str | None = None
+) -> list[dict[str, Any]]:
     """
     The per-instance table for every grid that was run.
 
@@ -413,6 +493,8 @@ def build_rows(data_dir: Path, grids: Sequence[str], noise: str) -> list[dict[st
         Grids to look for.
     noise:
         Noise label in the directory names.
+    report_bounds:
+        :func:`rederive_flags`; ``None`` -> ``REPORT_BOUNDS``.
 
     Returns
     -------
@@ -427,7 +509,10 @@ def build_rows(data_dir: Path, grids: Sequence[str], noise: str) -> list[dict[st
     for grid in grids:
         zne = stage_records(data_dir, f"sim_zne_{noise}_{grid}")
         for name in sorted(zne):
-            rows.append(instance_row(name, ideal.get(name), noisy.get(name), zne[name], grid))
+            rows.append(
+                instance_row(name, ideal.get(name), noisy.get(name), zne[name], grid,
+                             report_bounds)
+            )
             covered.add(name)
     for name in sorted(set(ideal) | set(noisy)):
         if name not in covered:
@@ -807,6 +892,12 @@ def headline(
                 sum(1 for r in members if r["reported_source"] == "extrapolation")
                 / len(members)
             ),
+            "n_reported_from_extrapolation": sum(
+                1 for r in members if r["reported_source"] == "extrapolation"
+            ),
+            # Of the unconstrained fit, before REPORT_BOUNDS is applied.
+            "n_reported_out_of_range": sum(1 for r in members if r["out_of_range"]),
+            "n_reported_ci_out_of_range": sum(1 for r in members if r["ci_out_of_range"]),
             "signal_recovery_median": (
                 statistics.median(recovery) if recovery else None
             ),
@@ -1036,6 +1127,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--noise", choices=("fake", "live"), default=None)
     parser.add_argument("--grids", nargs="+", default=list(DEFAULT_GRIDS))
     parser.add_argument(
+        "--report-bounds",
+        choices=REPORT_BOUNDS_OPTIONS,
+        default=REPORT_BOUNDS,
+        help=f"How a reported extrapolation outside [P_u, 1] is handled (default {REPORT_BOUNDS}).",
+    )
+    parser.add_argument(
         "--notes-template",
         type=Path,
         default=None,
@@ -1067,7 +1164,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     noise = args.noise or discover_noise(args.data_dir)
 
-    rows = build_rows(args.data_dir, args.grids, noise)
+    rows = build_rows(args.data_dir, args.grids, noise, args.report_bounds)
     if not rows:
         print(
             f"Nothing to aggregate: no sim_* records under {args.data_dir}. "
@@ -1088,6 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "dgssp/paper/sim-summary/1",
         "noise": noise,
         "resolved_rule": RESOLVED_RULE,
+        "report_bounds": args.report_bounds,
         "grids": grids_present,
         "n_instances": len({r["name"] for r in rows}),
         "stages_present": {
@@ -1128,7 +1226,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"  ! no notes template at {template}; skipping the results note")
 
-    print(f"instances: {summary['n_instances']}  grids: {grids_present}")
+    print(f"instances: {summary['n_instances']}  grids: {grids_present}  "
+          f"report bounds: {args.report_bounds}")
     print(f"rows carrying each stage's value: {summary['stages_present']} "
           "(an instance appears once per grid)")
     for grid, block in summary["per_grid"].items():
@@ -1139,7 +1238,9 @@ def main(argv: list[str] | None = None) -> int:
             f"{_fmt(block['fraction_resolved_with_signal'], 2)} / "
             f"{_fmt(block['fraction_identifiable_with_signal'], 2)}) "
             f"extrapolated={_fmt(block['fraction_reported_from_extrapolation'], 2)} "
-            f"signal recovery (median)={_fmt(block['signal_recovery_median'], 3)}"
+            f"signal recovery (median)={_fmt(block['signal_recovery_median'], 3)} "
+            f"out of range: point {block['n_reported_out_of_range']} / interval "
+            f"{block['n_reported_ci_out_of_range']} of {block['n_reported_from_extrapolation']}"
         )
     for path in written:
         print(f"wrote {path}")
