@@ -125,5 +125,5 @@ See `hw_results.md` §7, paragraph 6.
 
 ---
 
-Generated 2026-10-29T20:11:29Z from commit
-4028081.
+Generated 2026-10-29T20:43:40Z from commit
+9aae87b.
