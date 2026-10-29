@@ -440,3 +440,13 @@ def test_the_console_table_prints_the_model_the_tex_table_uses(capsys):
     hw_aggregate.print_records({"records": [record], "alpha_hat": None,
                                 "limit_band": None})
     assert " 0.859 " in capsys.readouterr().out
+
+
+def test_error_class_predictions_are_not_the_jobs_model(tmp_path):
+    """A --scale-only prediction never competes with the every-error one."""
+    date = "2026-01-01"
+    for name in (f"hw_predict_plan_x3.176_{date}", f"hw_predict_plan_x4.05_2q_{date}",
+                 f"hw_predict_plan_x32_readout_{date}", f"hw_predict_exec_{date}"):
+        (tmp_path / name).mkdir()
+    dirs = hw_aggregate.HwInputs(date, tmp_path, tmp_path).alpha_prediction_dirs()
+    assert [d.name for d in dirs] == [f"hw_predict_plan_x3.176_{date}"]

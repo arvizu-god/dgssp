@@ -43,15 +43,24 @@ counts) and neither using QPU time:
 
 What alpha scales: every instruction's calibrated ``error`` (gates, readout,
 reset); durations and ``T1`` / ``T2`` stay as calibrated (see
-:func:`dgssp.backends.scale_calibration_errors`).  Only PUBs whose instance
-has a signal to lose are fitted: ``M = 0`` and ``M = N/2`` sit at
-``P_uniform`` whatever the noise.
+:func:`dgssp.backends.scale_calibration_errors`).  ``--scale-only
+{2q,1q,readout}`` scales one error class alone and keeps the others as
+calibrated (default ``all``, the paper's fit); its counts are cached in
+``hw_alpha_<label>_<class>_<date>/`` and its predictions go to
+``hw_predict_<label>_x<alpha>_<class>_<date>/``, so the ``all`` files are never
+touched.  Only PUBs whose instance has a signal to lose are fitted: ``M = 0``
+and ``M = N/2`` sit at ``P_uniform`` whatever the noise.
+
+``--fit-alpha`` never replaces an existing ``fit.json``: it refits from the
+cache and reports whether the stored fit is reproduced exactly (``--force``
+to replace it).
 
 Run::
 
     python paper/scripts/noise_model_check.py --fetch-calibration
     python paper/scripts/noise_model_check.py --predict
     python paper/scripts/noise_model_check.py --fit-alpha
+    python paper/scripts/noise_model_check.py --fit-alpha --scale-only 2q
     python paper/scripts/noise_model_check.py --predict --calibration paper/hardware/calibration_2026-10-25.json --label plan
 """
 
@@ -78,7 +87,9 @@ from qiskit import QuantumCircuit  # noqa: E402
 
 from _common import DATA_DIR, HARDWARE_DIR, record_provenance, utc_timestamp  # noqa: E402
 from dgssp.backends import (  # noqa: E402
+    ERROR_CLASSES,
     CalibrationSnapshotBackend,
+    ErrorClass,
     calibration_payload,
     load_noise_model,
     median_gate_errors,
@@ -316,9 +327,15 @@ def simulate(
     return counts_from_result(result), ignored
 
 
-def noise_device(calibration: Path, alpha: float) -> tuple[Any, Any, dict[str, Any]]:
+def noise_device(
+    calibration: Path, alpha: float, which: ErrorClass = "all"
+) -> tuple[Any, Any, dict[str, Any]]:
     """
     The snapshot of ``calibration``, and the device to simulate (scaled if ``alpha != 1``).
+
+    ``which`` selects the errors ``alpha`` multiplies
+    (:func:`dgssp.backends.scale_calibration_errors`); at ``alpha = 1`` every
+    choice is the calibration itself.
 
     Returns
     -------
@@ -328,13 +345,13 @@ def noise_device(calibration: Path, alpha: float) -> tuple[Any, Any, dict[str, A
     snapshot = load_noise_model(calibration)
     if alpha == 1.0:
         return snapshot, snapshot.backend, {"alpha": 1.0, "n_scaled": 0, "n_capped": 0}
-    device, info = scale_calibration_errors(snapshot.backend, alpha)
+    device, info = scale_calibration_errors(snapshot.backend, alpha, which=which)
     return snapshot, device, info
 
 
-def median_errors(calibration: Path, alpha: float = 1.0) -> dict[str, Any]:
+def median_errors(calibration: Path, alpha: float = 1.0, which: ErrorClass = "all") -> dict[str, Any]:
     """
-    The device's median gate errors on ``calibration``, every error times ``alpha``.
+    The device's median gate errors on ``calibration``, the ``which`` errors times ``alpha``.
 
     What :func:`dgssp.metrics.survival_estimate` takes.  Built from the same
     snapshot and the same scaling (with its cap) as :func:`noise_device`, so a
@@ -345,8 +362,27 @@ def median_errors(calibration: Path, alpha: float = 1.0) -> dict[str, Any]:
     dict
         :func:`dgssp.backends.median_gate_errors` of the (scaled) device.
     """
-    _, device, _ = noise_device(calibration, alpha)
+    _, device, _ = noise_device(calibration, alpha, which)
     return median_gate_errors(device)
+
+
+def class_suffix(which: str) -> str:
+    """``""`` for ``all`` (the paper's file names), ``"_<class>"`` otherwise."""
+    return "" if which == "all" else f"_{which}"
+
+
+def alpha_cache_dir(data_dir: Path, label: str, which: str, date: str) -> Path:
+    """``hw_alpha_<label>[_<class>]_<date>``: one cache per calibration and error class."""
+    return data_dir / f"hw_alpha_{label}{class_suffix(which)}_{date}"
+
+
+def what_alpha_scales(which: str) -> str:
+    """The sentence ``fit.json`` records for ``which``."""
+    if which == "all":
+        return ("every calibrated instruction error (gates, readout, reset); "
+                "durations and T1/T2 as calibrated")
+    return (f"only the '{which}' errors (dgssp.backends.error_class); every other error, "
+            "durations and T1/T2 as calibrated")
 
 
 def default_calibration(paths: Paths) -> Path:
@@ -498,14 +534,16 @@ def run_predict(args: argparse.Namespace, paths: Paths) -> int:
         print(f"{rel(calibration)} not found; run --fetch-calibration first.")
         return 2
     alpha = float(args.alpha)
+    which = args.scale_only
     label = args.label or calibration_label(calibration, paths.date)
     if alpha != 1.0:
-        label = f"{label}_x{alpha:g}"
+        label = f"{label}_x{alpha:g}{class_suffix(which)}"
     out_dir = paths.data_dir / f"hw_predict_{label}_{paths.date}"
 
-    snapshot, device, scale_info = noise_device(calibration, alpha)
+    snapshot, device, scale_info = noise_device(calibration, alpha, which)
     print(f"predict: {len(circuits)} circuits on the {snapshot.backend_name} calibration of "
-          f"{snapshot.calibration_timestamp}, errors x {alpha:g}"
+          f"{snapshot.calibration_timestamp}, "
+          f"{'errors' if which == 'all' else f'{which} errors'} x {alpha:g}"
           + (f" ({scale_info['n_capped']} capped at 0.5)" if scale_info.get("n_capped") else ""))
     counts, ignored = simulate(manifest, circuits, device, max_threads=args.max_threads,
                                meta={"stage": "wp6_predict", "label": label})
@@ -587,6 +625,7 @@ def fit_alpha(
     groups: Sequence[str] | None = None,
     B: int = FIT_BOOTSTRAP_B,
     seed: int = FIT_BOOTSTRAP_SEED,
+    keep_draws: bool = False,
 ) -> dict[str, Any]:
     """
     The noise scale that best matches hardware ``P(solution)`` to prediction.
@@ -610,6 +649,9 @@ def fit_alpha(
     B, seed:
         Bootstrap resamples (hardware *and* simulated counts, binomially) and
         seed.
+    keep_draws:
+        Also return the ``B`` bootstrap values of ``alpha`` (``draws``), e.g.
+        to bootstrap a difference of two independent fits.
 
     Returns
     -------
@@ -653,7 +695,7 @@ def fit_alpha(
     chi2_red = chi2_min / dof if dof > 0 else None
     widen = math.sqrt(max(1.0, chi2_red or 1.0))
     grid_chi2 = [float(chi2[int(np.argmin(np.abs(fine - x)))]) for x in a]
-    return {
+    out: dict[str, Any] = {
         "alpha": alpha_hat,
         "ci": [float(lo), float(hi)],
         "ci_scaled": [alpha_hat - widen * (alpha_hat - float(lo)),
@@ -669,6 +711,9 @@ def fit_alpha(
         "loo": loo,
         "profile": {"alphas": a.tolist(), "chi2": grid_chi2},
     }
+    if keep_draws:
+        out["draws"] = boot.tolist()
+    return out
 
 
 def cached_counts(
@@ -678,23 +723,32 @@ def cached_counts(
     manifest: Mapping[str, Any],
     circuits: Sequence[QuantumCircuit],
     max_threads: int | None,
+    which: ErrorClass = "all",
 ) -> list[dict[str, int]]:
-    """The job's counts at one alpha: from the cache, or simulated and cached."""
+    """
+    The job's counts at one alpha: from the cache, or simulated and cached.
+
+    A cached file is used only if its calibration, simulator seed and error
+    class (``which``; files without the key are ``all``) match.
+    """
     path = cache / f"counts_alpha_{alpha:g}.json"
     sha = sha256_file(calibration)
     if path.exists():
         stored = json.loads(path.read_text(encoding="utf-8"))
-        if stored.get("calibration_sha256") == sha and stored.get("seed") == SEED_SIMULATOR:
+        if (stored.get("calibration_sha256") == sha and stored.get("seed") == SEED_SIMULATOR
+                and stored.get("which", "all") == which):
             return [dict(c) for c in stored["counts"]]
-        print(f"  {rel(path)} is from another calibration or seed; re-simulating")
-    snapshot, device, info = noise_device(calibration, alpha)
-    print(f"  alpha = {alpha:g}: simulating {len(circuits)} circuits"
+        raise SystemExit(f"{rel(path)} is from another calibration, seed or error class; "
+                         "a cached simulation is never overwritten (move it away to redo it).")
+    snapshot, device, info = noise_device(calibration, alpha, which)
+    print(f"  alpha = {alpha:g} ({which}): simulating {len(circuits)} circuits"
           + (f" ({info['n_capped']} errors capped at 0.5)" if info.get("n_capped") else ""),
           flush=True)
     counts, _ = simulate(manifest, circuits, device, max_threads=max_threads,
-                         meta={"stage": "wp6_alpha_fit", "alpha": alpha})
+                         meta={"stage": "wp6_alpha_fit", "alpha": alpha, "which": which})
     write_json(path, {
         "alpha": alpha,
+        "which": which,
         "calibration_file": rel(calibration),
         "calibration_sha256": sha,
         "seed": SEED_SIMULATOR,
@@ -703,6 +757,33 @@ def cached_counts(
         "created_utc": utc_timestamp(),
     })
     return counts
+
+
+def default_alpha_grid(*caches: Path) -> list[float]:
+    """The grid of the first cache holding a ``fit.json``, else :data:`DEFAULT_ALPHAS`."""
+    for cache in caches:
+        fit = cache / "fit.json"
+        if fit.exists():
+            return [float(a) for a in json.loads(fit.read_text(encoding="utf-8"))["alphas"]]
+    return list(DEFAULT_ALPHAS)
+
+
+#: Keys of a stored fit that a refit from the same cache must reproduce exactly.
+REPRODUCED_KEYS: tuple[str, ...] = ("alpha", "ci", "ci_scaled", "bootstrap_se", "chi2_min",
+                                    "dof", "n_pubs", "loo", "profile")
+
+
+def fit_differences(stored: Mapping[str, Any], refit: Mapping[str, Any]) -> list[str]:
+    """``"<subset>.<key>"`` wherever a refit's ``fits`` differ from the stored ones."""
+    diffs: list[str] = []
+    old, new = stored.get("fits", {}), refit.get("fits", {})
+    for name in sorted(set(old) | set(new)):
+        if name not in old or name not in new:
+            diffs.append(f"{name} (only in {'stored' if name in old else 'refit'})")
+            continue
+        diffs.extend(f"{name}.{key}" for key in REPRODUCED_KEYS
+                     if json_plain(old[name].get(key)) != json_plain(new[name].get(key)))
+    return diffs
 
 
 def run_fit_alpha(args: argparse.Namespace, paths: Paths) -> int:
@@ -714,22 +795,29 @@ def run_fit_alpha(args: argparse.Namespace, paths: Paths) -> int:
               "--calibration.")
         return 2
     label = args.label or calibration_label(calibration, paths.date)
-    cache = paths.data_dir / f"hw_alpha_{label}_{paths.date}"
-    alphas = sorted(float(a) for a in args.alphas)
+    which = args.scale_only
+    cache = alpha_cache_dir(paths.data_dir, label, which, paths.date)
+    alphas = sorted(float(a) for a in (
+        args.alphas or default_alpha_grid(cache, alpha_cache_dir(paths.data_dir, label, "all",
+                                                                 paths.date))))
     shots = int(manifest["settings"]["shots"])
 
     pubs = signal_pubs(manifest)
     hw_counts = hardware_counts(paths)
     hw = np.array([solution_probability(hw_counts[p["pub"]], p["solution_bitstrings"])
                    for p in pubs])
-    print(f"alpha fit: {len(pubs)} PUBs with signal, alphas {alphas}, "
+    print(f"alpha fit ({which} errors): {len(pubs)} PUBs with signal, alphas {alphas}, "
           f"calibration {rel(calibration)}")
     sim = np.empty((len(alphas), len(pubs)))
     for i, alpha in enumerate(alphas):
-        counts = cached_counts(cache, alpha, calibration, manifest, circuits, args.max_threads)
+        counts = cached_counts(cache, alpha, calibration, manifest, circuits, args.max_threads,
+                               which)
         sim[i] = [solution_probability(counts[p["pub"]], p["solution_bitstrings"]) for p in pubs]
 
-    subsets = {"lambda1": [1.0], "lambda3": [3.0], "lambda5": [5.0], "all": [1.0, 3.0, 5.0]}
+    # One subset per fold scale the job ran, then every PUB.  On the odd grid
+    # this is exactly lambda1 / lambda3 / lambda5 / all.
+    scales_run = sorted({p["scale"] for p in pubs})
+    subsets = {f"lambda{s:g}": [s] for s in scales_run} | {"all": scales_run}
     fits: dict[str, Any] = {}
     for name, scales in subsets.items():
         keep = np.array([p["scale"] in scales for p in pubs])
@@ -752,8 +840,8 @@ def run_fit_alpha(args: argparse.Namespace, paths: Paths) -> int:
         "calibration_file": rel(calibration),
         "calibration_sha256": sha256_file(calibration),
         "alphas": alphas,
-        "what_alpha_scales": "every calibrated instruction error (gates, readout, reset); "
-                             "durations and T1/T2 as calibrated",
+        "scale_only": which,
+        "what_alpha_scales": what_alpha_scales(which),
         "pubs_excluded": "instances with P_ideal == P_uniform (M = 0, M = N/2)",
         "shots": shots,
         "seed_simulator": SEED_SIMULATOR,
@@ -762,7 +850,6 @@ def run_fit_alpha(args: argparse.Namespace, paths: Paths) -> int:
         "created_utc": utc_timestamp(),
         "provenance": record_provenance(),
     }
-    out = write_json(cache / "fit.json", payload)
 
     print(f"\n{'fitted on':<10} {'alpha':>6}  {'95% CI (shots)':<15} "
           f"{'95% CI (scaled)':<16} {'chi2/dof':>8}  {'PUBs':>4}  leave-one-record-out")
@@ -775,6 +862,18 @@ def run_fit_alpha(args: argparse.Namespace, paths: Paths) -> int:
         print(f"{name:<10} {fit['alpha']:6.2f}  [{ci[0]:.2f}, {ci[1]:.2f}]     "
               f"[{wide[0]:.2f}, {wide[1]:.2f}]     {red:>8}  {fit['n_pubs']:>4}  "
               f"{loo_text}{flag}")
+
+    out = cache / "fit.json"
+    if out.exists() and not args.force:
+        diffs = fit_differences(json.loads(out.read_text(encoding="utf-8")), payload)
+        if diffs:
+            print(f"\n{rel(out)} exists and this refit DIFFERS in {len(diffs)} entries "
+                  f"(kept the stored file; --force to replace it):\n  " + "\n  ".join(diffs[:20]))
+            return 1
+        print(f"\n{rel(out)} exists; refit from the cache reproduces it exactly "
+              f"({len(fits)} subsets x {', '.join(REPRODUCED_KEYS)}). Not rewritten.")
+        return 0
+    write_json(out, payload)
     print(f"\nwrote {rel(out)}")
     return 0
 
@@ -804,8 +903,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Snapshot to simulate; default calibration_exec_<date>.json.")
     parser.add_argument("--alpha", type=float, default=1.0,
                         help="--predict: multiply every calibrated error by this.")
-    parser.add_argument("--alphas", type=float, nargs="+", default=list(DEFAULT_ALPHAS),
-                        help="--fit-alpha: the simulated grid.")
+    parser.add_argument("--alphas", type=float, nargs="+", default=None,
+                        help="--fit-alpha: the simulated grid (default: the grid of this "
+                             "cache's fit.json, else of the 'all' fit, else DEFAULT_ALPHAS).")
+    parser.add_argument("--scale-only", choices=ERROR_CLASSES, default="all",
+                        help="--predict / --fit-alpha: scale only this error class "
+                             "(default all, the paper's fit).")
     parser.add_argument("--instance", default=None, help=f"Instance CRN; default ${INSTANCE_ENV}.")
     parser.add_argument("--max-threads", type=int, default=None)
     parser.add_argument("--force", action="store_true",

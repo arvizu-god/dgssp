@@ -92,6 +92,7 @@ if str(SCRIPTS_DIR) not in sys.path:  # pragma: no cover - script bootstrap
 
 from _common import DATA_DIR, HARDWARE_DIR, TEX_DIR, record_provenance  # noqa: E402
 from aggregate import exact_p_ideal, rederive_flags, write_csv  # noqa: E402
+from dgssp.backends import ERROR_CLASSES  # noqa: E402
 from dgssp.metrics import (  # noqa: E402
     distribution_solution_probability,
     percentile_interval,
@@ -187,9 +188,17 @@ class HwInputs:
         return self.exec_calibration if self.predict_dir.exists() else self.paths.calibration
 
     def alpha_prediction_dirs(self) -> list[Path]:
-        """``hw_predict_<label>_x<alpha>_<date>``: predictions made at a scaled alpha."""
+        """
+        ``hw_predict_<label>_x<alpha>_<date>``: predictions made at a scaled alpha.
+
+        Every-error predictions only.  A ``--scale-only <class>`` prediction
+        (``..._x<alpha>_<class>_<date>``) is a robustness check of which errors
+        carry alpha (``alpha_robustness.py``), not this job's model.
+        """
         data_dir = self.paths.data_dir
-        return sorted(p for p in data_dir.glob(f"hw_predict_*_x*_{self.date}") if p.is_dir())
+        classes = tuple(f"_{c}_{self.date}" for c in ERROR_CLASSES if c != "all")
+        return sorted(p for p in data_dir.glob(f"hw_predict_*_x*_{self.date}")
+                      if p.is_dir() and not p.name.endswith(classes))
 
     def hashed(self) -> dict[str, str | None]:
         """``{repo path: sha256}`` of every input file (directories: their records)."""

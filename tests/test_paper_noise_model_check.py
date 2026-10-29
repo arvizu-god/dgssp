@@ -118,3 +118,45 @@ def test_parse_utc_needs_a_zone():
     assert nmc.parse_utc("2026-10-25T23:36:48-06:00").hour == 5
     with pytest.raises(SystemExit):
         nmc.parse_utc("2026-10-26T06:05:15")
+
+
+def test_error_class_caches_never_share_a_directory(tmp_path):
+    """'all' keeps the paper's names; any other class gets its own cache and fit."""
+    assert nmc.alpha_cache_dir(tmp_path, "exec", "all", "2026-10-25").name == "hw_alpha_exec_2026-10-25"
+    assert (nmc.alpha_cache_dir(tmp_path, "exec", "2q", "2026-10-25").name
+            == "hw_alpha_exec_2q_2026-10-25")
+    assert "readout" in nmc.what_alpha_scales("readout")
+    assert nmc.what_alpha_scales("all").startswith("every calibrated")
+
+
+def test_the_default_grid_is_the_stored_fits(tmp_path):
+    own, other = tmp_path / "own", tmp_path / "all"
+    assert nmc.default_alpha_grid(own, other) == list(nmc.DEFAULT_ALPHAS)
+    other.mkdir()
+    (other / "fit.json").write_text(json.dumps({"alphas": [1, 2, 8]}), encoding="utf-8")
+    assert nmc.default_alpha_grid(own, other) == [1.0, 2.0, 8.0]
+    own.mkdir()
+    (own / "fit.json").write_text(json.dumps({"alphas": [1, 3]}), encoding="utf-8")
+    assert nmc.default_alpha_grid(own, other) == [1.0, 3.0]
+
+
+def test_a_refit_is_compared_not_written():
+    """fit_differences is empty for an identical refit and names what moved."""
+    sim = _curves(ALPHAS)
+    hw = _curves([2.7])[0]
+    fit = nmc.fit_alpha(ALPHAS, sim, SHOTS, hw, SHOTS, B=50)
+    stored = json.loads(json.dumps({"fits": {"all": fit}}))
+    assert nmc.fit_differences(stored, {"fits": {"all": fit}}) == []
+    moved = dict(fit, alpha=fit["alpha"] + 0.001)
+    assert nmc.fit_differences(stored, {"fits": {"all": moved}}) == ["all.alpha"]
+    assert nmc.fit_differences(stored, {"fits": {}}) == ["all (only in stored)"]
+
+
+def test_bootstrap_draws_on_request():
+    sim = _curves(ALPHAS)
+    hw = _curves([2.7])[0]
+    plain = nmc.fit_alpha(ALPHAS, sim, SHOTS, hw, SHOTS, B=40)
+    kept = nmc.fit_alpha(ALPHAS, sim, SHOTS, hw, SHOTS, B=40, keep_draws=True)
+    assert "draws" not in plain and len(kept["draws"]) == 40
+    assert {k: v for k, v in kept.items() if k != "draws"} == plain
+    assert np.std(kept["draws"], ddof=1) == pytest.approx(kept["bootstrap_se"])

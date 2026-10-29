@@ -33,7 +33,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, Literal, TypeAlias, get_args
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Gate, Instruction, Parameter
@@ -1272,12 +1272,36 @@ def backend_from_calibration(
 #: purposes of this library.
 SCALED_ERROR_MAX = 0.5
 
+#: Which calibrated errors :func:`scale_calibration_errors` multiplies:
+#: ``"all"`` (the paper's fit), or one class alone (see :func:`error_class`).
+ErrorClass: TypeAlias = Literal["all", "2q", "1q", "readout"]
+
+#: The values of :data:`ErrorClass`, for argument parsers.
+ERROR_CLASSES: tuple[str, ...] = get_args(ErrorClass)
+
+
+def error_class(name: str, qubits: Sequence[int] | None) -> str:
+    """
+    The error class of one target entry: ``"readout"``, ``"2q"`` or ``"1q"``.
+
+    ``measure`` and its variants (``measure_2``, ``measure_reset``, ...) are
+    readout; any other entry on two qubits is ``"2q"``; everything else
+    (single-qubit gates, ``reset``, ``delay``) is ``"1q"``.  The three classes
+    partition the target, so scaling each in turn equals scaling ``"all"``.
+    """
+    if name.startswith("measure"):
+        return "readout"
+    if qubits is not None and len(qubits) == 2:
+        return "2q"
+    return "1q"
+
 
 def scale_calibration_errors(
     backend: BackendLike,
     alpha: float,
     *,
     max_error: float = SCALED_ERROR_MAX,
+    which: ErrorClass = "all",
 ) -> tuple[CalibrationSnapshotBackend, dict[str, Any]]:
     """
     The same device with every calibrated error multiplied by ``alpha``.
@@ -1300,25 +1324,36 @@ def scale_calibration_errors(
         Scaled errors are capped here (an error already above the cap, such
         as a faulty coupler reported at ``1.0``, keeps its calibrated value:
         scaling never lowers an error); the capped entries are counted.
+    which:
+        Scale only this :func:`error_class` (``"2q"``, ``"1q"``,
+        ``"readout"``) and keep the others as calibrated.  The default
+        ``"all"`` is the paper's family and returns exactly what this
+        function returned before the keyword existed (same name, same
+        ``info``).
 
     Returns
     -------
     tuple
         ``(scaled_backend, info)``: the rebuilt snapshot backend, and
-        ``{"alpha", "max_error", "n_scaled", "n_capped"}``.
+        ``{"alpha", "max_error", "n_scaled", "n_capped"}`` (plus ``"which"``
+        when it is not ``"all"``).
 
     Raises
     ------
     ValueError
-        If ``alpha`` is not positive.
+        If ``alpha`` is not positive or ``which`` is not an :data:`ErrorClass`.
     """
     if not alpha > 0:
         raise ValueError(f"alpha must be positive, got {alpha}.")
+    if which not in ERROR_CLASSES:
+        raise ValueError(f"which must be one of {ERROR_CLASSES}, got {which!r}.")
     payload = calibration_payload(backend)
     n_scaled = n_capped = 0
-    for rows in payload["instructions"].values():
+    for op_name, rows in payload["instructions"].items():
         for row in rows:
             if row["error"] is None:
+                continue
+            if which != "all" and error_class(op_name, row["qubits"]) != which:
                 continue
             error = float(row["error"])
             scaled = error * float(alpha)
@@ -1329,19 +1364,74 @@ def scale_calibration_errors(
             row["error"] = scaled
             n_scaled += 1
     name = backend_name(backend)
+    suffix = "" if which == "all" else f"_{which}"
     scaled_backend = backend_from_calibration(
         payload,
-        name=f"{name}_x{alpha:g}",
+        name=f"{name}_x{alpha:g}{suffix}",
         source_name=getattr(backend, "source_name", name),
         calibration_timestamp=calibration_timestamp(backend),
     )
-    info = {
+    info: dict[str, Any] = {
         "alpha": float(alpha),
         "max_error": float(max_error),
         "n_scaled": n_scaled,
         "n_capped": n_capped,
     }
+    if which != "all":
+        info["which"] = which
     return scaled_backend, info
+
+
+def layer_fidelity(properties: Mapping[str, Any] | None) -> dict[int, dict[str, Any]]:
+    """
+    The device's own layer-fidelity benchmark, read from its raw properties.
+
+    IBM devices report, in ``BackendProperties.general``, an ``lf_<N>`` entry
+    per chain length ``N``: the layer fidelity ``LF`` of a linear chain of
+    ``N`` qubits (its ``N - 1`` two-qubit gates in two simultaneous layers,
+    with their single-qubit gates), and in ``general_qlists`` the chain
+    itself.  The error per layered gate is ``EPLG = 1 - LF**(1 / (N - 1))``
+    (McKay et al., arXiv:2311.05933); the dashboard's "2Q error (layered)"
+    is ``EPLG`` at ``N = 100``.  ``EPLG`` is a process infidelity and carries
+    the layer's single-qubit gates and crosstalk, so it is not the same
+    quantity as an isolated two-qubit gate error.
+
+    Parameters
+    ----------
+    properties:
+        ``backend.properties().to_dict()`` (what :func:`save_noise_model`
+        stores as ``raw_properties``).
+
+    Returns
+    -------
+    dict
+        ``{N: {"lf", "eplg", "n_2q", "qubits", "date"}}`` in increasing
+        ``N``; empty when the properties carry no ``lf_<N>`` entry.
+    """
+    if not properties:
+        return {}
+    chains = {
+        str(row.get("name")): [int(q) for q in row.get("qubits") or []]
+        for row in properties.get("general_qlists") or []
+    }
+    out: dict[int, dict[str, Any]] = {}
+    for row in properties.get("general") or []:
+        name = str(row.get("name", ""))
+        if not name.startswith("lf_") or not name[3:].isdigit():
+            continue
+        n, value = int(name[3:]), row.get("value")
+        if value is None or n < 2:
+            continue
+        lf = float(value)
+        date = row.get("date")
+        out[n] = {
+            "lf": lf,
+            "eplg": 1.0 - lf ** (1.0 / (n - 1)) if lf > 0 else None,
+            "n_2q": n - 1,
+            "qubits": chains.get(name),
+            "date": date.isoformat() if hasattr(date, "isoformat") else date,
+        }
+    return dict(sorted(out.items()))
 
 
 @dataclass(frozen=True)
@@ -1575,7 +1665,11 @@ __all__ = [
     "calibration_payload",
     "backend_from_calibration",
     "SCALED_ERROR_MAX",
+    "ErrorClass",
+    "ERROR_CLASSES",
+    "error_class",
     "scale_calibration_errors",
+    "layer_fidelity",
     "save_noise_model",
     "load_noise_model",
 ]

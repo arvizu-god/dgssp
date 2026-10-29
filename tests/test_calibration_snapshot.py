@@ -19,11 +19,14 @@ from dgssp.backends import (
     backend_from_calibration,
     calibration_payload,
     calibration_timestamp,
+    error_class,
+    layer_fidelity,
     load_noise_model,
     median_gate_errors,
     save_noise_model,
     scale_calibration_errors,
 )
+from dgssp.runtime import backend_name
 from dgssp.solvers import DGConfig, DGSSPSolver
 
 
@@ -300,3 +303,65 @@ def test_a_non_positive_alpha_is_refused(device, alpha):
     """alpha must be positive."""
     with pytest.raises(ValueError, match="positive"):
         scale_calibration_errors(device, alpha)
+
+
+def test_error_classes_partition_the_target(device):
+    """Scaling 2q, then 1q, then readout equals scaling every error at once."""
+    stepwise = device
+    for which in ("2q", "1q", "readout"):
+        stepwise, info = scale_calibration_errors(stepwise, 2.0, max_error=1.0, which=which)
+        assert info["which"] == which
+    together, _ = scale_calibration_errors(device, 2.0, max_error=1.0)
+    assert calibration_payload(stepwise)["instructions"] == calibration_payload(together)["instructions"]
+
+
+@pytest.mark.parametrize("which", ["2q", "1q", "readout"])
+def test_one_class_alone_leaves_the_others_as_calibrated(device, which):
+    scaled, info = scale_calibration_errors(device, 2.0, max_error=1.0, which=which)
+    before, after = calibration_payload(device), calibration_payload(scaled)
+    n = 0
+    for name, rows in before["instructions"].items():
+        for old, new in zip(rows, after["instructions"][name], strict=True):
+            if old["error"] is None:
+                continue
+            if error_class(name, old["qubits"]) == which:
+                assert new["error"] == pytest.approx(min(2.0 * old["error"], 1.0))
+                n += 1
+            else:
+                assert new["error"] == old["error"]
+    assert n > 0 and info["n_scaled"] == n
+    assert backend_name(scaled).endswith(f"_x2_{which}")
+
+
+def test_the_default_class_is_the_old_behaviour(device):
+    """which='all' keeps the old name and info (no 'which' key): cached files stay valid."""
+    scaled, info = scale_calibration_errors(device, 2.0)
+    assert set(info) == {"alpha", "max_error", "n_scaled", "n_capped"}
+    assert backend_name(scaled) == f"{backend_name(device)}_x2"
+
+
+def test_error_class_names():
+    assert error_class("measure", [3]) == "readout"
+    assert error_class("measure_2", [3]) == "readout"
+    assert error_class("cz", [3, 4]) == "2q"
+    assert error_class("sx", [3]) == "1q"
+    assert error_class("reset", [3]) == "1q"
+    with pytest.raises(ValueError, match="which must be"):
+        scale_calibration_errors(object(), 2.0, which="cz")  # type: ignore[arg-type]
+
+
+def test_layer_fidelity_reads_lf_entries():
+    props = {
+        "general": [
+            {"name": "zz_01", "value": 1e-5, "date": "2026-10-25"},
+            {"name": "lf_4", "value": 0.97, "date": "2026-10-25T05:47:43-06:00"},
+            {"name": "lf_2", "value": 0.99, "date": None},
+        ],
+        "general_qlists": [{"name": "lf_4", "qubits": [3, 2, 1, 0]}],
+    }
+    lf = layer_fidelity(props)
+    assert list(lf) == [2, 4]
+    assert lf[4]["eplg"] == pytest.approx(1 - 0.97 ** (1 / 3))
+    assert lf[4]["n_2q"] == 3 and lf[4]["qubits"] == [3, 2, 1, 0]
+    assert lf[2]["qubits"] is None
+    assert layer_fidelity(None) == {} and layer_fidelity({"general": []}) == {}
