@@ -442,8 +442,9 @@ table charged `ε₁` to every `rz` as well, about a third of all single-qubit
 operations, and understated `S` by a factor of 1.03–1.5 across the grid
 (0.0037 → 0.0053 at `n = b = 8`); the conclusions below were unaffected.
 
-Read this as an upper bound (SS `survival_estimate` docstring): it ignores
-idling, crosstalk and readout, and it assumes every gate error is fatal. Even
+Read this as an estimate, optimistic because it ignores idling, crosstalk and
+leakage (see the `survival_estimate` docstring); it also ignores readout, and
+it assumes every gate error is fatal. Even
 so, **a single Grover iteration is already below 1% survival at `n = b = 8`, and
 the optimal iteration count puts the full search nine orders of magnitude below
 useful.** The hardware experiments in WP4 must therefore sit at the bottom-left

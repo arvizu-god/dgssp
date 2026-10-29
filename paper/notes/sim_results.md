@@ -42,8 +42,7 @@ including `zne_scalar_value` (the raw extrapolation) beside
 differ exactly where a fit is unresolved or unidentified** — which is the WP4
 result, so the paper quotes both.
 
-TEXT TO WRITE: the range of recovery across `n`, and the `n` at which it
-collapses.
+See `hw_results.md` §7, paragraph 1.
 
 ## 2. Resolved and identifiable
 
@@ -79,9 +78,7 @@ identifiable:
 | 5 | 0.008333 / 0.1083 | 0.01111 / 0.1444 | 0.09167 / 0.3333 | 0.1222 / 0.4444 | 120 / 90 |
 | 6 | 0.0303 / 0.1515 | 0.03333 / 0.1667 | 0.1818 / 0.3182 | 0.2 / 0.35 | 66 / 60 |
 
-TEXT TO WRITE: the `n` at which the odd grid stops identifying the exponential,
-and that the planned grid still does, at the same shot count. This is the
-claim partial folding exists to support.
+See `hw_results.md` §7, paragraph 2.
 
 ## 3. The reporting rule
 
@@ -92,8 +89,7 @@ needs no re-run: `sim_per_instance.csv` carries `resolved`, `identifiable`,
 `n_informative_scales`, `zne_scalar_value` and `zne_scalar_reported` per
 instance, so both rules can be evaluated from the archived table.
 
-TEXT TO WRITE: the decision, with the bias of each rule from `sim_cells.csv`
-(`bias_zne_scalar_value` against `bias_zne_scalar_reported`).
+See `hw_results.md` §7, paragraph 3.
 
 ## 4. Distances, and the infeasible-instance pathology
 
@@ -109,9 +105,7 @@ error.
 | planned | 116 | 0.02338 | 0.8613 | 0.9375 | 1 | 1 |
 | odd | 116 | 0.02307 | 0.8607 | 0.9375 | 1 | 1 |
 
-TEXT TO WRITE: the factor by which pointwise ZNE inflates `D_TV` on an M=0
-instance, that the simplex projection does not rescue it, and the mechanism
-(noise amplification by extrapolation weights that grow as the scales close up).
+See `hw_results.md` §7, paragraph 4.
 
 ## 5. Best extrapolation model
 
@@ -119,9 +113,7 @@ On the `odd7` grid (four points, Family P, `n <= 4`), median absolute error to
 the same instance's ideal `P(solution)`, **identified fits only**, with the
 exclusions counted: `sim_models.csv`, figure `fig_sim_models`.
 
-TEXT TO WRITE: which model wins, by how much, and how many fits each one had
-to exclude — a model that is accurate only where it is identified is not more
-accurate, it is more selective.
+See `hw_results.md` §7, paragraph 5.
 
 ## 6. Iteration sweep
 
@@ -129,8 +121,7 @@ accurate, it is more selective.
 `r` for both sweep instances, ideal / noisy / ZNE-scalar against the analytic
 `sin^2((2r+1) theta)`.
 
-TEXT TO WRITE: where the noisy curve stops tracking the analytic one, and
-whether ZNE moves the peak back.
+See `hw_results.md` §7, paragraph 6.
 
 ---
 

@@ -42,8 +42,7 @@ including `zne_scalar_value` (the raw extrapolation) beside
 differ exactly where a fit is unresolved or unidentified** — which is the WP4
 result, so the paper quotes both.
 
-TEXT TO WRITE: the range of recovery across `n`, and the `n` at which it
-collapses.
+See `hw_results.md` §7, paragraph 1.
 
 ## 2. Resolved and identifiable
 
@@ -79,9 +78,7 @@ identifiable:
 | 5 | {{grid_comparison.5.odd.fraction_resolved}} / {{grid_comparison.5.odd.fraction_identifiable}} | {{grid_comparison.5.odd.fraction_resolved_with_signal}} / {{grid_comparison.5.odd.fraction_identifiable_with_signal}} | {{grid_comparison.5.planned.fraction_resolved}} / {{grid_comparison.5.planned.fraction_identifiable}} | {{grid_comparison.5.planned.fraction_resolved_with_signal}} / {{grid_comparison.5.planned.fraction_identifiable_with_signal}} | {{grid_comparison.5.planned.n_instances}} / {{grid_comparison.5.planned.n_with_signal}} |
 | 6 | {{grid_comparison.6.odd.fraction_resolved}} / {{grid_comparison.6.odd.fraction_identifiable}} | {{grid_comparison.6.odd.fraction_resolved_with_signal}} / {{grid_comparison.6.odd.fraction_identifiable_with_signal}} | {{grid_comparison.6.planned.fraction_resolved}} / {{grid_comparison.6.planned.fraction_identifiable}} | {{grid_comparison.6.planned.fraction_resolved_with_signal}} / {{grid_comparison.6.planned.fraction_identifiable_with_signal}} | {{grid_comparison.6.planned.n_instances}} / {{grid_comparison.6.planned.n_with_signal}} |
 
-TEXT TO WRITE: the `n` at which the odd grid stops identifying the exponential,
-and that the planned grid still does, at the same shot count. This is the
-claim partial folding exists to support.
+See `hw_results.md` §7, paragraph 2.
 
 ## 3. The reporting rule
 
@@ -92,8 +89,7 @@ needs no re-run: `sim_per_instance.csv` carries `resolved`, `identifiable`,
 `n_informative_scales`, `zne_scalar_value` and `zne_scalar_reported` per
 instance, so both rules can be evaluated from the archived table.
 
-TEXT TO WRITE: the decision, with the bias of each rule from `sim_cells.csv`
-(`bias_zne_scalar_value` against `bias_zne_scalar_reported`).
+See `hw_results.md` §7, paragraph 3.
 
 ## 4. Distances, and the infeasible-instance pathology
 
@@ -109,9 +105,7 @@ error.
 | planned | {{per_grid.planned.pathology.n_m0}} | {{per_grid.planned.pathology.median_tv_lambda1}} | {{per_grid.planned.pathology.median_tv_clip}} | {{per_grid.planned.pathology.median_tv_simplex}} | {{per_grid.planned.pathology.fraction_clip_worse}} | {{per_grid.planned.pathology.fraction_simplex_worse}} |
 | odd | {{per_grid.odd.pathology.n_m0}} | {{per_grid.odd.pathology.median_tv_lambda1}} | {{per_grid.odd.pathology.median_tv_clip}} | {{per_grid.odd.pathology.median_tv_simplex}} | {{per_grid.odd.pathology.fraction_clip_worse}} | {{per_grid.odd.pathology.fraction_simplex_worse}} |
 
-TEXT TO WRITE: the factor by which pointwise ZNE inflates `D_TV` on an M=0
-instance, that the simplex projection does not rescue it, and the mechanism
-(noise amplification by extrapolation weights that grow as the scales close up).
+See `hw_results.md` §7, paragraph 4.
 
 ## 5. Best extrapolation model
 
@@ -119,9 +113,7 @@ On the `odd7` grid (four points, Family P, `n <= 4`), median absolute error to
 the same instance's ideal `P(solution)`, **identified fits only**, with the
 exclusions counted: `sim_models.csv`, figure `fig_sim_models`.
 
-TEXT TO WRITE: which model wins, by how much, and how many fits each one had
-to exclude — a model that is accurate only where it is identified is not more
-accurate, it is more selective.
+See `hw_results.md` §7, paragraph 5.
 
 ## 6. Iteration sweep
 
@@ -129,8 +121,7 @@ accurate, it is more selective.
 `r` for both sweep instances, ideal / noisy / ZNE-scalar against the analytic
 `sin^2((2r+1) theta)`.
 
-TEXT TO WRITE: where the noisy curve stops tracking the analytic one, and
-whether ZNE moves the peak back.
+See `hw_results.md` §7, paragraph 6.
 
 ---
 

@@ -60,9 +60,12 @@ shallowest instance of each n × M cell, plus the edge instance).
   the job ran predicts slightly *more* signal, not less. Measured: α = 3.18
   (95 % CI 3.07–3.35), see Open item 3.
 - The algorithm works at n = 2 (0.60 vs 0.25 random), is marginal at n = 3
-  (0.26–0.35, 1.4–2.1× random) and is indistinguishable from random at n = 4
-  (0.077 / 0.142 / 0.131 vs 0.0625 / 0.125 / 0.125), for the *easiest* n = 4
-  instances of the family.
+  (0.26–0.35, 1.4–2.1× random) and is detectable but useless for search at
+  n = 4 (3.6σ, 3.1σ and 1.2σ above random for P-n4-M1-10, P-n4-M2-02 and
+  S-n4-g1-M2-00: 0.077 / 0.142 / 0.131 vs 0.0625 / 0.125 / 0.125; the last is
+  consistent with random), for the *easiest* n = 4 instances of the family.
+  (Wording corrected 2026-10-28: n = 4 is not at random on two of the three
+  instances. See `hw_results.md` §3.)
 
 ### ZNE (odd grid, exponential with the P_uniform asymptote)
 

@@ -277,8 +277,9 @@ instance is:
 
 **The edge is `S-n4-g1-M2-00`, and it sits on the boundary.** It is the largest
 of the 20 edge-eligible instances, and its margin is 1.3% (`P_est` 0.2533 vs
-0.2500) — well inside the error of a survival model that is itself a
-coherence-free upper bound (no idling, readout or crosstalk). Report it as
+0.2500) — well inside the error of a survival model that is itself an
+estimate, optimistic because it ignores idling, crosstalk and leakage (and
+readout). Report it as
 "`n = 4, M = 2` is where search meets the 2× bar on this device twin", not as
 a sharp threshold; on hardware it is expected to fall below.
 
