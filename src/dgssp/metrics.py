@@ -292,9 +292,9 @@ def survival_estimate(two_q: int, one_q: int, errors: Mapping[str, Any]) -> dict
     ``S2 = (1 - eps2)**two_q`` is the primary figure -- two-qubit errors are an
     order of magnitude larger than single-qubit ones on every heavy-hex device
     in the fake provider -- and ``S1 = (1 - eps1)**one_q`` is the secondary
-    factor.  This is a *coherence-free upper bound*: it ignores idling,
-    crosstalk, readout and the fact that not every gate error is fatal to the
-    marked amplitude.  It is used to say where the algorithm cannot work, not
+    factor.  This is an *estimate*, optimistic because it ignores idling,
+    crosstalk and leakage; it also ignores readout and the fact that not every
+    gate error is fatal to the marked amplitude.  It is used to say where the algorithm cannot work, not
     to predict a success probability.
 
     Parameters

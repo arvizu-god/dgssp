@@ -48,13 +48,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from functools import lru_cache
+from itertools import combinations
 from typing import Any, Literal, TypeAlias
 
 import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.providers import BackendV2
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
-from scipy.optimize import OptimizeWarning, curve_fit
+from scipy.optimize import OptimizeWarning, curve_fit, minimize_scalar
 
 from ..instance import SubsetSumInstance
 from ..metrics import (
@@ -1856,9 +1857,10 @@ def plan_scales(
     monotonically with ``lam`` the admissible candidates form a prefix, and
     the grid is that prefix, starting at 1.
 
-    ``survival`` is an *upper bound* (see
-    :func:`dgssp.metrics.survival_estimate`), so the plan is optimistic; the
-    resolvability flag of :func:`fit_scalar_series` checks it after the fact.
+    ``survival`` is an *estimate*, optimistic because it ignores idling,
+    crosstalk and leakage (see :func:`dgssp.metrics.survival_estimate`), so the
+    plan is optimistic too; the resolvability flag of
+    :func:`fit_scalar_series` checks it after the fact.
 
     Parameters
     ----------
@@ -2877,6 +2879,495 @@ def expected_extrapolation(
     )
 
 
+# ---------------------------------------------------------------------------
+# 11) Error propagation of the fixed-asymptote exponential
+# ---------------------------------------------------------------------------
+#
+# Theory: paper/notes/zne_theory.md.  Under depolarising noise scaled by lam,
+# P(lam) = a + b exp(-c lam) exactly, with a = P_uniform known, so the scalar
+# estimator a + b learns only (b, c).  Its delta-method standard error is
+#
+#     Var(b) = S2 / (S0 S2 - S1**2),   S_m = sum_j lam_j**m g_j**2 / sigma_j**2,
+#
+# g_j = exp(-c lam_j): the amplitude cancels, so the *absolute* SE of P(0)
+# depends only on the rate, the grid and the shots.  Nothing in this section
+# changes the estimator; it only describes it.
+
+
+def _step_limit() -> float:
+    """Root of ``u = 1 + exp(-2 u)`` (fixed-point iteration, contraction 0.22)."""
+    u = 1.0
+    for _ in range(200):
+        u = 1.0 + math.exp(-2.0 * u)
+    return u
+
+
+#: ``c * optimal_step(c)`` as ``c -> inf``: 1.1089, the root of
+#: ``u = 1 + exp(-2u)``.  Not 1: dropping the first point's own error from
+#: the two-point relative error gives ``1 / c``, keeping it gives this.
+OPTIMAL_STEP_LIMIT: float = _step_limit()
+
+#: Relative tolerance for "the rate sits at the cap".  ``chi2`` is flat to
+#: machine precision near the cap (the other scales contribute
+#: ``exp(-rate_max lam) ~ 1e-13``), so the golden-section search stops about
+#: ``1e-8`` short of ``rate_max``, inside the ``1e-9`` tolerance of the stored
+#: ``rate_at_bound`` flag.  That flag is kept as it is; this section's
+#: diagnostics use this tolerance instead.
+RATE_CAP_RTOL: float = 1e-6
+
+
+def at_rate_cap(rate: float | np.ndarray, rate_max: float = EXP_RATE_MAX) -> Any:
+    """``rate >= rate_max (1 - RATE_CAP_RTOL)``, elementwise."""
+    return np.asarray(rate) >= rate_max * (1.0 - RATE_CAP_RTOL)
+
+
+def _linearised_value_se(
+    x: np.ndarray, b: np.ndarray, c: np.ndarray, sigma: np.ndarray
+) -> np.ndarray:
+    """
+    Delta-method SE of ``a + b`` for many fixed-asymptote fits at once.
+
+    The same linearised covariance :func:`_fit_series` inverts for one series
+    (Jacobian ``[g, -b x g] / sigma``), in closed form so a Monte Carlo of
+    thousands of fits is one array expression.  ``b`` cancels except at
+    ``b == 0``, where the Jacobian is singular and the result is ``nan`` (as
+    :func:`_fit_series` returns ``value_se = None``).
+
+    Parameters
+    ----------
+    x:
+        Scales, shape ``(n,)``.
+    b, c:
+        Amplitudes and rates, shape ``(R,)``.
+    sigma:
+        Standard errors, shape ``(R, n)`` or ``(n,)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(R,)``; ``inf`` where the normal matrix is numerically singular.
+    """
+    with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+        g2 = np.exp(-2.0 * np.outer(c, x)) / np.broadcast_to(sigma, (c.size, x.size)) ** 2
+        s0 = g2.sum(axis=1)
+        s1 = (g2 * x).sum(axis=1)
+        s2 = (g2 * x * x).sum(axis=1)
+        det = s0 * s2 - s1**2
+        var = np.where(det > 0, s2 / det, np.inf)
+    return np.where(b == 0.0, np.nan, np.sqrt(var))
+
+
+def exp_fixed_se(
+    scales: Sequence[float],
+    observed: Sequence[float],
+    shots: Sequence[int],
+    asymptote: float,
+    *,
+    rate_max: float = EXP_RATE_MAX,
+) -> dict[str, Any]:
+    """
+    The scalar estimator's fit and its delta-method standard error.
+
+    The weighted fixed-asymptote fit of :func:`fit_scalar_series` (the same
+    :func:`_exp_fixed_many`, the same binomial weights), so ``value`` and
+    ``se`` equal a stored record's ``value`` and ``value_se``.  Beside it,
+    the error a *known* decay would give: if ``F(lam_1) = exp(-c lam_1)``
+    were known, ``P(0) = a + (P(lam_1) - a) / F`` is linear in one
+    observation and its SE is ``sigma_1 exp(c lam_1)``.  ``learning_cost``
+    is the ratio, the price of fitting ``c`` instead of knowing it.
+
+    Parameters
+    ----------
+    scales:
+        Realised scales.
+    observed:
+        Observed proportion at each scale.
+    shots:
+        Shots behind each.
+    asymptote:
+        The fixed ``a`` (``P_uniform``).
+    rate_max:
+        Rate bound (:data:`EXP_RATE_MAX`).
+
+    Returns
+    -------
+    dict
+        ``value``, ``amplitude``, ``rate``, ``cov`` (of ``(b, c)``, ``None``
+        when singular), ``se`` (``nan`` when singular), ``se_known_f``,
+        ``learning_cost``, ``rate_at_bound`` (the stored flag) and
+        ``at_cap`` (:func:`at_rate_cap`), ``cap_value``
+        (:func:`rate_cap_value`), and the sorted ``scales``, ``observed``,
+        ``sigma``, ``shots``.
+    """
+    order = np.argsort(np.asarray(scales, dtype=float))
+    x = np.asarray(scales, dtype=float)[order]
+    y = np.asarray(observed, dtype=float)[order]
+    n = np.asarray(shots, dtype=int)[order]
+    sigma = np.array([proportion_sigma(float(v), int(s)) for v, s in zip(y, n, strict=True)])
+    fit = _fit_series("exponential", x, y, sigma, float(asymptote), rate_max)
+    b, c = fit["params"]
+    se = float("nan") if fit["value_se"] is None else float(fit["value_se"])
+    with np.errstate(over="ignore"):
+        se_known_f = float(sigma[0] * np.exp(c * x[0]))
+    return {
+        "value": fit["value"],
+        "amplitude": b,
+        "rate": c,
+        "cov": fit["cov"],
+        "se": se,
+        "se_known_f": se_known_f,
+        "learning_cost": se / se_known_f,
+        "rate_at_bound": fit["rate_at_bound"],
+        "at_cap": bool(at_rate_cap(c, rate_max)),
+        "cap_value": rate_cap_value(x.tolist(), y.tolist(), float(asymptote), rate_max),
+        "scales": x.tolist(),
+        "observed": y.tolist(),
+        "sigma": sigma.tolist(),
+        "shots": n.tolist(),
+    }
+
+
+def rate_cap_value(
+    scales: Sequence[float],
+    observed: Sequence[float],
+    asymptote: float,
+    rate_max: float = EXP_RATE_MAX,
+) -> float:
+    """
+    What the estimator returns when only the lowest scale is informative.
+
+    ``chi2`` is then flat in ``c`` with its infimum at ``c -> inf``; the
+    search stops at ``rate_max`` and the other scales contribute
+    ``exp(-rate_max lam) ~ 0``, so the fit passes through the lowest point
+    and ``a + b = a + (P(lam_min) - a) exp(rate_max lam_min)``.
+
+    Parameters
+    ----------
+    scales, observed:
+        The series (any order).
+    asymptote:
+        The fixed ``a``.
+    rate_max:
+        Rate bound (:data:`EXP_RATE_MAX`).
+
+    Returns
+    -------
+    float
+        The capped value.
+    """
+    i = int(np.argmin(np.asarray(scales, dtype=float)))
+    lam = float(scales[i])
+    return float(asymptote + (float(observed[i]) - asymptote) * math.exp(rate_max * lam))
+
+
+def predicted_se(
+    scales: Sequence[float],
+    survival: float,
+    signal: float,
+    p_uniform: float,
+    shots: int | Sequence[int],
+) -> float:
+    """
+    :func:`exp_fixed_se` on the model's expected observations.
+
+    The planner's figure of merit: the SE of ``P(0)`` the scalar estimator
+    will have, if ``P(lam) = p_uniform + signal * survival**lam`` holds,
+    before any shot is taken.  Evaluated at the true ``(b, c) = (signal,
+    -ln survival)`` with the binomial ``sigma`` at each expected proportion.
+
+    Parameters
+    ----------
+    scales:
+        The grid.
+    survival:
+        ``exp(-c)``, in ``(0, 1]``; ``0`` (no signal left at ``lam = 1``)
+        gives ``inf``.
+    signal:
+        ``P_ideal - P_uniform``; ``0`` gives ``inf``.
+    p_uniform:
+        The asymptote.
+    shots:
+        Shots per scale (one number, or one per scale).
+
+    Returns
+    -------
+    float
+        Absolute SE of ``P(0)``; ``inf`` when the fit is not identified.
+    """
+    if not 0.0 <= survival <= 1.0:
+        raise ValueError(f"survival must be in [0, 1], got {survival}.")
+    if survival == 0.0 or signal == 0.0:
+        return float("inf")
+    x = np.sort(np.asarray(scales, dtype=float))
+    n = np.broadcast_to(np.asarray(shots, dtype=int), x.shape)
+    y = np.clip(p_uniform + signal * survival**x, 0.0, 1.0)
+    sigma = np.array([proportion_sigma(float(v), int(s)) for v, s in zip(y, n, strict=True)])
+    rate = -math.log(survival)
+    return float(_linearised_value_se(x, np.array([signal]), np.array([rate]), sigma)[0])
+
+
+def two_point_relative_error(step: float, rate: float) -> float:
+    """
+    Relative SE of the excess, two scales ``{1, 1 + step}``, in units of ``sigma_1 / D_1``.
+
+    ``sqrt((1 + 1/step)**2 + exp(2 rate step) / step**2)``: the closed form of
+    ``zne_theory.md`` section 3 with equal ``sigma`` at both scales and
+    ``D_2 = D_1 exp(-rate step)``.
+
+    Parameters
+    ----------
+    step:
+        ``lam_2 - lam_1 > 0``.
+    rate:
+        ``c >= 0``.
+
+    Returns
+    -------
+    float
+        The dimensionless factor.
+    """
+    return math.sqrt((1.0 + 1.0 / step) ** 2 + math.exp(2.0 * rate * step) / step**2)
+
+
+def optimal_step(rate: float) -> dict[str, float]:
+    """
+    The second-scale step that minimises :func:`two_point_relative_error`.
+
+    Numerical (bounded Brent after a log-spaced grid, which brackets the
+    single minimum: both terms fall for ``step < 1/rate``).  Returned beside
+    the two approximations: ``1 / rate`` (drops the first point's error) and
+    ``OPTIMAL_STEP_LIMIT / rate`` (the exact large-rate limit).
+
+    Parameters
+    ----------
+    rate:
+        ``c > 0``.
+
+    Returns
+    -------
+    dict[str, float]
+        ``step`` (numerical), ``inverse_rate``, ``large_rate_limit``,
+        ``relative_error`` (at ``step``) and ``c_step`` (``rate * step``).
+    """
+    if rate <= 0.0:
+        raise ValueError(f"rate must be positive, got {rate}.")
+    grid = np.geomspace(1e-3 / rate, 50.0 / rate, 4001)
+    with np.errstate(over="ignore"):
+        values = (1.0 + 1.0 / grid) ** 2 + np.exp(2.0 * rate * grid) / grid**2
+    i = int(np.argmin(values))
+    lo, hi = grid[max(i - 1, 0)], grid[min(i + 1, grid.size - 1)]
+    best = minimize_scalar(
+        lambda d: two_point_relative_error(float(d), rate),
+        bounds=(float(lo), float(hi)),
+        method="bounded",
+        options={"xatol": 1e-12 / rate},
+    )
+    step = float(best.x)
+    return {
+        "step": step,
+        "inverse_rate": 1.0 / rate,
+        "large_rate_limit": OPTIMAL_STEP_LIMIT / rate,
+        "relative_error": two_point_relative_error(step, rate),
+        "c_step": rate * step,
+    }
+
+
+def plan_scales_spacing(
+    survival: float,
+    signal: float,
+    shots: int,
+    candidates: Sequence[float],
+    k: float = 3.0,
+    *,
+    p_uniform: float | None = None,
+    n_points: int | None = 3,
+) -> list[float]:
+    """
+    Pre-register the grid with the smallest predicted SE among admissible ones.
+
+    :func:`plan_scales` (which the campaign used, and which stays as it was)
+    takes the admissible prefix of ``candidates`` and thins it evenly.  This
+    planner takes the same prefix -- every scale whose predicted signal is
+    ``>= k`` shot-noise sigma -- and then chooses, among all grids of
+    ``n_points`` scales from it that start at 1, the one with the smallest
+    :func:`predicted_se`.  Ties go to the smaller largest scale (fewer folds).
+
+    Parameters
+    ----------
+    survival, signal, shots, candidates, k, p_uniform:
+        As for :func:`plan_scales`.  With ``p_uniform=None`` both the
+        admissibility test and the SE use the worst-case ``p = 1/2``.
+    n_points:
+        Scales per grid (``>= 2``); fewer if the prefix is shorter.  ``None``
+        returns the whole prefix (more scales at fixed shots per scale never
+        raise the SE, so there is nothing to choose).
+
+    Returns
+    -------
+    list[float]
+        Increasing scales; ``[1.0]`` when fewer than two are admissible.
+    """
+    if n_points is not None and n_points < 2:
+        raise ValueError(f"n_points must be >= 2 or None, got {n_points}.")
+    prefix = plan_scales(
+        survival, signal, shots, candidates, k, p_uniform=p_uniform, n_points=None
+    )
+    if len(prefix) < 2:
+        return [1.0]
+    size = len(prefix) if n_points is None else min(n_points, len(prefix))
+    rate = -math.log(survival)
+
+    def score(grid: list[float]) -> float:
+        if p_uniform is not None:
+            return predicted_se(grid, survival, signal, p_uniform, shots)
+        x = np.asarray(grid, dtype=float)
+        sigma = np.full(x.size, 0.5 / math.sqrt(shots))
+        return float(_linearised_value_se(x, np.array([signal]), np.array([rate]), sigma)[0])
+
+    grids = [[prefix[0], *rest] for rest in combinations(prefix[1:], size - 1)]
+    return min(grids, key=lambda g: (score(g), g[-1], g))
+
+
+def pointwise_fit_rates(
+    counts_per_scale: Mapping[float, Mapping[str, int]], cfg: ZNESamplingConfig
+) -> dict[str, float]:
+    """
+    The decay rate each bitstring's pointwise exponential fit chose.
+
+    The fits of :func:`pointwise_raw` (unweighted, asymptote ``2**-n``); a
+    rate at ``cfg.exp_rate_max`` (:func:`at_rate_cap`) marks a string whose
+    value is the cap
+    (:func:`rate_cap_value`), i.e. whose excess carried no information
+    beyond the lowest scale.  Strings that are zero at every scale are not
+    fitted (:func:`pointwise_raw` returns 0 for them) and are left out.
+
+    Parameters
+    ----------
+    counts_per_scale:
+        Counts keyed by realised scale.
+    cfg:
+        ``method == "exponential"`` with a fixed asymptote.
+
+    Returns
+    -------
+    dict[str, float]
+        Rate per fitted bitstring.
+    """
+    if cfg.method != "exponential" or cfg.asymptote is None:
+        raise ValueError("pointwise_fit_rates needs the fixed-asymptote exponential.")
+    x, keys, probs = _probability_matrix(counts_per_scale)
+    asymptote = _pointwise_asymptote(cfg, keys)
+    assert asymptote is not None
+    series = probs.T
+    seen = ~np.all(series == 0.0, axis=1)
+    _, rates = _exp_fixed_many(
+        x, series[seen], np.ones((1, x.size)), asymptote, cfg.exp_rate_max
+    )
+    return {k: float(r) for k, r in zip(np.asarray(keys)[seen], rates, strict=True)}
+
+
+def exp_fixed_monte_carlo(
+    scales: Sequence[float],
+    survival: float,
+    signal: float,
+    p_uniform: float,
+    shots: int,
+    *,
+    n_replicas: int = 2000,
+    seed: int = 0,
+    rate_max: float = EXP_RATE_MAX,
+    k: float = RESOLVABILITY_K,
+) -> dict[str, Any]:
+    """
+    Monte Carlo of the scalar estimator against its delta-method SE.
+
+    Binomial draws from ``p_uniform + signal * survival**lam`` at every
+    scale; each replica is fitted exactly as :func:`fit_scalar_series` fits
+    (weights from that replica's own proportions).  Compares the spread of
+    the estimates with :func:`predicted_se` and with the median of the
+    per-replica :func:`exp_fixed_se`, over all replicas and over the
+    replicas the gate (:func:`is_resolved`) would report.
+
+    Parameters
+    ----------
+    scales, survival, signal, p_uniform, shots:
+        The model and design.
+    n_replicas, seed:
+        Monte Carlo size and seed.
+    rate_max:
+        Rate bound (:data:`EXP_RATE_MAX`).
+    k:
+        Gate threshold (:data:`RESOLVABILITY_K`).
+
+    Returns
+    -------
+    dict
+        ``truth``, ``z_min_expected`` (smallest expected signal-to-noise
+        over the scales), ``se_predicted``, ``relative_se_predicted``
+        (over ``|signal|``), and for ``all`` and ``resolved`` replicas:
+        ``n``, ``se_mc``, ``se_formula_median``, ``ratio_predicted`` and
+        ``ratio_formula`` (formula over Monte Carlo), ``bias_mean``,
+        ``bias_mean_se``, ``bias_median``, ``coverage_formula`` (truth within
+        ``1.96 se``) and ``fraction_at_bound``.
+    """
+    x = np.sort(np.asarray(scales, dtype=float))
+    truth = p_uniform + signal
+    p = p_uniform + signal * survival**x
+    rng = np.random.default_rng(seed)
+    Y = rng.binomial(shots, p, size=(n_replicas, x.size)) / shots
+    S = _sigma_matrix(Y, np.full(x.size, float(shots)))
+    b, c = _exp_fixed_many(x, Y, 1.0 / S**2, p_uniform, rate_max)
+    values = p_uniform + b
+    se = _linearised_value_se(x, b, c, S)
+    at_bound = at_rate_cap(c, rate_max)
+    direction = signal_direction(truth, p_uniform)
+    resolved = np.array(
+        [bool(is_resolved(row.tolist(), [shots] * x.size, p_uniform, direction=direction, k=k))
+         for row in Y]
+    )
+    se_pred = predicted_se(x.tolist(), survival, signal, p_uniform, shots)
+    z_min = float(
+        min(direction * (v - p_uniform) / proportion_sigma(float(v), shots) for v in p)
+    )
+
+    def block(mask: np.ndarray) -> dict[str, Any]:
+        m = int(mask.sum())
+        if m < 2:
+            return {"n": m}
+        v, s = values[mask], se[mask]
+        se_mc = float(np.std(v, ddof=1))
+        return {
+            "n": m,
+            "se_mc": se_mc,
+            "se_formula_median": float(np.nanmedian(s)),
+            "ratio_predicted": se_pred / se_mc,
+            "ratio_formula": float(np.nanmedian(s)) / se_mc,
+            "bias_mean": float(np.mean(v) - truth),
+            "bias_mean_se": se_mc / math.sqrt(m),
+            "bias_median": float(np.median(v) - truth),
+            "coverage_formula": float(np.mean(np.abs(v - truth) <= 1.96 * s)),
+            "fraction_at_bound": float(np.mean(at_bound[mask])),
+        }
+
+    return {
+        "scales": x.tolist(),
+        "survival": survival,
+        "rate": -math.log(survival),
+        "signal": signal,
+        "p_uniform": p_uniform,
+        "shots": shots,
+        "n_replicas": n_replicas,
+        "seed": seed,
+        "truth": truth,
+        "z_min_expected": z_min,
+        "se_predicted": se_pred,
+        "relative_se_predicted": se_pred / abs(signal),
+        "fraction_resolved": float(np.mean(resolved)),
+        "all": block(np.ones(n_replicas, dtype=bool)),
+        "resolved": block(resolved),
+    }
+
+
 __all__ = [
     "ZNESamplingConfig",
     "ZNE_METHODS",
@@ -2927,6 +3418,17 @@ __all__ = [
     "depolarised_probability",
     "synthetic_depolarising_counts",
     "expected_extrapolation",
+    "OPTIMAL_STEP_LIMIT",
+    "RATE_CAP_RTOL",
+    "at_rate_cap",
+    "exp_fixed_se",
+    "rate_cap_value",
+    "predicted_se",
+    "two_point_relative_error",
+    "optimal_step",
+    "plan_scales_spacing",
+    "pointwise_fit_rates",
+    "exp_fixed_monte_carlo",
 ]
 
 
