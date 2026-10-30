@@ -1,0 +1,2221 @@
+{
+  "schema": "dgssp/paper/hardware-manifest/1",
+  "date": "2026-10-29",
+  "created_utc": "2026-10-30T04:00:59Z",
+  "backend": {
+    "name": "ibm_fez",
+    "source": "live",
+    "num_qubits": 156,
+    "processor_family": "heron",
+    "heavy_hex": true,
+    "status_at_plan": {
+      "operational": true,
+      "pending_jobs": 1,
+      "status_msg": "active"
+    },
+    "calibration_timestamp": "2026-10-29T21:44:40-06:00",
+    "calibration_timestamp_after_plan": "2026-10-29T21:44:40-06:00",
+    "calibration_stable_during_plan": true,
+    "calibration_file": "paper/hardware/calibration_2026-10-29.json",
+    "calibration_sha256": "67cd8c88a78a5c2e0499c300d561487ec663dc8d9ad04699a7bafbf1b9c12ced",
+    "snapshot_matches_live_target": true
+  },
+  "account_facts": {
+    "file": "paper/hardware/account_facts.md",
+    "exists": true,
+    "filled": true,
+    "backend_listed": true
+  },
+  "circuits_file": "paper/hardware/circuits_2026-10-29.qpy",
+  "circuits_sha256": "7711ad94ec35ad63296d1049873712a288580da847c5a95f92a4884f7601f995",
+  "settings": {
+    "shots": 12288,
+    "scales": [
+      1.0,
+      1.25,
+      1.5,
+      2.0,
+      2.5,
+      3.0,
+      5.0
+    ],
+    "seed_min": 0,
+    "seed_max": 32,
+    "optimization_level": 3,
+    "layout_method": "sabre",
+    "fold_seed": 0,
+    "fold": "dgssp.mitigation.fold_isa (= fold_transpiled) + rebase_to_backend, via plan_zne_batch; submitted as-is (no further transpilation)",
+    "zne": {
+      "method": "exponential",
+      "mode": "scalar",
+      "renorm": "clip",
+      "asymptote": "p_uniform",
+      "methods_fitted": [
+        "linear",
+        "quadratic",
+        "richardson",
+        "exponential"
+      ],
+      "n_bootstrap": 500,
+      "bootstrap_seed": 0
+    },
+    "seed_simulator": 20261020,
+    "only": null,
+    "sweep_iterations": null,
+    "drift_check": "scale-1 repeat, as the last PUBs, of the records named with --drift (P-n2-M1-11_L1, P-n3-M2-17_L2); each clears P_uniform by >= 0.25",
+    "drift_keys": [
+      "P-n2-M1-11_L1",
+      "P-n3-M2-17_L2"
+    ],
+    "pin_layout": [
+      "P-n2-M1-11:L1=2026-10-25",
+      "P-n3-M1-17:L1=2026-10-25",
+      "P-n3-M1-17_r1:L1=2026-10-25",
+      "P-n4-M1-10_r1:L1=2026-10-25",
+      "P-n4-M1-10_r2:L1=2026-10-25",
+      "P-n3-M2-17:L1=2026-10-25",
+      "P-n3-M2-17:L2=2026-10-28",
+      "P-n2-M1-11:L2=2026-10-28",
+      "P-n3-M1-17:L2=2026-10-28",
+      "P-n3-M1-17_r1:L2=2026-10-28"
+    ],
+    "instances_files": {
+      "hardware_subset": "paper/instances/hardware_subset.json",
+      "hardware_subset_sha256": "f981f79e808d7fabcfb33deede9aff108c7585187f3a19b3b26a3cb8108e9d8c",
+      "sweep": "paper/instances/sweep.json",
+      "sweep_sha256": "38420b4045f4f85a397314cb5fc654f038d52cbd919ebbff4350af08bd83160b"
+    }
+  },
+  "sampler": {
+    "options": {
+      "environment": {
+        "job_tags": [
+          "dgssp",
+          "paper-a",
+          "wp6",
+          "2026-10-29"
+        ]
+      },
+      "max_execution_time": 228,
+      "twirling": {
+        "enable_gates": true,
+        "enable_measure": false,
+        "num_randomizations": 32,
+        "shots_per_randomization": 384,
+        "strategy": "active-accum"
+      },
+      "dynamical_decoupling": {
+        "enable": false
+      }
+    },
+    "execution_mode_default": "job",
+    "twirling": {
+      "client_supports_gate_twirling": true,
+      "client_version": "0.49.0",
+      "plan_support": "unverified: decided server-side at submission",
+      "enabled": true
+    },
+    "dynamical_decoupling": {
+      "enabled": false,
+      "sequence_type": null
+    },
+    "measurement_mitigation": "none",
+    "notes": "No measurement mitigation: SamplerV2 has no readout-error mitigation option (resilience options exist only for EstimatorV2), and measurement twirling (twirling.enable_measure) is kept off so readout noise keeps the form the calibration-derived noise model assumes. rep_delay and init_qubits are left at the device defaults. Error suppression is gate twirling only: it is noise tailoring for ZNE (folded noise grows predictably once coherent errors are randomised). Dynamical decoupling is off by design: it is not part of C2, the noise model has no counterpart, and it would change each fold's idle noise differently. The local simulator path ignores twirling (qiskit-ibm-runtime warns); under the Aer noise model, which is already stochastic, twirling does not change the expected distribution."
+  },
+  "records": [
+    {
+      "key": "P-n2-M1-11_L1",
+      "kind": "zne",
+      "instance": "P-n2-M1-11",
+      "role": "pinned",
+      "items": [
+        2,
+        1
+      ],
+      "target": 3,
+      "n_items": 2,
+      "M": 1,
+      "solution_bitstrings": [
+        "11"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 5,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        1.25,
+        1.5,
+        2.0,
+        2.5
+      ],
+      "pub_indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "drift_check": true,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-25.json",
+        "manifest_sha256": "cbbac0e22340849465f4358bde523626542fbd08c1968512e7d639cddaae2abf",
+        "circuits_sha256": "11e9e916d7a11b53d5763ec072eca2383997d3b4bb4f2e4b46a771683664a8d9",
+        "record_key": "P-n2-M1-11",
+        "pub_index": 0,
+        "device": "ibm_fez"
+      },
+      "grids": {
+        "gentle": [
+          1.0,
+          1.25,
+          1.5
+        ],
+        "rule": [
+          1.0,
+          2.0,
+          2.5
+        ]
+      },
+      "circuit_set": "fitted"
+    },
+    {
+      "key": "P-n3-M2-17_L2",
+      "kind": "single",
+      "instance": "P-n3-M2-17",
+      "role": "pinned",
+      "items": [
+        2,
+        1,
+        2
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 2,
+      "solution_bitstrings": [
+        "011",
+        "110"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 23,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        88,
+        92,
+        78,
+        89,
+        91,
+        98,
+        90
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        5
+      ],
+      "drift_check": true,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-28.json",
+        "manifest_sha256": "d3b1c37dc78ae4c765ec62a5ea70e27debb6358cef4d64e7da4eaf4e785b2245",
+        "circuits_sha256": "6d59335256d4190dfa0664e03c0d8f9ad82c891758f256bef099e434aa94b964",
+        "record_key": "P-n3-M2-17",
+        "pub_index": 3,
+        "device": "ibm_fez"
+      },
+      "grids": {},
+      "circuit_set": "layout_test"
+    },
+    {
+      "key": "P-n3-M1-17_L1",
+      "kind": "zne",
+      "instance": "P-n3-M1-17",
+      "role": "pinned",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 2,
+      "r_opt": 2,
+      "best_seed": 30,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        1.25,
+        1.5,
+        3.0,
+        5.0
+      ],
+      "pub_indices": [
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-25.json",
+        "manifest_sha256": "cbbac0e22340849465f4358bde523626542fbd08c1968512e7d639cddaae2abf",
+        "circuits_sha256": "11e9e916d7a11b53d5763ec072eca2383997d3b4bb4f2e4b46a771683664a8d9",
+        "record_key": "P-n3-M1-17",
+        "pub_index": 15,
+        "device": "ibm_fez"
+      },
+      "grids": {
+        "odd": [
+          1.0,
+          3.0,
+          5.0
+        ],
+        "gentle": [
+          1.0,
+          1.25,
+          1.5
+        ]
+      },
+      "circuit_set": "fitted"
+    },
+    {
+      "key": "P-n3-M1-17_r1_L1",
+      "kind": "zne",
+      "instance": "P-n3-M1-17",
+      "role": "pinned",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 1,
+      "r_opt": 2,
+      "best_seed": 30,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "nominal_scales": [
+        1.0,
+        1.25,
+        1.5
+      ],
+      "pub_indices": [
+        11,
+        12,
+        13
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-25.json",
+        "manifest_sha256": "cbbac0e22340849465f4358bde523626542fbd08c1968512e7d639cddaae2abf",
+        "circuits_sha256": "11e9e916d7a11b53d5763ec072eca2383997d3b4bb4f2e4b46a771683664a8d9",
+        "record_key": "P-n3-M1-17_r1",
+        "pub_index": 30,
+        "device": "ibm_fez"
+      },
+      "grids": {
+        "gentle": [
+          1.0,
+          1.25,
+          1.5
+        ]
+      },
+      "circuit_set": "fitted"
+    },
+    {
+      "key": "P-n4-M1-10_r1_L1",
+      "kind": "zne",
+      "instance": "P-n4-M1-10",
+      "role": "pinned",
+      "items": [
+        2,
+        2,
+        1,
+        2
+      ],
+      "target": 1,
+      "n_items": 4,
+      "M": 1,
+      "solution_bitstrings": [
+        "0100"
+      ],
+      "p_uniform": 0.0625,
+      "iterations": 1,
+      "r_opt": 3,
+      "best_seed": 3,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "nominal_scales": [
+        1.0,
+        1.25,
+        1.5
+      ],
+      "pub_indices": [
+        14,
+        15,
+        16
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-25.json",
+        "manifest_sha256": "cbbac0e22340849465f4358bde523626542fbd08c1968512e7d639cddaae2abf",
+        "circuits_sha256": "11e9e916d7a11b53d5763ec072eca2383997d3b4bb4f2e4b46a771683664a8d9",
+        "record_key": "P-n4-M1-10_r1",
+        "pub_index": 36,
+        "device": "ibm_fez"
+      },
+      "grids": {
+        "gentle": [
+          1.0,
+          1.25,
+          1.5
+        ]
+      },
+      "circuit_set": "fitted"
+    },
+    {
+      "key": "P-n4-M1-10_r2_L1",
+      "kind": "single",
+      "instance": "P-n4-M1-10",
+      "role": "pinned",
+      "items": [
+        2,
+        2,
+        1,
+        2
+      ],
+      "target": 1,
+      "n_items": 4,
+      "M": 1,
+      "solution_bitstrings": [
+        "0100"
+      ],
+      "p_uniform": 0.0625,
+      "iterations": 2,
+      "r_opt": 3,
+      "best_seed": 3,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        17
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-25.json",
+        "manifest_sha256": "cbbac0e22340849465f4358bde523626542fbd08c1968512e7d639cddaae2abf",
+        "circuits_sha256": "11e9e916d7a11b53d5763ec072eca2383997d3b4bb4f2e4b46a771683664a8d9",
+        "record_key": "P-n4-M1-10_r2",
+        "pub_index": 39,
+        "device": "ibm_fez"
+      },
+      "grids": {},
+      "circuit_set": "fitted"
+    },
+    {
+      "key": "P-n3-M2-17_L1",
+      "kind": "single",
+      "instance": "P-n3-M2-17",
+      "role": "pinned",
+      "items": [
+        2,
+        1,
+        2
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 2,
+      "solution_bitstrings": [
+        "011",
+        "110"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 11,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        18
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-25.json",
+        "manifest_sha256": "cbbac0e22340849465f4358bde523626542fbd08c1968512e7d639cddaae2abf",
+        "circuits_sha256": "11e9e916d7a11b53d5763ec072eca2383997d3b4bb4f2e4b46a771683664a8d9",
+        "record_key": "P-n3-M2-17",
+        "pub_index": 3,
+        "device": "ibm_fez"
+      },
+      "grids": {},
+      "circuit_set": "layout_test"
+    },
+    {
+      "key": "P-n2-M1-11_L2",
+      "kind": "single",
+      "instance": "P-n2-M1-11",
+      "role": "pinned",
+      "items": [
+        2,
+        1
+      ],
+      "target": 3,
+      "n_items": 2,
+      "M": 1,
+      "solution_bitstrings": [
+        "11"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 15,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        98,
+        93,
+        92,
+        90,
+        91
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        19
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-28.json",
+        "manifest_sha256": "d3b1c37dc78ae4c765ec62a5ea70e27debb6358cef4d64e7da4eaf4e785b2245",
+        "circuits_sha256": "6d59335256d4190dfa0664e03c0d8f9ad82c891758f256bef099e434aa94b964",
+        "record_key": "P-n2-M1-11",
+        "pub_index": 0,
+        "device": "ibm_fez"
+      },
+      "grids": {},
+      "circuit_set": "out_of_sample"
+    },
+    {
+      "key": "P-n3-M1-17_L2",
+      "kind": "single",
+      "instance": "P-n3-M1-17",
+      "role": "pinned",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 2,
+      "r_opt": 2,
+      "best_seed": 29,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        71,
+        53,
+        50,
+        58,
+        52,
+        51
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        20
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-28.json",
+        "manifest_sha256": "d3b1c37dc78ae4c765ec62a5ea70e27debb6358cef4d64e7da4eaf4e785b2245",
+        "circuits_sha256": "6d59335256d4190dfa0664e03c0d8f9ad82c891758f256bef099e434aa94b964",
+        "record_key": "P-n3-M1-17",
+        "pub_index": 6,
+        "device": "ibm_fez"
+      },
+      "grids": {},
+      "circuit_set": "out_of_sample"
+    },
+    {
+      "key": "P-n3-M1-17_r1_L2",
+      "kind": "single",
+      "instance": "P-n3-M1-17",
+      "role": "pinned",
+      "items": [
+        1,
+        1,
+        1
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 1,
+      "solution_bitstrings": [
+        "111"
+      ],
+      "p_uniform": 0.125,
+      "iterations": 1,
+      "r_opt": 2,
+      "best_seed": 29,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        71,
+        53,
+        50,
+        58,
+        52,
+        51
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        21
+      ],
+      "drift_check": false,
+      "pinned_from": {
+        "manifest": "paper/hardware/manifest_2026-10-28.json",
+        "manifest_sha256": "d3b1c37dc78ae4c765ec62a5ea70e27debb6358cef4d64e7da4eaf4e785b2245",
+        "circuits_sha256": "6d59335256d4190dfa0664e03c0d8f9ad82c891758f256bef099e434aa94b964",
+        "record_key": "P-n3-M1-17_r1",
+        "pub_index": 9,
+        "device": "ibm_fez"
+      },
+      "grids": {},
+      "circuit_set": "out_of_sample"
+    },
+    {
+      "key": "P-n2-M1-11_L1_drift",
+      "kind": "drift",
+      "instance": "P-n2-M1-11",
+      "role": "drift_repeat",
+      "items": [
+        2,
+        1
+      ],
+      "target": 3,
+      "n_items": 2,
+      "M": 1,
+      "solution_bitstrings": [
+        "11"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 5,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        22
+      ],
+      "repeat_of_pub": 0,
+      "drift_check": true
+    },
+    {
+      "key": "P-n3-M2-17_L2_drift",
+      "kind": "drift",
+      "instance": "P-n3-M2-17",
+      "role": "drift_repeat",
+      "items": [
+        2,
+        1,
+        2
+      ],
+      "target": 3,
+      "n_items": 3,
+      "M": 2,
+      "solution_bitstrings": [
+        "011",
+        "110"
+      ],
+      "p_uniform": 0.25,
+      "iterations": 1,
+      "r_opt": 1,
+      "best_seed": 23,
+      "seed_source": "pinned_layout",
+      "initial_layout": [
+        88,
+        92,
+        78,
+        89,
+        91,
+        98,
+        90
+      ],
+      "nominal_scales": [
+        1.0
+      ],
+      "pub_indices": [
+        23
+      ],
+      "repeat_of_pub": 5,
+      "drift_check": true
+    }
+  ],
+  "circuits": [
+    {
+      "pub_index": 0,
+      "key": "P-n2-M1-11_L1",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 71,
+      "two_q_depth": 67,
+      "depth": 240,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 8.568e-06
+    },
+    {
+      "pub_index": 1,
+      "key": "P-n2-M1-11_L1",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.25,
+      "realised_scale": 1.2535211267605635,
+      "realised_scale_exact": [
+        89,
+        71
+      ],
+      "realised_scale_1q": 1.25,
+      "two_q_count": 89,
+      "two_q_depth": 85,
+      "depth": 351,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.0536e-05
+    },
+    {
+      "pub_index": 2,
+      "key": "P-n2-M1-11_L1",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.5,
+      "realised_scale": 1.5070422535211268,
+      "realised_scale_exact": [
+        107,
+        71
+      ],
+      "realised_scale_1q": 1.5,
+      "two_q_count": 107,
+      "two_q_depth": 103,
+      "depth": 447,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.2432e-05
+    },
+    {
+      "pub_index": 3,
+      "key": "P-n2-M1-11_L1",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 2.0,
+      "realised_scale": 2.0140845070422535,
+      "realised_scale_exact": [
+        143,
+        71
+      ],
+      "realised_scale_1q": 2.0,
+      "two_q_count": 143,
+      "two_q_depth": 138,
+      "depth": 619,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.5896e-05
+    },
+    {
+      "pub_index": 4,
+      "key": "P-n2-M1-11_L1",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 2.5,
+      "realised_scale": 2.492957746478873,
+      "realised_scale_exact": [
+        177,
+        71
+      ],
+      "realised_scale_1q": 2.5,
+      "two_q_count": 177,
+      "two_q_depth": 169,
+      "depth": 808,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.9296e-05
+    },
+    {
+      "pub_index": 5,
+      "key": "P-n3-M2-17_L2",
+      "instance": "P-n3-M2-17",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 184,
+      "two_q_depth": 150,
+      "depth": 506,
+      "physical_qubits": [
+        92,
+        91,
+        98,
+        90,
+        78,
+        88,
+        89
+      ],
+      "initial_layout": [
+        88,
+        92,
+        78,
+        89,
+        91,
+        98,
+        90
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.6972e-05
+    },
+    {
+      "pub_index": 6,
+      "key": "P-n3-M1-17_L1",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 212,
+      "two_q_depth": 175,
+      "depth": 607,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.9536e-05
+    },
+    {
+      "pub_index": 7,
+      "key": "P-n3-M1-17_L1",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "pinned",
+      "nominal_scale": 1.25,
+      "realised_scale": 1.2547169811320755,
+      "realised_scale_exact": [
+        133,
+        106
+      ],
+      "realised_scale_1q": 1.2505219206680585,
+      "two_q_count": 266,
+      "two_q_depth": 219,
+      "depth": 879,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 2.4352e-05
+    },
+    {
+      "pub_index": 8,
+      "key": "P-n3-M1-17_L1",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "pinned",
+      "nominal_scale": 1.5,
+      "realised_scale": 1.5,
+      "realised_scale_exact": [
+        3,
+        2
+      ],
+      "realised_scale_1q": 1.501043841336117,
+      "two_q_count": 318,
+      "two_q_depth": 265,
+      "depth": 1158,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 2.9400000000000003e-05
+    },
+    {
+      "pub_index": 9,
+      "key": "P-n3-M1-17_L1",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "pinned",
+      "nominal_scale": 3.0,
+      "realised_scale": 3.0,
+      "realised_scale_exact": [
+        3,
+        1
+      ],
+      "realised_scale_1q": 3.0,
+      "two_q_count": 636,
+      "two_q_depth": 525,
+      "depth": 2803,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 5.5288e-05
+    },
+    {
+      "pub_index": 10,
+      "key": "P-n3-M1-17_L1",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "pinned",
+      "nominal_scale": 5.0,
+      "realised_scale": 5.0,
+      "realised_scale_exact": [
+        5,
+        1
+      ],
+      "realised_scale_1q": 5.0,
+      "two_q_count": 1060,
+      "two_q_depth": 875,
+      "depth": 4999,
+      "physical_qubits": [
+        129,
+        118,
+        109,
+        111,
+        108,
+        110
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 9.104000000000001e-05
+    },
+    {
+      "pub_index": 11,
+      "key": "P-n3-M1-17_r1_L1",
+      "instance": "P-n3-M1-17",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 112,
+      "two_q_depth": 97,
+      "depth": 321,
+      "physical_qubits": [
+        111,
+        110,
+        109,
+        118,
+        129,
+        108
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.1496000000000001e-05
+    },
+    {
+      "pub_index": 12,
+      "key": "P-n3-M1-17_r1_L1",
+      "instance": "P-n3-M1-17",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.25,
+      "realised_scale": 1.25,
+      "realised_scale_exact": [
+        5,
+        4
+      ],
+      "realised_scale_1q": 1.2520325203252032,
+      "two_q_count": 140,
+      "two_q_depth": 121,
+      "depth": 492,
+      "physical_qubits": [
+        111,
+        110,
+        109,
+        118,
+        129,
+        108
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.4184e-05
+    },
+    {
+      "pub_index": 13,
+      "key": "P-n3-M1-17_r1_L1",
+      "instance": "P-n3-M1-17",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.5,
+      "realised_scale": 1.5,
+      "realised_scale_exact": [
+        3,
+        2
+      ],
+      "realised_scale_1q": 1.5040650406504066,
+      "two_q_count": 168,
+      "two_q_depth": 147,
+      "depth": 603,
+      "physical_qubits": [
+        111,
+        110,
+        109,
+        118,
+        129,
+        108
+      ],
+      "initial_layout": [
+        111,
+        108,
+        129,
+        110,
+        118,
+        109
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.6720000000000003e-05
+    },
+    {
+      "pub_index": 14,
+      "key": "P-n4-M1-10_r1_L1",
+      "instance": "P-n4-M1-10",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 233,
+      "two_q_depth": 180,
+      "depth": 596,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        98,
+        90,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.9672e-05
+    },
+    {
+      "pub_index": 15,
+      "key": "P-n4-M1-10_r1_L1",
+      "instance": "P-n4-M1-10",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.25,
+      "realised_scale": 1.2489270386266094,
+      "realised_scale_exact": [
+        291,
+        233
+      ],
+      "realised_scale_1q": 1.2515212981744421,
+      "two_q_count": 291,
+      "two_q_depth": 227,
+      "depth": 917,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        98,
+        90,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 2.5148e-05
+    },
+    {
+      "pub_index": 16,
+      "key": "P-n4-M1-10_r1_L1",
+      "instance": "P-n4-M1-10",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.5,
+      "realised_scale": 1.497854077253219,
+      "realised_scale_exact": [
+        349,
+        233
+      ],
+      "realised_scale_1q": 1.4989858012170385,
+      "two_q_count": 349,
+      "two_q_depth": 269,
+      "depth": 1161,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        98,
+        90,
+        111,
+        91
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 2.9436e-05
+    },
+    {
+      "pub_index": 17,
+      "key": "P-n4-M1-10_r2_L1",
+      "instance": "P-n4-M1-10",
+      "r": 2,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 475,
+      "two_q_depth": 341,
+      "depth": 1149,
+      "physical_qubits": [
+        79,
+        94,
+        92,
+        93,
+        90,
+        111,
+        91,
+        98
+      ],
+      "initial_layout": [
+        79,
+        94,
+        111,
+        90,
+        92,
+        98,
+        93,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 3.6264000000000004e-05
+    },
+    {
+      "pub_index": 18,
+      "key": "P-n3-M2-17_L1",
+      "instance": "P-n3-M2-17",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 194,
+      "two_q_depth": 151,
+      "depth": 502,
+      "physical_qubits": [
+        118,
+        109,
+        110,
+        98,
+        112,
+        113,
+        111
+      ],
+      "initial_layout": [
+        113,
+        109,
+        118,
+        110,
+        112,
+        98,
+        111
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.6780000000000002e-05
+    },
+    {
+      "pub_index": 19,
+      "key": "P-n2-M1-11_L2",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 71,
+      "two_q_depth": 68,
+      "depth": 240,
+      "physical_qubits": [
+        98,
+        91,
+        93,
+        90,
+        92
+      ],
+      "initial_layout": [
+        98,
+        93,
+        92,
+        90,
+        91
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 8.66e-06
+    },
+    {
+      "pub_index": 20,
+      "key": "P-n3-M1-17_L2",
+      "instance": "P-n3-M1-17",
+      "r": 2,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 235,
+      "two_q_depth": 199,
+      "depth": 645,
+      "physical_qubits": [
+        58,
+        51,
+        71,
+        52,
+        53,
+        50
+      ],
+      "initial_layout": [
+        71,
+        53,
+        50,
+        58,
+        52,
+        51
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 2.1624e-05
+    },
+    {
+      "pub_index": 21,
+      "key": "P-n3-M1-17_r1_L2",
+      "instance": "P-n3-M1-17",
+      "r": 1,
+      "role": "pinned",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 126,
+      "two_q_depth": 104,
+      "depth": 341,
+      "physical_qubits": [
+        51,
+        52,
+        53,
+        71,
+        50,
+        58
+      ],
+      "initial_layout": [
+        71,
+        53,
+        50,
+        58,
+        52,
+        51
+      ],
+      "repeat_of_pub": null,
+      "shots": 12288,
+      "duration_s": 1.2164e-05
+    },
+    {
+      "pub_index": 22,
+      "key": "P-n2-M1-11_L1_drift",
+      "instance": "P-n2-M1-11",
+      "r": 1,
+      "role": "drift_repeat",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 71,
+      "two_q_depth": 67,
+      "depth": 240,
+      "physical_qubits": [
+        109,
+        108,
+        111,
+        118,
+        110
+      ],
+      "initial_layout": [
+        118,
+        111,
+        110,
+        108,
+        109
+      ],
+      "repeat_of_pub": 0,
+      "shots": 12288,
+      "duration_s": 8.568e-06
+    },
+    {
+      "pub_index": 23,
+      "key": "P-n3-M2-17_L2_drift",
+      "instance": "P-n3-M2-17",
+      "r": 1,
+      "role": "drift_repeat",
+      "nominal_scale": 1.0,
+      "realised_scale": 1.0,
+      "realised_scale_exact": [
+        1,
+        1
+      ],
+      "realised_scale_1q": 1.0,
+      "two_q_count": 184,
+      "two_q_depth": 150,
+      "depth": 506,
+      "physical_qubits": [
+        92,
+        91,
+        98,
+        90,
+        78,
+        88,
+        89
+      ],
+      "initial_layout": [
+        88,
+        92,
+        78,
+        89,
+        91,
+        98,
+        90
+      ],
+      "repeat_of_pub": 5,
+      "shots": 12288,
+      "duration_s": 1.6972e-05
+    }
+  ],
+  "totals": {
+    "circuits": 24,
+    "shots": 294912,
+    "by_role": {
+      "pinned": 22,
+      "drift_repeat": 2
+    },
+    "records": 12
+  },
+  "estimate": {
+    "formula": "usage_ratio * floor_seconds * safety_factor",
+    "per_shot_time_s": 0.00031001703001354254,
+    "per_shot_time_source": "usage / floor of 2026-10-25, 2026-10-28",
+    "per_circuit_overhead_s": 0.0,
+    "safety_factor": 2.0,
+    "total_shots": 294912,
+    "n_circuits": 24,
+    "estimated_seconds": 182.8554847107077,
+    "estimated_minutes": 3.0475914118451284,
+    "floor_seconds": 80.37585715199998,
+    "floor_model": "sum shots * (ASAP-scheduled duration + default rep_delay), execution only",
+    "rep_delay_s": 0.00025,
+    "longest_circuit_s": 9.104000000000001e-05,
+    "longest_per_shot_s": 0.00034104000000000003,
+    "per_shot_below_longest_circuit": false,
+    "remaining_allowance_seconds": 456.0,
+    "remaining_allowance_source": "--remaining-seconds",
+    "budget_fraction": 0.5,
+    "budget_cap_seconds": 228.0,
+    "fraction_of_remaining": 0.4009988699796222,
+    "within_budget": true,
+    "verify": "Measure per_shot and overhead from job.usage() of a previous small job (paper/hardware/usage.md once one exists), or from https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time (quick rule there: 2 s + 0.00035 s per execution).",
+    "device_limits": {
+      "max_shots": 100000,
+      "max_circuits": 300,
+      "default_rep_delay": 0.00025,
+      "rep_delay_range": [
+        0.0,
+        0.002
+      ],
+      "dt": 4e-09
+    },
+    "usage_rate": {
+      "model": "usage_seconds / floor_seconds of past jobs; the largest is used",
+      "jobs": [
+        {
+          "date": "2026-10-25",
+          "job_id": "dbfeqr7gdj9s73bbgh6g",
+          "usage_seconds": 75.0,
+          "floor_seconds": 65.93391820800001,
+          "ratio": 1.13750254858811
+        },
+        {
+          "date": "2026-10-28",
+          "job_id": "dbgkqq8te5oc738icnfg",
+          "usage_seconds": 51.0,
+          "floor_seconds": 46.03025817600001,
+          "ratio": 1.1079668466120225
+        }
+      ],
+      "ratio": 1.13750254858811
+    }
+  },
+  "service_usage_raw": null,
+  "preflight": {
+    "live_target": {
+      "passed": true,
+      "checks": {
+        "options": "ok",
+        "program_inputs": "ok",
+        "coerce_pubs": "ok",
+        "classical_registers": "ok",
+        "rzz_angles": "ok",
+        "dd_with_dynamic_circuits": "ok",
+        "isa": "ok",
+        "instructions_in_target": "ok",
+        "faulty_qubits": "ok"
+      },
+      "program_inputs": {
+        "options": {
+          "dynamical_decoupling": {
+            "enable": false
+          },
+          "twirling": {
+            "enable_gates": true,
+            "enable_measure": false,
+            "num_randomizations": 32,
+            "shots_per_randomization": 384,
+            "strategy": "active-accum"
+          }
+        },
+        "version": 2,
+        "support_qiskit": true
+      },
+      "n_pubs": 24,
+      "shots": 12288
+    },
+    "snapshot_target": {
+      "passed": true,
+      "checks": {
+        "options": "ok",
+        "program_inputs": "ok",
+        "coerce_pubs": "ok",
+        "classical_registers": "ok",
+        "rzz_angles": "ok",
+        "dd_with_dynamic_circuits": "ok",
+        "isa": "ok",
+        "instructions_in_target": "ok"
+      },
+      "n_pubs": 24,
+      "shots": 12288
+    },
+    "device_limits_problems": [],
+    "passed": true,
+    "not_covered": "plan entitlements and server-side option support (twirling, DD) are only checked when the job arrives"
+  },
+  "verify": {
+    "qpu_time_model": "https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time",
+    "execution_modes": "https://quantum.cloud.ibm.com/docs/en/guides/execution-modes",
+    "twirling_options": "https://quantum.cloud.ibm.com/docs/en/api/qiskit-ibm-runtime/options-twirling-options",
+    "dd_options": "https://quantum.cloud.ibm.com/docs/en/api/qiskit-ibm-runtime/options-dynamical-decoupling-options",
+    "error_suppression": "https://quantum.cloud.ibm.com/docs/en/guides/configure-error-suppression",
+    "max_execution_time": "https://quantum.cloud.ibm.com/docs/en/guides/max-execution-time"
+  },
+  "provenance": {
+    "timestamp_utc": "2026-10-30T04:00:59Z",
+    "git": {
+      "commit": "34a1d964dc080c780f26dab3ed24b313e6f852fa",
+      "short_commit": "34a1d96",
+      "branch": "main",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 27,
+      "untracked_outputs_by_dir": {
+        "paper/data": 23,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 4,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-30T04:00:59Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.16",
+      "implementation": "CPython",
+      "executable": "C:\\Users\\Arturo Arvizu\\.conda\\envs\\dgssp-paper\\python.exe"
+    },
+    "platform": "Windows-10-10.0.26300-SP0",
+    "host": "DESKTOP-893P15V",
+    "user": "Arturo Arvizu",
+    "backend": {
+      "name": "ibm_fez",
+      "num_qubits": 156,
+      "processor_family": "heron",
+      "heavy_hex": true,
+      "calibration_timestamp": "2026-10-29T21:44:40-06:00"
+    }
+  },
+  "design": {
+    "file": "paper/hardware/design_job3.json",
+    "sha256": "ba3a9ceb110f009b7533f40c36bd60bac535aac27a4837b2d662e4e93258f604",
+    "name": "job3",
+    "records": [
+      {
+        "key": "P-n2-M1-11_L1",
+        "source": "P-n2-M1-11:L1=2026-10-25",
+        "grids": {
+          "gentle": [
+            1.0,
+            1.25,
+            1.5
+          ],
+          "rule": [
+            1.0,
+            2.0,
+            2.5
+          ]
+        },
+        "drift": true,
+        "circuit_set": "fitted",
+        "in_job": true
+      },
+      {
+        "key": "P-n3-M1-17_L1",
+        "source": "P-n3-M1-17:L1=2026-10-25",
+        "grids": {
+          "odd": [
+            1.0,
+            3.0,
+            5.0
+          ],
+          "gentle": [
+            1.0,
+            1.25,
+            1.5
+          ]
+        },
+        "drift": false,
+        "circuit_set": "fitted",
+        "in_job": true
+      },
+      {
+        "key": "P-n3-M1-17_r1_L1",
+        "source": "P-n3-M1-17_r1:L1=2026-10-25",
+        "grids": {
+          "gentle": [
+            1.0,
+            1.25,
+            1.5
+          ]
+        },
+        "drift": false,
+        "circuit_set": "fitted",
+        "in_job": true
+      },
+      {
+        "key": "P-n4-M1-10_r1_L1",
+        "source": "P-n4-M1-10_r1:L1=2026-10-25",
+        "grids": {
+          "gentle": [
+            1.0,
+            1.25,
+            1.5
+          ]
+        },
+        "drift": false,
+        "circuit_set": "fitted",
+        "in_job": true
+      },
+      {
+        "key": "P-n4-M1-10_r2_L1",
+        "source": "P-n4-M1-10_r2:L1=2026-10-25",
+        "grids": {},
+        "drift": false,
+        "circuit_set": "fitted",
+        "in_job": true
+      },
+      {
+        "key": "P-n3-M2-17_L1",
+        "source": "P-n3-M2-17:L1=2026-10-25",
+        "grids": {},
+        "drift": false,
+        "circuit_set": "layout_test",
+        "in_job": true
+      },
+      {
+        "key": "P-n3-M2-17_L2",
+        "source": "P-n3-M2-17:L2=2026-10-28",
+        "grids": {},
+        "drift": true,
+        "circuit_set": "layout_test",
+        "in_job": true
+      },
+      {
+        "key": "P-n2-M1-11_L2",
+        "source": "P-n2-M1-11:L2=2026-10-28",
+        "grids": {},
+        "drift": false,
+        "circuit_set": "out_of_sample",
+        "in_job": true
+      },
+      {
+        "key": "P-n3-M1-17_L2",
+        "source": "P-n3-M1-17:L2=2026-10-28",
+        "grids": {},
+        "drift": false,
+        "circuit_set": "out_of_sample",
+        "in_job": true
+      },
+      {
+        "key": "P-n3-M1-17_r1_L2",
+        "source": "P-n3-M1-17_r1:L2=2026-10-28",
+        "grids": {},
+        "drift": false,
+        "circuit_set": "out_of_sample",
+        "in_job": true
+      }
+    ],
+    "alphas": {
+      "all": {
+        "value": 3.1759999999997603,
+        "scale_only": "all",
+        "file": "paper/data/alpha_robustness.json",
+        "path": [
+          "variants",
+          "all",
+          "all",
+          "alpha"
+        ]
+      },
+      "2q": {
+        "value": 4.054999999999664,
+        "scale_only": "2q",
+        "file": "paper/data/alpha_robustness.json",
+        "path": [
+          "variants",
+          "2q",
+          "all",
+          "alpha"
+        ]
+      }
+    },
+    "rule_grids": {
+      "P-n2-M1-11_L1": {
+        "record": "P-n2-M1-11_L1",
+        "planner": "dgssp.mitigation.zne.plan_scales_spacing",
+        "candidates": [
+          1.0,
+          1.25,
+          1.5,
+          1.75,
+          2.0,
+          2.5,
+          3.0,
+          4.0,
+          5.0,
+          7.0
+        ],
+        "k": 3.0,
+        "n_points": 3,
+        "alpha": 3.1759999999997603,
+        "scale_info": {
+          "alpha": 3.1759999999997603,
+          "max_error": 0.5,
+          "n_scaled": 1444,
+          "n_capped": 18
+        },
+        "shots": 12288,
+        "seed_simulator": 20261020,
+        "p_lambda1_simulated": 0.4977213541666667,
+        "p_ideal": 0.9999999999999969,
+        "p_uniform": 0.25,
+        "survival": 0.3302951388888903,
+        "rate": 1.1077686639540918,
+        "grid": [
+          1.0,
+          2.0,
+          2.5
+        ],
+        "step": 1.0,
+        "c_step": 1.1077686639540918,
+        "optimal_step": 1.0756003158428764,
+        "c_optimal_step": 1.1915163248298624,
+        "predicted_se": 0.038520664514002705
+      }
+    },
+    "trimmed": [],
+    "two_q_check": [
+      {
+        "record": "P-n2-M1-11_L1",
+        "source": "paper/hardware/manifest_2026-10-25.json",
+        "source_pub": 0,
+        "two_q": 71,
+        "source_two_q": 71,
+        "physical_qubits": [
+          109,
+          108,
+          111,
+          118,
+          110
+        ],
+        "source_physical_qubits": [
+          109,
+          108,
+          111,
+          118,
+          110
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n3-M2-17_L2",
+        "source": "paper/hardware/manifest_2026-10-28.json",
+        "source_pub": 3,
+        "two_q": 184,
+        "source_two_q": 184,
+        "physical_qubits": [
+          92,
+          91,
+          98,
+          90,
+          78,
+          88,
+          89
+        ],
+        "source_physical_qubits": [
+          92,
+          91,
+          98,
+          90,
+          78,
+          88,
+          89
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n3-M1-17_L1",
+        "source": "paper/hardware/manifest_2026-10-25.json",
+        "source_pub": 15,
+        "two_q": 212,
+        "source_two_q": 212,
+        "physical_qubits": [
+          129,
+          118,
+          109,
+          111,
+          108,
+          110
+        ],
+        "source_physical_qubits": [
+          129,
+          118,
+          109,
+          111,
+          108,
+          110
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n3-M1-17_r1_L1",
+        "source": "paper/hardware/manifest_2026-10-25.json",
+        "source_pub": 30,
+        "two_q": 112,
+        "source_two_q": 112,
+        "physical_qubits": [
+          111,
+          110,
+          109,
+          118,
+          129,
+          108
+        ],
+        "source_physical_qubits": [
+          111,
+          110,
+          109,
+          118,
+          129,
+          108
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n4-M1-10_r1_L1",
+        "source": "paper/hardware/manifest_2026-10-25.json",
+        "source_pub": 36,
+        "two_q": 233,
+        "source_two_q": 233,
+        "physical_qubits": [
+          79,
+          94,
+          92,
+          93,
+          98,
+          90,
+          111,
+          91
+        ],
+        "source_physical_qubits": [
+          79,
+          94,
+          92,
+          93,
+          98,
+          90,
+          111,
+          91
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n4-M1-10_r2_L1",
+        "source": "paper/hardware/manifest_2026-10-25.json",
+        "source_pub": 39,
+        "two_q": 475,
+        "source_two_q": 475,
+        "physical_qubits": [
+          79,
+          94,
+          92,
+          93,
+          90,
+          111,
+          91,
+          98
+        ],
+        "source_physical_qubits": [
+          79,
+          94,
+          92,
+          93,
+          90,
+          111,
+          91,
+          98
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n3-M2-17_L1",
+        "source": "paper/hardware/manifest_2026-10-25.json",
+        "source_pub": 3,
+        "two_q": 194,
+        "source_two_q": 194,
+        "physical_qubits": [
+          118,
+          109,
+          110,
+          98,
+          112,
+          113,
+          111
+        ],
+        "source_physical_qubits": [
+          118,
+          109,
+          110,
+          98,
+          112,
+          113,
+          111
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n2-M1-11_L2",
+        "source": "paper/hardware/manifest_2026-10-28.json",
+        "source_pub": 0,
+        "two_q": 71,
+        "source_two_q": 71,
+        "physical_qubits": [
+          98,
+          91,
+          93,
+          90,
+          92
+        ],
+        "source_physical_qubits": [
+          98,
+          91,
+          93,
+          90,
+          92
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n3-M1-17_L2",
+        "source": "paper/hardware/manifest_2026-10-28.json",
+        "source_pub": 6,
+        "two_q": 235,
+        "source_two_q": 235,
+        "physical_qubits": [
+          58,
+          51,
+          71,
+          52,
+          53,
+          50
+        ],
+        "source_physical_qubits": [
+          58,
+          51,
+          71,
+          52,
+          53,
+          50
+        ],
+        "equal": true
+      },
+      {
+        "record": "P-n3-M1-17_r1_L2",
+        "source": "paper/hardware/manifest_2026-10-28.json",
+        "source_pub": 9,
+        "two_q": 126,
+        "source_two_q": 126,
+        "physical_qubits": [
+          51,
+          52,
+          53,
+          71,
+          50,
+          58
+        ],
+        "source_physical_qubits": [
+          51,
+          52,
+          53,
+          71,
+          50,
+          58
+        ],
+        "equal": true
+      }
+    ],
+    "two_q_equal": true,
+    "report_bounds": "clip",
+    "resolved_rule": "v2"
+  }
+}

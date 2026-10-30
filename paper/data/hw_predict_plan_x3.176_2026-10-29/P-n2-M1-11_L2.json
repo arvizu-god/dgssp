@@ -1,0 +1,181 @@
+{
+  "instance": {
+    "items": [
+      2,
+      1
+    ],
+    "target": 3,
+    "name": "P-n2-M1-11"
+  },
+  "n_items": 2,
+  "n_sum": 3,
+  "iterations": 1,
+  "executor": "noise_model_prediction",
+  "mitigation_mode": "none",
+  "backend": "ibm_fez_x3.176",
+  "shots": 12288,
+  "counts": {
+    "1": {
+      "11": 7500,
+      "10": 1604,
+      "01": 1880,
+      "00": 1304
+    }
+  },
+  "metrics": {
+    "solution_bitstrings": [
+      "11"
+    ],
+    "num_solutions": 1,
+    "p_uniform": 0.25,
+    "solution_probability": 0.6103515625,
+    "mitigated_solution_probability": null,
+    "mitiq_solution_probability": null,
+    "n_qubits": 5,
+    "elapsed_s": null,
+    "solution_probability_ci": [
+      0.601763916015625,
+      0.6182454427083334
+    ],
+    "tv_to_reference": {
+      "point": 0.38964843749999845
+    },
+    "reference_distribution": {
+      "00": 9.302174546296705e-33,
+      "01": 2.2368929928111167e-31,
+      "10": 2.290259542425069e-31,
+      "11": 0.9999999999999969
+    },
+    "hardware": {
+      "date": "2026-10-29",
+      "manifest": "manifest_2026-10-29.json",
+      "manifest_sha256": "8fcfe9bb675656a7869793915b32a0cc2ead1fcc447d2f5e5248758a7e06691e",
+      "circuits_sha256": "7711ad94ec35ad63296d1049873712a288580da847c5a95f92a4884f7601f995",
+      "calibration_file": "paper/hardware/calibration_2026-10-29.json",
+      "source": "prediction",
+      "job_id": "predict-plan_x3.176-2026-10-29",
+      "execution_mode": "local",
+      "record_key": "P-n2-M1-11_L2",
+      "role": "pinned",
+      "r_opt": 1,
+      "pub_indices": [
+        19
+      ],
+      "initial_layout": [
+        98,
+        93,
+        92,
+        90,
+        91
+      ],
+      "sampler_options": {
+        "environment": {
+          "job_tags": [
+            "dgssp",
+            "paper-a",
+            "wp6",
+            "2026-10-29"
+          ]
+        },
+        "max_execution_time": 228,
+        "twirling": {
+          "enable_gates": true,
+          "enable_measure": false,
+          "num_randomizations": 32,
+          "shots_per_randomization": 384,
+          "strategy": "active-accum"
+        },
+        "dynamical_decoupling": {
+          "enable": false
+        }
+      },
+      "ignored_options": [
+        "Options {'dynamical_decoupling': {'enable': False}, 'twirling': {'enable_gates': True, 'enable_measure': False, 'num_randomizations': 32, 'shots_per_randomization': 384, 'strategy': 'active-accum'}} have no effect in local testing mode."
+      ]
+    },
+    "prediction": {
+      "calibration_file": "paper/hardware/calibration_2026-10-29.json",
+      "calibration_sha256": "67cd8c88a78a5c2e0499c300d561487ec663dc8d9ad04699a7bafbf1b9c12ced",
+      "calibration_timestamp": "2026-10-29T21:44:40-06:00",
+      "alpha": 3.1759999999997603,
+      "scale_info": {
+        "alpha": 3.1759999999997603,
+        "max_error": 0.5,
+        "n_scaled": 1444,
+        "n_capped": 18
+      },
+      "seed_simulator": 20261020,
+      "plan_calibration_file": "paper/hardware/calibration_2026-10-29.json"
+    }
+  },
+  "transpiled": {
+    "two_q_count": 71,
+    "depth": 240,
+    "two_q_depth": 68,
+    "physical_qubits": [
+      98,
+      91,
+      93,
+      90,
+      92
+    ],
+    "one_q_physical": null,
+    "two_q_physical": null,
+    "virtual_gate_count": null,
+    "survival": null,
+    "best_seed": 15,
+    "seed_source": "pinned_layout"
+  },
+  "job_id": "predict-plan_x3.176-2026-10-29",
+  "provenance": {
+    "timestamp_utc": "2026-10-30T04:06:36Z",
+    "git": {
+      "commit": "34a1d964dc080c780f26dab3ed24b313e6f852fa",
+      "short_commit": "34a1d96",
+      "branch": "main",
+      "dirty": false,
+      "dirty_files": [],
+      "untracked_output_count": 54,
+      "untracked_outputs_by_dir": {
+        "paper/data": 48,
+        "paper/figures": 0,
+        "paper/instances": 0,
+        "paper/hardware": 6,
+        "paper/tex": 0
+      },
+      "probed_utc": "2026-10-30T04:06:35Z"
+    },
+    "packages": {
+      "qiskit": "2.5.2",
+      "qiskit-ibm-runtime": "0.49.0",
+      "qiskit-aer": "0.17.2",
+      "mitiq": "1.1.0",
+      "numpy": "2.2.6",
+      "scipy": "1.17.1",
+      "matplotlib": "3.11.1"
+    },
+    "python": {
+      "version": "3.11.16",
+      "implementation": "CPython",
+      "executable": "C:\\Users\\Arturo Arvizu\\.conda\\envs\\dgssp-paper\\python.exe"
+    },
+    "platform": "Windows-10-10.0.26300-SP0",
+    "host": "DESKTOP-893P15V",
+    "user": "Arturo Arvizu",
+    "backend": {
+      "name": "ibm_fez_x3.176",
+      "num_qubits": 156,
+      "processor_family": null,
+      "heavy_hex": true,
+      "calibration_timestamp": "2026-10-29T21:44:40-06:00"
+    }
+  },
+  "schema_version": 2,
+  "calibration_timestamp": "2026-10-29T21:44:40-06:00",
+  "zne_fit": null,
+  "pathology": null,
+  "mitiq": null,
+  "pointwise": null,
+  "renorm": null,
+  "fold_seed": null
+}
