@@ -47,6 +47,6 @@ budget lines by how they start.
 
 ## After `--submit` (not checked by the script)
 
-- Job id copied from the terminal into my notes: ____
-- `--collect --jobs paper/hardware/jobs_<date>.json` run once the job is DONE;
-  `paper/hardware/usage.md` compared with the estimate.
+- Job id copied from the terminal into my notes: dbi285dep8hs73an3gpg
+- `--collect --jobs paper/hardware/jobs_2026-10-29.json` run once the job is DONE;
+  `paper/hardware/usage.md` compared with the estimate: 87 s vs 182.9 s (0.48).
