@@ -43,7 +43,7 @@ budget lines by how they start.
 - [x] Token in env: `$env:QISKIT_IBM_TOKEN` set in this PowerShell window only, not saved in any file
 - [x] Job log path writable: `runs/jobs.jsonl`
 - [x] account_facts.md filled (Status: filled 2026-10-25), and its primary device is the manifest's backend
-- [ ] Pre-registration pushed: commit <hash>, sha256 <sha256>, pushed at ____ UTC
+- [x] Pre-registration pushed: commit 198346d0cb884c8d104f4e85b9b227c6b29853d2, sha256 cee4f23f9999e8143bbe7d04c15ffc89f199cca8e3ac6d3adc10fd2934880816, pushed at 04:50 UTC
 
 ## After `--submit` (not checked by the script)
 
