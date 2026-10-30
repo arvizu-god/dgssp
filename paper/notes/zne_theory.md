@@ -418,7 +418,32 @@ every record,** so it sits inside the Liu–Cai framework. Max |Σ − 1|:
 The data-dependent per-string rates make the map nonlinear, and the cap makes
 it unbounded.
 
-### 7.8 Figure
+### 7.8 Prospective test on hardware (Q3, Q4, Q5)
+
+Pre-registered before job 3 (`paper/hardware/preregistration_2026-10-29.json`), scored
+in `paper/data/scorecard_2026-10-29.json`; rows in `paper/data/hw_crossjob.json`
+(`error_formula`).
+
+- **Q3, the grid rule's premise: confirmed.** On one circuit, in one job, on the same
+  counts, the odd grid gave "identified, not resolved" and the gentle grid "resolved".
+- **Q4a, the formula: held.** SE_boot / SE_formula at the observed points on the three
+  eligible fits: 1.023, 1.009, 1.042, inside [0.75, 1.33]. With the four resolved fits
+  of jobs 1–2 (0.971–1.018, post hoc) that makes 7 of 7 inside the window.
+  This tests §2's formula given the observed points, not a forecast of them.
+- **Q4b, the forecast: declared untested, and it ran high.** SE_boot / SE_pred on the
+  same fits: 0.697, 0.646, 0.788. The predicted signal was too low (§9 of
+  `hw_results.md`), and SE_pred moves with it. Do not write "the formula predicted the
+  hardware error" without saying which of the two is meant.
+- **Q4c, the rule's gain: held.** The gentle grid's error was 1.875 times the rule
+  grid's, against 1.739 predicted. On the same counts, the rule grid nearly halved the
+  error and both fits agree (0.940, 0.934).
+- **Q5: 4 of 6 statuses,** against 6.0 expected. P(status) carries shot noise only; the
+  one consequential miss is P-n4-M1-10_r1, a circuit that ran below its prediction.
+- **Error size is not bias.** The rule grid's interval [0.895, 0.975] excludes the ideal
+  1.000: a smaller SE makes a real bias visible. The exponential is the model, not a
+  guarantee (§1).
+
+### 7.9 Figure
 
 `paper/figures/fig_zne_grid_theory.{pdf,png}`, drawn from
 `zne_theory.json.figure` and `optimal_step.hardware`.

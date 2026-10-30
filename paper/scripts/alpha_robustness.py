@@ -84,6 +84,10 @@ SCHEMA = "dgssp/paper/alpha-robustness/1"
 #: Job of record (odd grid; alpha fitted here) and job 2 (gentle grid).
 JOB1, JOB2 = "2026-10-25", "2026-10-28"
 
+#: Job 3 (pre-registered): only drawn in the figure, beside jobs 1-2.  Its alpha_r
+#: come from its scorecard; the fits and the trend stay those of jobs 1-2.
+JOB3 = "2026-10-29"
+
 #: The alpha caches, both on each job's execution-time calibration.  Job 2's is
 #: labelled apart: a fit.json in hw_alpha_exec_<date> would become that job's
 #: (in-sample) model in hw_aggregate.py, replacing the out-of-sample prediction.
@@ -793,16 +797,37 @@ def layered_block(variants: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def make_figure(payload: Mapping[str, Any], directory: Path = FIGURES_DIR) -> list[Path]:
-    """``fig_alpha_depth``: (a) alpha_r and (b) the exponent against the 2Q count."""
+def day3_rows() -> list[dict[str, Any]]:
+    """Job 3's per-record alpha_r with their 2Q counts; empty before it is scored."""
+    card = DATA_DIR / f"scorecard_{JOB3}.json"
+    if not card.exists():
+        return []
+    manifest = _load_json(HARDWARE_DIR / f"manifest_{JOB3}.json")
+    two_q = {c["key"]: c["two_q_count"] for c in manifest["circuits"]
+             if float(c["nominal_scale"]) == 1.0}
+    return [{**row, "two_q": two_q[row["key"]]} for row in _load_json(card)["alpha_r_day3"]]
+
+
+def make_figure(
+    payload: Mapping[str, Any],
+    directory: Path = FIGURES_DIR,
+    later_rows: Sequence[Mapping[str, Any]] = (),
+) -> list[Path]:
+    """
+    ``fig_alpha_depth``: (a) alpha_r and (b) the exponent against the 2Q count.
+
+    ``later_rows`` (:func:`day3_rows`) are drawn in panel (a) only; the band and
+    the trend stay those of jobs 1-2.
+    """
     from plotting import FULL_WIDTH_IN, OKABE_ITO, figure, save_figure
 
     depth = payload["depth"]
-    rows = depth["rows"]
+    rows = [*depth["rows"], *later_rows]
     band = depth["alpha_hat"]
     fig, (ax_a, ax_b) = figure(width=FULL_WIDTH_IN, aspect=0.42, ncols=2)
     style = {JOB1: ("o", OKABE_ITO["blue"], "job 1 (odd grid)"),
-             JOB2: ("s", OKABE_ITO["vermillion"], "job 2 (gentle grid)")}
+             JOB2: ("s", OKABE_ITO["vermillion"], "job 2 (gentle grid)"),
+             JOB3: ("D", OKABE_ITO["bluish_green"], "job 3 (pre-registered)")}
 
     for ax, value, ci_of in ((ax_a, "alpha_r", "alpha_r_ci_scaled"), (ax_b, "exponent", None)):
         ax.axhspan(band["ci_scaled"][0], band["ci_scaled"][1], color=OKABE_ITO["grey"],
@@ -813,7 +838,7 @@ def make_figure(payload: Mapping[str, Any], directory: Path = FIGURES_DIR) -> li
         for job, (marker, colour, label) in style.items():
             for in_trend in (True, False):
                 pts = [r for r in rows if r["job"] == job and r["in_trend"] == in_trend
-                       and r[value] is not None]
+                       and r.get(value) is not None]
                 if not pts:
                     continue
                 x = np.array([r["two_q"] for r in pts], dtype=float)
@@ -839,7 +864,7 @@ def make_figure(payload: Mapping[str, Any], directory: Path = FIGURES_DIR) -> li
     for ax, value, top in ((ax_a, "alpha_r", 6.5), (ax_b, "exponent", 6.0)):
         # Points above the axis (alpha_r at the grid edge): an arrow on the top edge.
         for job, (_, colour, _) in style.items():
-            off = [r["two_q"] for r in rows if r["job"] == job and r[value] is not None
+            off = [r["two_q"] for r in rows if r["job"] == job and r.get(value) is not None
                    and r[value] > top]
             if off:
                 ax.plot(off, [top - 0.12] * len(off), "^", color=colour, mfc="none", ms=5,
@@ -850,7 +875,7 @@ def make_figure(payload: Mapping[str, Any], directory: Path = FIGURES_DIR) -> li
     ax_b.set_ylabel(r"exponent $\ln(\mathrm{kept}) / \ln S$")
     ax_a.set_title("(a)", loc="left")
     ax_b.set_title("(b)", loc="left")
-    ax_a.legend(loc="lower left", fontsize=6.0)
+    ax_b.legend(*ax_a.get_legend_handles_labels(), loc="upper left", fontsize=6.0, ncol=2)
     return save_figure(fig, FIGURE, directory=directory)
 
 
@@ -960,7 +985,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = build()
         written = save_record(args.out, payload)
         print(f"wrote {rel(written)}")
-    for path in make_figure(payload, args.figures_dir):
+    for path in make_figure(payload, args.figures_dir, later_rows=day3_rows()):
         print(f"wrote {rel(path)}")
     print_summary(payload)
     return 0

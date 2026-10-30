@@ -1,6 +1,6 @@
 # Hardware results: analysis and text (WP7)
 
-What the paper says about the two ibm_fez jobs, with every number traced to a file.
+What the paper says about the three ibm_fez jobs, with every number traced to a file. Job 3, the pre-registered one, is §9; read it before quoting §1–§5.
 
 - **Job of record:** `dbfeqr7gdj9s73bbgh6g`, ran 2026-10-26 06:05–06:14 UTC (folder label `2026-10-25` is the plan date), odd grid λ ∈ {1, 3, 5}, 47 PUBs × 4096 shots.
 - **Second job:** `dbgkqq8te5oc738icnfg`, ran 2026-10-28 01:18–01:19 UTC (folder label `2026-10-28` is the plan date), gentle grid λ ∈ {1, 1.25, 1.5}, 14 PUBs × 12 288 shots.
@@ -178,6 +178,8 @@ The statement for C3:
 
 ## 4. P-n3-M2-17 at random on 2026-10-28
 
+*Job 3 answered "bad layout or bad day" for this circuit: §9.1, Q7. The text below is what was known before it.*
+
 **What can be said:**
 
 - **On day 1 it behaved as the α̂ model says.** It kept 0.138 of its signal at λ = 1; the model at α̂ gives 0.146.
@@ -203,6 +205,8 @@ Text (as drafted in the status note, still accurate):
 Add: "Its distribution is near uniform but not exactly, and a repeat at the end of the job reproduced it, so the failure lasted the whole job."
 
 ## 5. The remaining ~465 s
+
+*Done: this became job 3 (§9), with a wider design than the spec below.*
 
 **Recommendation: use about 60 s of it, in one job, after arXiv v1 is submitted and before the window ends (≈ 2026-11-21).** v1 does not depend on it: §4's wording stands either way. The budget is lost at the window's end, so the cost is a few hours of plan / dry run / checklist, not the QPU time.
 
@@ -349,6 +353,85 @@ Proposed text:
 ---
 
 Fig S3: decided against (§1). Tables S2 and 3–4 unchanged; job 2's Table (`hw_table_results_2026-10-28.tex`) now has its model column, from the execution calibration (fetched 2026-10-27; identical to the plan's, so the values did not change).
+
+## 9. Job 3 (pre-registered)
+
+Job `dbi285dep8hs73an3gpg`, ran 2026-10-30 06:18–06:22 UTC (folder label `2026-10-29`), 24 PUBs × 12 288 shots, 87 s charged. Pre-registration pushed in commit `198346d` before submission; its sha256 at scoring equals the one recorded at submission. The analysis code is the code frozen in step 6a; the scorecard's deviations list is empty.
+
+The verdicts below are `paper/data/scorecard_2026-10-29.{json,md}`, written by `score_preregistration.py`. Cross-job numbers are `paper/data/hw_crossjob.json`, written by `hw_crossjob.py`.
+
+### 9.1 Scorecard
+
+| Q | Verdict | Numbers |
+|---|---|---|
+| Q1, fitted circuits | not held | missed 1 of 5, RMS 0.046, largest 0.085 |
+| Q1, out of sample | not held | missed 3 of 3, RMS 0.212, largest 0.350 |
+| Q2, out of sample (primary) | indistinguishable | RMS all 0.212 vs CZ-only 0.214 |
+| Q2, fitted circuits | all errors better | RMS all 0.046 vs CZ-only 0.060 |
+| Q3 | confirmed | same circuit, job and shots: odd "identified, not resolved", gentle "resolved" |
+| Q4a | held | SE_boot / SE_formula at the observed points: 1.023, 1.009, 1.042 |
+| Q4c | held | gentle / rule SE 1.875 against 1.739 predicted |
+| Q5 (reported) | 4 of 6 | expected 6.0 |
+| Q6 | not reproducible | χ²/dof 8.04 after shifts −0.589 (day 1) and −0.572 (day 2); between circuits 30.29 |
+| Q7 | L2 random, L1 fine | L1 0.351, L2 0.253, P_u 0.25 |
+| Q8 | does not reach | P-n4-M1-10_r1 "identified, not resolved", λ = 1 value 0.075 |
+| Q9 (reported) | not reproduced | residual day 1 +0.022 (z +3.5), day 3 −0.008 (z −3.8) |
+
+Q7's pre-registered sentence: "a persistent defect of the day-2 layout that the calibration does not show".
+
+The two Q5 misses: P-n3-M1-17_L1 on the odd grid (predicted "not identifiable", observed "identified, not resolved"; both count for Q3) and P-n4-M1-10_r1 (Q8). The predicted P(status) = 1.00 covers shot noise only, not an error in the model's signal.
+
+### 9.2 Numbers
+
+Execution calibration: the stamp moved from 21:44 to 23:56 local, with **0** calibration entries changed on the job's qubits. The secondary predictions on it are count-for-count equal to the pre-registered ones, so no miss below comes from a recalibration.
+
+Drift inside the job: P-n2-M1-11_L1 z = −1.76, P-n3-M2-17_L2 z = +0.07.
+
+Same-job grid fits (`paper/tex/hw_table_grids_job3.tex`, `paper/figures/fig_hw_grid_samejob`; reported values clipped, SE_boot unclipped):
+
+| Record | Grid | Status | Reported [interval] | Ideal | SE_boot |
+|---|---|---|---|---|---|
+| P-n2-M1-11_L1 | gentle | resolved | 0.940 [0.871, 1.000] | 1.000 | 0.038 |
+| P-n2-M1-11_L1 | rule | resolved | 0.934 [0.895, 0.975] | 1.000 | 0.020 |
+| P-n3-M1-17_L1 | odd | identified, not resolved | 0.245 (λ = 1) | 0.945 | 0.046 |
+| P-n3-M1-17_L1 | gentle | resolved | 0.659 [0.521, 0.839] | 0.945 | 0.081 |
+| P-n3-M1-17_r1_L1 | gentle | resolved | 0.692 [0.590, 0.823] | 0.781 | 0.060 |
+| P-n4-M1-10_r1_L1 | gentle | identified, not resolved | 0.075 (λ = 1) | 0.473 | 4.578 |
+
+**"Resolved" is not "correct".** Two of the four resolved intervals exclude the ideal value (P-n2 rule, P-n3 gentle). On jobs 1–2 all four resolved intervals contained it.
+
+λ = 1 RMS against the prediction made before each job (all errors, then CZ-only; "without" leaves out P-n3-M2-17):
+
+| Circuits | All | All, without | CZ-only | CZ-only, without |
+|---|---|---|---|---|
+| Job 2 | 0.058 | 0.027 | 0.060 | 0.014 |
+| Job 3, day-2 circuits | 0.189 | 0.212 | 0.190 | 0.214 |
+| Job 3, day-1 circuits | 0.042 | 0.046 | 0.056 | 0.060 |
+
+P-n3-M2-17 by day and layout: day 1 L1 0.353, day 2 L2 0.247, day 3 L1 0.351, day 3 L2 0.253.
+
+Layer fidelity (reported, not tested): EPLG 0.00513, EPLG / median CZ 2.11 on day 3; 0.00613 and 2.35 on day 1; 0.00555 and 2.19 on day 2.
+
+QPU: 87 s against an estimate of 182.9 s; 220 s over all jobs and the probe.
+
+### 9.3 Post hoc: not verdicts
+
+Everything in this subsection was chosen after seeing the job. It is a hypothesis, and it changes no verdict above.
+
+- **Every circuit below its prediction uses the same qubits.** Exactly four of the ten records came out below prediction: P-n2-M1-11_L2 (−0.350), P-n3-M2-17_L2, P-n4-M1-10_r1_L1 and P-n4-M1-10_r2_L1. Those four are the only records on qubits 90, 91 and 92; they share couplers 90-91, 91-92 and 91-98. The six others were all above prediction.
+- **Qubit 91 is the common end of those couplers,** but qubits 90 and 92 are not ruled out. The calibration does not single them out: CZ 0.0022, 0.0019 and 0.0028 against a device median of 0.0024.
+- **It changes over time.** P-n2-M1-11_L2 is the identical circuit that scored 0.646 on day 2 (deviation +0.007), when P-n3-M2-17_L2 was already at random. On day 3 its outcomes are nearly flat: 0.260 on the solution, the rest 0.241–0.250.
+- **Without those records,** Q6's χ²/dof is 1.36 instead of 8.04, with the between-circuit value still 31.39: read post hoc, that would be "reproducible per circuit". Q1 is still missed out of sample (RMS 0.079, both records above 0.05). Q2 out of sample becomes 0.079 (all) vs 0.060 (CZ-only). Q8 cannot be rescued this way, because the n = 4 circuits are the ones on those qubits.
+- **Healthy circuits ran better than predicted,** and α_r fell by about 0.6 on them. The day-3 calibration overstated the noise on those circuits. α is not a fixed multiplier from day to day.
+
+### 9.4 What this changes in §1–§6
+
+- **§1.** The out-of-sample result on job 2 stands as a statement about job 2. α̂ as a predictor across days does not: the pre-registered test was not held. §1 must not be quoted without §9.1.
+- **§2.** Strengthened: Q3 shows the grid alone decides, on one circuit, in one job. Weakened: a resolved interval can still exclude the ideal value.
+- **§3.** Q8: on this day and these qubits the gentle grid did not reach n = 4. §5's reading "the limit depends on more than the 2Q count" is available, but the qubit pattern in §9.3 is a competing explanation.
+- **§4.** Layout or day is answered by Q7 for this circuit. The new fact is that the failure spread to a circuit that was fine on day 2.
+- **§5.** Done: this is that job.
+- **§6.** Its rows are about jobs 1–2 and were not recomputed.
 
 ## Corrections log (2026-10-28)
 

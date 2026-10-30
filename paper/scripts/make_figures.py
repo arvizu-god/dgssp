@@ -51,6 +51,10 @@ provenance is broken.  Run ``aggregate.py`` first; this script reads its CSVs,
     simulation as a cloud, the device's own noise model, the same model with
     every error scaled by the fitted alpha, and the hardware.
 
+``fig_hw_grid_samejob``
+    Job 3's named grids fitted on the same counts: the odd and the gentle grid
+    on one circuit, and the gentle and the rule grid on another.
+
 ``fig_hw_folding``
     Why the odd grid fails on hardware: ``P(solution)`` against ``lambda`` with
     the fitted exponential, for one record of each estimator status.
@@ -141,6 +145,13 @@ ZNE_AXIS_MAX = 1.25
 
 #: Half-width of a 95 % normal interval, for the per-scale hardware points.
 Z95 = 1.959963984540054
+
+#: The pre-registered job: its hardware joins ``fig_hw_signal``, its named grids
+#: are ``fig_hw_grid_samejob``.  Both are optional inputs.
+JOB3_DATE = "2026-10-29"
+
+#: ``fig_hw_grid_samejob``: (record, grids on its panel).
+SAMEJOB_PANELS = (("P-n3-M1-17_L1", ("odd", "gentle")), ("P-n2-M1-11_L1", ("gentle", "rule")))
 
 
 # ---------------------------------------------------------------------------
@@ -979,7 +990,11 @@ def fig_hw_example(summary: dict[str, Any], out: Path, key: str = EXAMPLE_RECORD
 
 
 def fig_hw_signal(
-    summary: dict[str, Any], sim_rows: Sequence[dict[str, str]], out: Path, grid: str
+    summary: dict[str, Any],
+    sim_rows: Sequence[dict[str, str]],
+    out: Path,
+    grid: str,
+    later: dict[str, Any] | None = None,
 ) -> list[Path]:
     """
     Signal kept at ``lambda = 1`` against two-qubit gate count.
@@ -995,6 +1010,9 @@ def fig_hw_signal(
         Figures directory.
     grid:
         Which grid's rows to take the WP5 instances from.
+    later:
+        ``hw_summary_<date>.json`` of the pre-registered job: its hardware, same
+        circuits on another day, joins the plot.
 
     Returns
     -------
@@ -1062,6 +1080,13 @@ def fig_hw_signal(
         ):
             ax.plot([r["two_q_count"]] * 2, [r["kept_model_exec"], r["kept_hardware"]],
                     color=OKABE_ITO["grey"], linewidth=0.5, zorder=1)
+    if later is not None:
+        points = [(r["two_q_count"], r["kept_hardware"]) for r in _with_signal(later["records"])
+                  if isinstance(r.get("kept_hardware"), (int, float))]
+        hardware = style_for("hardware")
+        ax.plot([p[0] for p in points], [p[1] for p in points], linestyle="none", marker="D",
+                markersize=5, color=hardware.color, markerfacecolor="none",
+                zorder=hardware.zorder, label="Hardware, job 3 (pre-registered)")
     ax.axhline(0.0, color=OKABE_ITO["grey"], linestyle=":", linewidth=0.8, zorder=1)
     ax.set_xscale("log")
     ax.set_ylim(-0.15, 1.05)
@@ -1236,6 +1261,67 @@ def fig_hw_zne(summary: dict[str, Any], out: Path) -> list[Path]:
     return save_figure(fig, "fig_hw_zne", directory=out)
 
 
+def fig_hw_grid_samejob(data_dir: Path, out: Path) -> list[Path]:
+    """
+    Named grids on the same counts: ``P(solution)`` against ``lambda``, one panel per record.
+
+    Each grid's fitted exponential is solid when its status is "resolved" and
+    dashed when it is not reported; a resolved fit's reported value and interval
+    stand at ``lambda = 0`` beside the ideal.
+
+    Returns
+    -------
+    list[Path]
+        Files written; empty without ``hw_grids_<date>.json``.
+    """
+    path = data_dir / f"hw_grids_{JOB3_DATE}.json"
+    if not path.exists():
+        return []
+    rows = json.loads(path.read_text(encoding="utf-8"))["rows"]
+    fig, axes = figure(width=FULL_WIDTH_IN, aspect=0.42, ncols=len(SAMEJOB_PANELS), squeeze=False)
+    colours = {"odd": OKABE_ITO["orange"], "gentle": OKABE_ITO["blue"],
+               "rule": OKABE_ITO["vermillion"]}
+    hw = style_for("hardware")
+    for ax, (key, names) in zip(axes.ravel(), SAMEJOB_PANELS, strict=True):
+        fits = {r["grid_name"]: r for r in rows if r["key"] == key}
+        points = {x: (y, n) for name in names for x, y, n in zip(
+            fits[name]["realised"], fits[name]["observed"], fits[name]["shots"], strict=True)}
+        xs = np.array(sorted(points))
+        ys = np.array([points[x][0] for x in xs])
+        sigma = np.sqrt(ys * (1.0 - ys) / np.array([points[x][1] for x in xs]))
+        ax.errorbar(xs, ys, yerr=Z95 * sigma, capsize=2, elinewidth=0.8, label="hardware",
+                    **hw.line_kwargs(linestyle="none", markersize=5, markerfacecolor=hw.color))
+        first = fits[names[0]]
+        ax.axhline(first["p_uniform"], color=OKABE_ITO["grey"], linestyle=":", linewidth=0.8,
+                   zorder=1, label="$P_\\mathrm{unif}$")
+        ideal = style_for("ideal")
+        ax.plot([0.0], [first["p_ideal"]], linestyle="none", marker="*", markersize=9,
+                color=ideal.color, zorder=ideal.zorder, label="ideal")
+        for offset, name in zip((-0.04, 0.04), names, strict=True):
+            fit = fits[name]
+            resolved = fit["status"] == "resolved"
+            grid_text = ", ".join(f"{g:g}" for g in fit["grid"])
+            if fit.get("value") is not None and fit.get("rate") is not None:
+                lam = np.linspace(0.0, max(xs), 200)
+                drop = (fit["value"] - fit["p_uniform"]) * np.exp(-fit["rate"] * lam)
+                ax.plot(lam, fit["p_uniform"] + drop, color=colours[name], linewidth=1.0,
+                        linestyle="-" if resolved else "--", zorder=2,
+                        label=f"{name} [{grid_text}]: {fit['status']}")
+            if resolved:
+                value = fit["reported_value"]
+                ax.errorbar([offset], [value],
+                            yerr=[[value - fit["reported_lo"]], [fit["reported_hi"] - value]],
+                            color=colours[name], marker="o", markersize=4, capsize=2,
+                            elinewidth=0.8, linestyle="none", zorder=3)
+        ax.set_title(key, fontsize="small")
+        ax.set_xlabel("noise scale $\\lambda$")
+        ax.set_xlim(-0.2, max(xs) + 0.2)
+        ax.set_ylim(0.0, 1.05)
+        ax.legend(fontsize="x-small", loc="upper right")
+    axes.ravel()[0].set_ylabel("$P(\\mathrm{solution})$")
+    return save_figure(fig, "fig_hw_grid_samejob", directory=out)
+
+
 def build_hw(data_dir: Path, figures_dir: Path, grid: str) -> list[Path]:
     """
     Build the hardware figures.
@@ -1253,10 +1339,13 @@ def build_hw(data_dir: Path, figures_dir: Path, grid: str) -> list[Path]:
     records = summary["records"]
     written: list[Path] = []
     written += fig_hw_example(summary, figures_dir)
+    later_path = data_dir / f"hw_summary_{JOB3_DATE}.json"
+    later = json.loads(later_path.read_text(encoding="utf-8")) if later_path.exists() else None
     written += fig_hw_signal(summary, read_csv(data_dir / "sim_per_instance.csv"),
-                             figures_dir, grid)
+                             figures_dir, grid, later=later)
     written += fig_hw_folding(summary, figures_dir)
     written += fig_hw_zne(summary, figures_dir)
+    written += fig_hw_grid_samejob(data_dir, figures_dir)
     written += fig_sim_sweep(load_sweeps(data_dir), figures_dir, hardware=records,
                              name="fig_hw_sweep")
     cells = read_csv(data_dir / "sim_cells.csv")

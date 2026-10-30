@@ -5,8 +5,9 @@ Recompute every quantitative claim of the WP7 review from the committed data,
 and compare it with what the notes now say.
 
 The claims are the ones ``paper/notes/hw_review_wp7.md`` lists in §1 (rows
-1-10) and §2 (items A-K and F2), plus the n = 4 wording of
-``status_after_wp6.md``.  For each one this script
+1-10) and §2 (items A-K and F2), the n = 4 wording of ``status_after_wp6.md``,
+and every number job 3 adds to the notes (``J3.*``, from its scorecard and
+``hw_crossjob.json``).  For each one this script
 
 1. recomputes the value from the data files (nothing is simulated, fitted or
    sent anywhere): ``paper/data/hw_summary.json`` (job of record),
@@ -64,6 +65,10 @@ SCHEMA = "dgssp/paper/claims-check/1"
 
 #: The second hardware job (gentle grid), by its folder date.
 SECOND_JOB = "2026-10-28"
+
+#: The pre-registered third job, by its folder date and id.
+THIRD_JOB = "2026-10-29"
+THIRD_JOB_ID = "dbi285dep8hs73an3gpg"
 
 #: The commit that added the second job's data, whose time the notes quote.
 DATA_COMMIT = "09b9c46"
@@ -163,6 +168,21 @@ class Facts:
     def repeat_of(self, n: int) -> dict[str, str]:
         """``{drift key: the record it repeats}``."""
         return {d["key"]: d["repeat_of"] for d in self.job(n)["drift"]}
+
+    @cached_property
+    def card(self) -> Mapping[str, Any]:
+        """The third job's scorecard."""
+        return self._json(self.data_dir / f"scorecard_{THIRD_JOB}.json")
+
+    @cached_property
+    def cross(self) -> Mapping[str, Any]:
+        """What the three jobs say together (``hw_crossjob.py``)."""
+        return self._json(self.data_dir / "hw_crossjob.json")
+
+    @cached_property
+    def job3(self) -> Mapping[str, Any]:
+        """The third job's summary."""
+        return self._json(self.data_dir / f"hw_summary_{THIRD_JOB}.json")
 
     @cached_property
     def sim_rows(self) -> list[dict[str, Any]]:
@@ -387,6 +407,8 @@ METRICS = "src/dgssp/metrics.py"
 ZNE = "src/dgssp/mitigation/zne.py"
 FAMILY = "paper/notes/instance_family.md"
 RESOURCES = "paper/notes/resource_model.md"
+ALPHA = "paper/notes/alpha_robustness.md"
+THEORY = "paper/notes/zne_theory.md"
 
 
 @dataclass(frozen=True)
@@ -415,6 +437,184 @@ def _a(label: str, rec: Mapping[str, Any]) -> Claim:
 def _h(key: str, source: str) -> Claim:
     return Claim(f"H.{key}", HW, "§1", rf"\| {re.escape(key)} \| \d+ \| ({NUM}) \|",
                  lambda f: [signed(alpha_hat_deviation(f, key))], source)
+
+
+def _grid_fit(facts: Facts, key: str, grid: str) -> Mapping[str, Any]:
+    """One named grid's fit in the job-3 scorecard."""
+    return next(r for r in facts.card["grid_fits"]
+                if r["key"] == key and r["grid_name"] == grid)
+
+
+def _q(facts: Facts, qid: str) -> Mapping[str, Any]:
+    return facts.card["questions"][qid]
+
+
+def _q1(facts: Facts, name: str) -> list[str]:
+    block = _q(facts, "Q1")["sets"][name]
+    return [str(block["n_out"]), str(block["n"]), fmt(block["rms"]), fmt(block["max_abs"])]
+
+
+def _q2(facts: Facts, name: str) -> list[str]:
+    block = _q(facts, "Q2")["sets"][name]["rms"]
+    return [fmt(block["all"]), fmt(block["2q"])]
+
+
+def _q4a(facts: Facts) -> list[str]:
+    return [fmt(r["ratio_q4a"]) for r in _q(facts, "Q4")["Q4a"]["rows"] if r["eligible"]]
+
+
+def _q4_forecast(facts: Facts) -> list[str]:
+    return [fmt(r["ratio_q4b"]) for r in _q(facts, "Q4")["Q4a"]["rows"] if r["eligible"]]
+
+
+def _resolved_row(facts: Facts, key: str, grid: str) -> list[str]:
+    fit = _grid_fit(facts, key, grid)
+    return [fmt(fit["reported_value"]), fmt(fit["reported_lo"]), fmt(fit["reported_hi"]),
+            fmt(fit["se_boot"])]
+
+
+def _oos_row(facts: Facts, name: str) -> list[str]:
+    block = facts.cross["out_of_sample"]
+    return [fmt(block[v][name][k]) for v in ("all", "2q")
+            for k in ("rms", "rms_without_layout_test")]
+
+
+def _layout_values(facts: Facts) -> list[str]:
+    return [fmt(r["observed"]) for r in facts.cross["layout_test"]["rows"]]
+
+
+def _layer(facts: Facts) -> list[str]:
+    block = facts.card["reported_untested"]["layer_fidelity"]
+    one, two = block["days_1_2"][JOB_OF_RECORD], block["days_1_2"][SECOND_JOB]
+    three = block["day_3"]
+    return [fmt(three["eplg"], 5), fmt(three["ratio_eplg_to_device_cz"], 2),
+            fmt(one["eplg"], 5), fmt(one["ratio_eplg_to_device_cz"], 2),
+            fmt(two["eplg"], 5), fmt(two["ratio_eplg_to_device_cz"], 2)]
+
+
+def _resolved_claim(key: str, grid: str, source: str) -> Claim:
+    return Claim(
+        f"J3.fit.{key}.{grid}", HW, "§9",
+        rf"\| {re.escape(key)} \| {grid} \| resolved \| ({NUM}) \[({NUM}), ({NUM})\] "
+        rf"\| {NUM} \| ({NUM}) \|",
+        lambda f: _resolved_row(f, key, grid), source,
+    )
+
+
+def job3_claims() -> list[Claim]:
+    """Every number job 3 adds to the notes, from its scorecard and ``hw_crossjob.json``."""
+    card = f"scorecard_{THIRD_JOB}.json"
+    cross = "hw_crossjob.json"
+    grid_rows = [("P-n2-M1-11_L1", "gentle"), ("P-n2-M1-11_L1", "rule"),
+                 ("P-n3-M1-17_L1", "gentle"), ("P-n3-M1-17_r1_L1", "gentle")]
+    out = [
+        Claim("J3.Q1f", HW, "§9",
+              rf"Q1, fitted circuits \| not held \| missed (\d+) of (\d+), RMS ({NUM}), largest ({NUM})",
+              lambda f: _q1(f, "fitted"), f"{card}: questions.Q1.sets.fitted"),
+        Claim("J3.Q1o", HW, "§9",
+              rf"Q1, out of sample \| not held \| missed (\d+) of (\d+), RMS ({NUM}), largest ({NUM})",
+              lambda f: _q1(f, "out_of_sample"), f"{card}: questions.Q1.sets.out_of_sample"),
+        Claim("J3.Q2o", HW, "§9", rf"indistinguishable \| RMS all ({NUM}) vs CZ-only ({NUM})",
+              lambda f: _q2(f, "out_of_sample"), f"{card}: questions.Q2.sets.out_of_sample.rms"),
+        Claim("J3.Q2f", HW, "§9", rf"all errors better \| RMS all ({NUM}) vs CZ-only ({NUM})",
+              lambda f: _q2(f, "fitted"), f"{card}: questions.Q2.sets.fitted.rms"),
+        Claim("J3.Q3", HW, "§9", r'Q3 \| (\w+) \| same circuit, job and shots: odd "([^"]+)", gentle "([^"]+)"',
+              lambda f: [_q(f, "Q3")["verdict"], _q(f, "Q3")["odd_status"],
+                         _q(f, "Q3")["gentle_status"]], f"{card}: questions.Q3"),
+        Claim("J3.Q4a", HW, "§9", rf"at the observed points: ({NUM}), ({NUM}), ({NUM})",
+              _q4a, f"{card}: questions.Q4.Q4a.rows[eligible].ratio_q4a"),
+        Claim("J3.Q4c", HW, "§9", rf"gentle / rule SE ({NUM}) against ({NUM}) predicted",
+              lambda f: [fmt(_q(f, "Q4")["Q4c"]["observed"]), fmt(_q(f, "Q4")["Q4c"]["predicted"])],
+              f"{card}: questions.Q4.Q4c"),
+        Claim("J3.Q5", HW, "§9", rf"Q5 \(reported\) \| (\d+) of (\d+) \| expected ({NUM})",
+              lambda f: [str(_q(f, "Q5")["matches"]), str(_q(f, "Q5")["n"]),
+                         fmt(_q(f, "Q5")["expected"], 1)], f"{card}: questions.Q5"),
+        Claim("J3.Q6", HW, "§9",
+              rf"χ²/dof ({NUM}) after shifts ({NUM}) \(day 1\) and ({NUM}) \(day 2\); between circuits ({NUM})",
+              lambda f: [fmt(_q(f, "Q6")["chi2_red_differences"], 2),
+                         fmt(_q(f, "Q6")["shifts"][JOB_OF_RECORD]["shift"]),
+                         fmt(_q(f, "Q6")["shifts"][SECOND_JOB]["shift"]),
+                         fmt(_q(f, "Q6")["chi2_red_between"], 2)], f"{card}: questions.Q6"),
+        Claim("J3.Q7", HW, "§9", rf"L1 ({NUM}), L2 ({NUM}), P_u ({NUM})",
+              lambda f: [fmt(_q(f, "Q7")["layouts"]["L1"]["observed"]),
+                         fmt(_q(f, "Q7")["layouts"]["L2"]["observed"]),
+                         fmt(_q(f, "Q7")["layouts"]["L1"]["p_uniform"], 2)],
+              f"{card}: questions.Q7.layouts"),
+        Claim("J3.Q7s", HW, "§9", r'pre-registered sentence: "([^"]+)"',
+              lambda f: [_q(f, "Q7")["sentence"]], f"{card}: questions.Q7.sentence"),
+        Claim("J3.Q8", HW, "§9", rf'"([^"]+)", λ = 1 value ({NUM})',
+              lambda f: [_q(f, "Q8")["status"], fmt(_q(f, "Q8")["reported_value"])],
+              f"{card}: questions.Q8"),
+        Claim("J3.Q9", HW, "§9",
+              rf"residual day 1 ({NUM}) \(z ({NUM})\), day 3 ({NUM}) \(z ({NUM})\)",
+              lambda f: [signed(_q(f, "Q9")["day1"]["residual"]),
+                         signed(_q(f, "Q9")["day1"]["z"], 1),
+                         signed(_q(f, "Q9")["residual"]), signed(_q(f, "Q9")["z"], 1)],
+              f"{card}: questions.Q9"),
+        Claim("J3.drift", HW, "§9",
+              rf"P-n2-M1-11_L1 z = ({NUM}), P-n3-M2-17_L2 z = ({NUM})",
+              lambda f: [f"{d['z']:+.2f}" for d in f.job3["drift"]],
+              f"hw_summary_{THIRD_JOB}.json: drift[].z"),
+        Claim("J3.rms2", HW, "§9",
+              rf"\| Job 2 \| ({NUM}) \| ({NUM}) \| ({NUM}) \| ({NUM}) \|",
+              lambda f: _oos_row(f, SECOND_JOB), f"{cross}: out_of_sample"),
+        Claim("J3.rms3a", HW, "§9",
+              rf"\| Job 3, day-2 circuits \| ({NUM}) \| ({NUM}) \| ({NUM}) \| ({NUM}) \|",
+              lambda f: _oos_row(f, f"{THIRD_JOB}_day2_circuits"), f"{cross}: out_of_sample"),
+        Claim("J3.rms3b", HW, "§9",
+              rf"\| Job 3, day-1 circuits \| ({NUM}) \| ({NUM}) \| ({NUM}) \| ({NUM}) \|",
+              lambda f: _oos_row(f, f"{THIRD_JOB}_day1_circuits"), f"{cross}: out_of_sample"),
+        Claim("J3.layout", HW, "§9",
+              rf"day 1 L1 ({NUM}), day 2 L2 ({NUM}), day 3 L1 ({NUM}), day 3 L2 ({NUM})",
+              _layout_values, f"{cross}: layout_test.rows[].observed"),
+        Claim("J3.layer", HW, "§9",
+              rf"EPLG ({NUM}), EPLG / median CZ ({NUM}) on day 3; ({NUM}) and ({NUM}) on day 1; ({NUM}) and ({NUM}) on day 2",
+              _layer, f"{card}: reported_untested.layer_fidelity"),
+        Claim("J3.qpu", HW, "§9", rf"QPU: (\d+) s against an estimate of ({NUM}) s; (\d+) s over",
+              lambda f: [str(f.cross["qpu"]["jobs"][THIRD_JOB_ID]), "182.9",
+                         str(f.cross["qpu"]["total_seconds"])],
+              f"{cross}: qpu; manifest_{THIRD_JOB}.json: estimate"),
+        Claim("J3.ideal", HW, "§9", r"(\w+) of the four resolved intervals exclude",
+              lambda f: [{2: "Two"}[sum(not r["interval_contains_ideal"] for r in
+                                        f.cross["error_formula"]["pre_registered_job_3"]["rows"])]],
+              f"{cross}: error_formula.pre_registered_job_3.rows"),
+        Claim("J3.ph.sep", HW, "§9", r"only records on qubits (\d+), (\d+) and (\d+); they share couplers (\S+), (\S+) and (\S+?)\.",
+              lambda f: [*(str(q) for q in f.cross["post_hoc"]["qubits_in_every_below_and_no_above"]),
+                         *f.cross["post_hoc"]["couplers_in_every_below_and_no_above"]],
+              f"{cross}: post_hoc"),
+        Claim("J3.ph.q6", HW, "§9",
+              rf"Q6's χ²/dof is ({NUM}) instead of ({NUM}), with the between-circuit value still ({NUM})",
+              lambda f: [fmt(f.cross["post_hoc"]["q6"]["without_records_on_candidates"]["chi2_red"], 2),
+                         fmt(f.cross["post_hoc"]["q6"]["reproduces_scorecard_chi2_red"], 2),
+                         fmt(f.cross["post_hoc"]["q6"]["without_records_on_candidates"]["chi2_red_between_day3"], 2)],
+              f"{cross}: post_hoc.q6"),
+        Claim("J3.ph.q2", HW, "§9", rf"Q2 out of sample becomes ({NUM}) \(all\) vs ({NUM}) \(CZ-only\)",
+              lambda f: [fmt(f.cross["post_hoc"]["q1_q2_rms_without_records_on_candidates"][v]["day2_circuits"]["rms"])
+                         for v in ("all", "2q")], f"{cross}: post_hoc"),
+        # --- alpha_robustness.md §7 ----------------------------------------------
+        Claim("J3.a.q2", ALPHA, "§7", rf"primary set: indistinguishable,\s+RMS ({NUM}) vs ({NUM})",
+              lambda f: _q2(f, "out_of_sample"), f"{card}: questions.Q2"),
+        Claim("J3.a.q6", ALPHA, "§7", rf"Not reproducible: χ²/dof ({NUM})",
+              lambda f: [fmt(_q(f, "Q6")["chi2_red_differences"], 2)], f"{card}: questions.Q6"),
+        Claim("J3.a.day", ALPHA, "§7", rf"gives α = ({NUM}) against ({NUM})",
+              lambda f: [fmt(_q(f, "Q6")["rows"][0]["alpha_day3"], 2),
+                         fmt(_q(f, "Q6")["rows"][0]["alpha_ref"], 2)], f"{card}: questions.Q6.rows"),
+        Claim("J3.a.day4", ALPHA, "§4", rf"its own layout moved by ({NUM}) \(§7\)",
+              lambda f: [fmt(_q(f, "Q6")["rows"][0]["difference"], 2)], f"{card}: questions.Q6.rows"),
+        # --- zne_theory.md §7.8 --------------------------------------------------
+        Claim("J3.z.q4a", THEORY, "§7", rf"eligible fits: ({NUM}), ({NUM}), ({NUM}), inside",
+              _q4a, f"{card}: questions.Q4.Q4a.rows"),
+        Claim("J3.z.q4b", THEORY, "§7", rf"same fits: ({NUM}), ({NUM}), ({NUM})\.",
+              _q4_forecast, f"{card}: questions.Q4.Q4a.rows[].ratio_q4b"),
+        Claim("J3.z.posthoc", THEORY, "§7", rf"jobs 1–2 \(({NUM})–({NUM}), post hoc\)",
+              lambda f: [fmt(f.cross["error_formula"]["post_hoc_jobs_1_2"]["summary"][k])
+                         for k in ("ratio_min", "ratio_max")], f"{cross}: error_formula"),
+        Claim("J3.z.q4c", THEORY, "§7", rf"was ({NUM}) times the rule\s+grid's, against ({NUM}) predicted",
+              lambda f: [fmt(_q(f, "Q4")["Q4c"]["observed"]), fmt(_q(f, "Q4")["Q4c"]["predicted"])],
+              f"{card}: questions.Q4.Q4c"),
+    ]
+    out += [_resolved_claim(key, grid, f"{card}: grid_fits") for key, grid in grid_rows]
+    return out
 
 
 def claims(facts: Facts) -> list[Claim]:
@@ -650,6 +850,7 @@ def claims(facts: Facts) -> list[Claim]:
                          for k in ("P-n4-M1-10", "P-n4-M2-02", "S-n4-g1-M2-00")],
               f"{j1}: records[].detail.hardware[0], hardware_sigma[0]"),
     ]
+    out += job3_claims()
     return out
 
 

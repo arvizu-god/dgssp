@@ -24,7 +24,7 @@ checked against `paper/data/`.
 | Planned | Delivered? | What the data actually say | Change in emphasis |
 |---|---|---|---|
 | C1 resource model | **Yes, fully** | Closed forms exact on 144/144 circuits. Heavy-hex routing costs 1.25–2.08× (median 1.64). Signed items cost **zero** two-qubit gates (only 2b phase gates); the guard bit is the real cost (29–168 2Q). Asymptotically the ancilla-free diffuser Θ(n²) dominates the Θ(n log n) adder, though not inside the measured grid. | None. Add the hardware-limit band on Fig 4: only (n, b) = (2,3), (2,4), (3,3) fit at one iteration. |
-| C2 hardware + ZNE + Mitiq + model | **Yes, but different from expected** | (a) The calibration model is optimistic; one factor α̂ = 3.18 on every error fits folded and unfolded circuits, and predicted a second day to within 0.05 on 3 of 4 records. (b) Whether ZNE works is set by the fold grid: odd grid resolves n = 2 only; gentle grid resolves all M = 1 records up to n = 3. (c) Mitiq agrees wherever our fit is resolved. | The noise-model comparison became a **result** (α̂ + out-of-sample test), not a check. "Compared against Mitiq" became an implementation cross-check plus a demonstration of the gate. "Frozen random family" is true in simulation (463 instances); on hardware it is the **shallowest instance per cell**, i.e. best cases. Say so. |
+| C2 hardware + ZNE + Mitiq + model | **Yes, but different from expected** | (a) The calibration model is optimistic; one factor α̂ = 3.18 on every error fits folded and unfolded circuits, and predicted a second day to within 0.05 on 3 of 4 records. **A pre-registered third day did not hold** (fitted circuits RMS 0.046; out of sample RMS 0.212), and the per-circuit α_r did not reproduce (χ²/dof 8.04). (b) Whether ZNE works is set by the fold grid: odd grid resolves n = 2 only; gentle grid resolves all M = 1 records up to n = 3. (c) Mitiq agrees wherever our fit is resolved. | The noise-model comparison became a **result** (α̂ + out-of-sample test), not a check. "Compared against Mitiq" became an implementation cross-check plus a demonstration of the gate. "Frozen random family" is true in simulation (463 instances); on hardware it is the **shallowest instance per cell**, i.e. best cases. Say so. |
 | C3 failure map + ZNE limits | **Yes** | Signal kept: 0.47 (n = 2), 0.10–0.29 (n = 3), ≤ 0.021 (n = 4, detectable, useless). Fewer iterations than optimal win. The a-priori survival estimate put the limit ~2× too far. Pointwise ZNE: coin toss where unresolved, always harmful at M = 0. | Fewer-iterations-win is **known** (Tenev et al. 2026), so cite, don't claim. |
 | (not in C1–C3) | **New** | The **reporting gate**: extrapolate only when every folded point is still ≥ 2σ above random and enough points are informative; otherwise report the λ = 1 value, flagged. Without it: 3.547 (Mitiq), 376.6 and 2275 (raw fit) on hardware. | Promote. It is the most transferable thing in the paper. |
 
@@ -39,7 +39,9 @@ The three contributions stay, but each now says what was found, not what was don
 2. **A hardware failure map with a predictive noise model** (C2 + C3a). Where the
    search stops returning useful answers on ibm_fez, and evidence that the device
    behaves like its own calibration with every error × 3.18. That factor was fitted
-   on one day and tested on another.
+   on one day and tested on another. *Under review after job 3 (`hw_results.md` §9):
+   the pre-registered third day did not hold, so "predictive" is not available as
+   written.*
 3. **Zero-noise extrapolation for a sampling algorithm: when it can be trusted**
    (C2 + C3b). The scalar estimator plus a resolution gate. The fold grid decides
    whether extrapolation is possible at all. Extrapolating the whole distribution
@@ -59,10 +61,10 @@ Item by item, against what exists (search today, not exhaustive):
 | Hardware data for an arithmetic-oracle Grover SSP | Benoit, Schwartz, Cytron (arXiv:2410.01775): ripple-carry adder, positive items, gate counts only; say IBM hardware results were "disappointing" but report none. No hardware data for SSP/knapsack Grover with an adder oracle found. | **Novel** ("to our knowledge"). Weak on its own: n ≤ 4. |
 | Signed SSP at zero 2Q cost; exact counts; heavy-hex factor | 2410.01775 (no signs, no QFT adder); Draper / Ruiz-Perez (generic QFT arithmetic); Lancellotti et al. 2026 (quantum walk SSP, fault-tolerant resource counts) | **Novel for this construction**, incremental in kind. Supporting contribution. |
 | Grover dies before r_opt; limit at a few hundred 2Q | Tenev, Nedev, Vitanov 2026 (Heron r1–r3, 3–6 qubit phase oracles: peak below r_opt, 6 qubits at random); AbuGhanem, Sci Rep 2025 (3 qubits, Eagle) | **Known qualitatively.** Our addition: the limit expressed in 2Q gates for an arithmetic oracle, and tied to a resource model. |
-| Calibration model is optimistic | AbuGhanem 2025 (noisy sim 77 % vs hardware 45 %); Bravo-Montes et al. EPJ QT 2024 (choose among noise models, no scaling factor, no out-of-sample test); Díaz Agreda et al. 2026 (digital twin, no factor, no out-of-sample) | Optimism is **known**. A single factor that fits folded + unfolded circuits and is **tested on a second day** is not done in these papers. **Modest novelty.** |
+| Calibration model is optimistic | AbuGhanem 2025 (noisy sim 77 % vs hardware 45 %); Bravo-Montes et al. EPJ QT 2024 (choose among noise models, no scaling factor, no out-of-sample test); Díaz Agreda et al. 2026 (digital twin, no factor, no out-of-sample) | Optimism is **known**. A single factor that fits folded + unfolded circuits and is **tested on a second day, then against a pre-registered third day where it did not hold,** is not done in these papers. The novelty is the test, including its failure. **Modest novelty.** |
 | ZNE of bitstring distributions; pointwise pathology | Liu & Cai, arXiv:2502.11285: general framework for mitigating sampling (bitstring probability = projector expectation), clipping negatives, simulation only, PEC-focused, no analysis of near-uniform failure | Framework **exists**; our failure mode (nonlinear per-bitstring fit near uniform, D_TV → 1 − 2⁻ⁿ) and hardware demonstration are **new but narrow**. Must cite and position. |
 | Reporting gate | Miranskyy et al. 2026 (bounded ZNE models; "coverage"; no refusal mechanism); Mitiq best-practices paper (arXiv:2307.05203) | **Modest novelty.** The gate is simple; its value is shown by the hardware contrast (3.547, 376.6, 2275). |
-| Fold grid decides | Giurgica-Tiron et al. 2020 (partial folding); general advice to keep scale factors small | Known in spirit; **quantified** here (463 instances + same instances on hardware). Modest. |
+| Fold grid decides | Giurgica-Tiron et al. 2020 (partial folding); general advice to keep scale factors small | Known in spirit; **quantified** here (463 instances + same instances on hardware), and **confirmed pre-registered on one circuit in one job** (Q3). Modest. |
 
 **What a referee will say:** "incremental, small n". The answer is the
 framing: lead with the transferable lessons (how far a calibration model is
@@ -92,8 +94,8 @@ plus a supplement. Numbers in brackets are 95 % intervals.
 ### Abstract (~200 words)
 
 Problem (Grover with arithmetic oracle; NISQ). What we did (resource model;
-463-instance simulation; two jobs on ibm_fez). Three findings with numbers:
-signal kept 47 % / 10–29 % / ≤ 2 %; α̂ = 3.18, predictive on a second day;
+463-instance simulation; three jobs on ibm_fez, the third pre-registered). Three findings with numbers:
+signal kept 47 % / 10–29 % / ≤ 2 %; α̂ = 3.18, close on a second day, not held on a pre-registered third;
 ZNE resolves n = 3 only on a gentle grid, and a gate keeps unsupported values
 out (3.55 for a probability). One closing line: code and data open.
 

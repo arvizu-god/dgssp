@@ -145,7 +145,8 @@ P-n3-M1-17_r1 −1.11 (z −4.9) (`A:day_to_day.shared_records`). That is the
 between-circuit scatter of §2, not a change of the device.
 
 **One number.** For the same circuit on a new layout two days later, α moved by
-+0.04 [−0.15, +0.24].
++0.04 [−0.15, +0.24]. *Do not generalise this: on the third day the same circuit on
+its own layout moved by −0.67 (§7).*
 
 **Paper sentence.** "Refitted on the second day, relative to that day's
 calibration, the same 71-gate circuit gives α = 3.07 [2.95, 3.18] against 3.03
@@ -194,8 +195,8 @@ excess the fit finds (×3.2 on all errors, ×4.1 on CZ errors alone), but not mo
 
 - Main text, model paragraph: §1 sentence (2q carries it, readout cannot) and §5
   sentence (layered error explains part). Together they answer "what is α?".
-- Main text or supplement: §4 one number (α stable between days for the same
-  circuit).
+- Main text or supplement: §4 one number, only with §7 beside it. "α stable between
+  days" no longer stands.
 - Supplement: §2 figure and table, §3 residual table, §1 full table.
 - Remove: "one α describes circuits up to ≈ 230 2Q; deeper circuits keep more
   signal than it predicts" (review §2 F2, outline). Replace it with the §2
@@ -203,6 +204,45 @@ excess the fit finds (×3.2 on all errors, ×4.1 on CZ errors alone), but not mo
 - The "depth effect" argument for the ~60 s job (review §7: P-n4-M1-10_r2 tests
   "the depth effect") no longer holds as stated. The record still separates
   α = 1 from α̂, which is its main value.
+
+## 7. Day 3 (job 3, pre-registered)
+
+From `paper/data/scorecard_2026-10-29.json` and `paper/data/hw_crossjob.json`; the
+fit above is unchanged. Per-record fits use the alpha grid in
+`paper/data/hw_alpha_exec_insample_2026-10-29/` on the execution calibration.
+
+**Q2 (all errors or CZ errors).** Out of sample, the primary set: indistinguishable,
+RMS 0.212 vs 0.214. Fitted circuits: all errors better, RMS 0.046 vs 0.060. Post hoc,
+without P-n2-M1-11_L2: 0.079 vs 0.060, the other way. So day 3 does not settle §1's
+"2q carries it".
+
+**Q6 (is α_r a property of the circuit).** Not reproducible: χ²/dof 8.04 after one
+shift per reference day (−0.589 against day 1, −0.572 against day 2), with the
+between-circuit χ²/dof at 30.29. Spearman 0.21, not tested.
+
+| Record | Reference | α_r reference | α_r day 3 | Used in Q6 |
+|---|---|---|---|---|
+| P-n2-M1-11_L1 | day 1 | 3.02 | 2.35 | yes |
+| P-n3-M1-17_L1 | day 1 | 3.10 | 2.40 | yes |
+| P-n3-M1-17_r1_L1 | day 1 | 3.76 | 2.91 | yes |
+| P-n4-M1-10_r1_L1 | day 1 | 2.47 | 4.57 | yes |
+| P-n3-M2-17_L1 | day 1 | 3.43 | 3.07 | yes |
+| P-n3-M1-17_L2 | day 2 | 2.98 | 2.34 | yes |
+| P-n3-M1-17_r1_L2 | day 2 | 2.65 | 2.12 | yes |
+
+**Post hoc, not a verdict.** Without P-n4-M1-10_r1_L1, the one record in the table on
+qubits 90, 91 and 92 (`hw_results.md` §9.3), χ²/dof is 1.36 and the between-circuit
+value 31.39. That reading says the ranking of circuits repeats and the whole scale
+shifts by about 0.6 from day to day. It was chosen after seeing the data.
+
+**What stands.** α̂ = 3.18 fitted job 1. It does not transfer to another day's
+calibration with the accuracy §4 suggested: the common shift of about −0.6 compares
+with §4's +0.04. On day 3 the calibration overstated the noise where the circuits were
+healthy, while IBM's EPLG improved (0.00513, ratio to median CZ 2.11).
+
+**Paper sentence, replacing §4's.** "Refitted on a third day with the layout held
+fixed, the same 71-gate circuit gives α = 2.35 against 3.02: the factor is not constant
+from day to day, and a pre-registered test of it did not hold."
 
 ## Corrections to the spec and what was changed to get here
 
