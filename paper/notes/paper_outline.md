@@ -36,12 +36,12 @@ The three contributions stay, but each now says what was found, not what was don
    Exact gate counts per iteration, checked against every built circuit; measured
    heavy-hex cost (routing ×1.64); signed items at zero two-qubit cost; and a map
    of which (n, b) fit under the measured hardware limit.
-2. **A hardware failure map with a predictive noise model** (C2 + C3a). Where the
-   search stops returning useful answers on ibm_fez, and evidence that the device
-   behaves like its own calibration with every error × 3.18. That factor was fitted
-   on one day and tested on another. *Under review after job 3 (`hw_results.md` §9):
-   the pre-registered third day did not hold, so "predictive" is not available as
-   written.*
+2. **A hardware failure map, and how far a scaled noise model carries over** (C2 +
+   C3a). Where the search stops returning useful answers on ibm_fez. A scaled
+   calibration model describes one day well, carries over only roughly, and misses
+   failures the calibration doesn't show; we show this with a pre-registered test
+   (every error × 3.18, fitted on day 1; close on day 2; not held on day 3,
+   `hw_results.md` §9).
 3. **Zero-noise extrapolation for a sampling algorithm: when it can be trusted**
    (C2 + C3b). The scalar estimator plus a resolution gate. The fold grid decides
    whether extrapolation is possible at all. Extrapolating the whole distribution
@@ -68,7 +68,7 @@ Item by item, against what exists (search today, not exhaustive):
 
 **What a referee will say:** "incremental, small n". The answer is the
 framing: lead with the transferable lessons (how far a calibration model is
-off and how well one factor predicts it; when ZNE output can be trusted for a
+off and how far one factor carries over between days; when ZNE output can be trusted for a
 sampling algorithm; why the fold grid matters), with SSP as the testbed.
 
 **Open gap from WP0.** `related_work.md` and `contributions.md` were never
@@ -85,8 +85,8 @@ plus a supplement. Numbers in brackets are 95 % intervals.
 ### Title (candidates)
 
 1. *Draper-oracle Grover search for Subset Sum on a heavy-hex processor:
-   resource scaling, a predictive noise model, and when zero-noise extrapolation
-   can be trusted*
+   resource scaling, how far a scaled noise model carries over, and when zero-noise
+   extrapolation can be trusted*
 2. *How far does an arithmetic-oracle Grover search run on IBM Heron hardware?*
 3. *Error-mitigated Grover search for signed Subset Sum on superconducting
    hardware: limits and lessons*
@@ -246,9 +246,10 @@ What we explain (fake_marrakesh, 463 instances; this is the method study):
 
 Drafted in `hw_review_wp7.md` §5. Order:
 1. Unmitigated performance and the sweep.
-2. Device vs calibration model; α̂; out-of-sample day; the P-n3-M2-17 failure;
-   survival at α = 1 placed the limit ~2× too far; deep circuits keep more signal
-   than one α predicts.
+2. Device vs calibration model; α̂ fitted on job 1; close on the second day; not held
+   on the pre-registered third (scorecard first, `hw_results.md` §9); failures the
+   calibration doesn't show (P-n3-M2-17_L2 on two days, P-n2-M1-11_L2 on day 3);
+   survival at α = 1 placed the limit ~2× too far.
 3. ZNE: odd vs gentle grid (promote Table S2 to Table 5).
 4. What the gate prevents (Mitiq 3.547; raw 376.6 / 2275).
 5. Pointwise on hardware: coin toss; M = 0 collapse.
@@ -265,21 +266,22 @@ What we explain:
 - **What α is and is not.** A phenomenological factor. Likely contributors:
   crosstalk and spectator errors in parallel layers (what layered benchmarks
   capture and isolated RB misses), leakage, residual coherent error. It is not
-  constant: deep circuits keep more signal; one day-2 record failed outright.
-  Treat it as a one-day calibration that held once out of sample.
+  constant: on a pre-registered third day the healthy circuits' α_r fell by about
+  0.6, and circuits failed outright that the calibration rated as ordinary.
+  Treat it as a description of one day that carries over only roughly.
 - **What ZNE can do for a sampler.** Extrapolate a scalar (P(solution)), not the
   distribution. Choose the grid so folded points still carry signal (pre-register
   with the survival rule). Report only resolved fits. ZNE extended the reach from
   n = 2 to n = 3 here, not to n = 4.
 - **Comparison with simple-oracle Grover on Heron** (Tenev et al.): consistent;
   the arithmetic oracle hits the same 2Q budget at fewer qubits.
-- **Limitations, stated plainly:** n ≤ 4 and easiest instances; one device; two
+- **Limitations, stated plainly:** n ≤ 4 and easiest instances; one device; three
   days; M known in advance; no readout mitigation; α includes readout; the
   gentle-grid extrapolation has a lever arm of 2 and model choice is not in the
   CI (defended by the λ-independence of α).
 - **Future work (one paragraph, no results):** approximate rotations (K = 3: −22 %
   2Q at ≤ 6 % ideal loss, measured offline); dynamic-circuit counting; a second
-  device; testing α across days.
+  device; why α shifts between days.
 
 ### 9 Conclusion (~250 words)
 
