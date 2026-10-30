@@ -49,12 +49,17 @@ folds of P-n3-M1-17_r1_L1, then P-n4-M1-10_r1_L1.
 
 ### Pre-declared criteria (frozen in the pre-registration file before submission)
 
+Reported ZNE values follow step 5 (`REPORT_BOUNDS = "clip"`: value and
+interval clipped to [P_u, 1]). **Error-size comparisons (Q4) use the
+unclipped bootstrap** (the "flag" view stored alongside), because clipping an
+interval at 1 shrinks (hi − lo) and would bias SE_boot low.
+
 | ID | Question | Rule |
 |---|---|---|
 | Q1 | Does α̂ hold on a third day? | For every record except P-n3-M2-17_*, \|P_hw(λ = 1) − P_pred(α̂)\| ≤ 0.05 → "held". Report per-record deviations and RMS. |
 | Q2 | All errors × 3.18 or CZ errors × 4.06? | λ = 1 RMS of each model over the same records. "Better" only if lower by ≥ 0.005; otherwise "indistinguishable". |
 | Q3 | Does the grid alone decide? | P-n3-M1-17_L1: odd ∈ {not identifiable, identified-not-resolved} **and** gentle = resolved → "confirmed". |
-| Q4 | Does the error formula predict hardware? | Each resolved fit with predicted relative SE ≤ 0.2: SE_boot / SE_pred ∈ [0.75, 1.33]. P-n2: observed SE_gentle / SE_rule within ±30 % of the predicted ratio. |
+| Q4 | Does the error formula predict hardware? | Each resolved fit with predicted relative SE ≤ 0.2: SE_boot(unclipped) / SE_pred ∈ [0.75, 1.33]. P-n2: observed SE_gentle / SE_rule within ±30 % of the predicted ratio. |
 | Q5 | Predicted ZNE status | Predicted vs observed status per record × grid; count of matches. |
 | Q6 | Is α_r a property of the circuit? | Pinned job-1 circuits, α_r(day 3) − α_r(day 1) with CIs. "Reproducible per circuit" iff χ²/dof of the differences ≤ 2 **and** the day-3 between-circuit χ²/dof stays > 2. Spearman reported, not tested (n is small). |
 | Q7 | P-n3-M2-17: layout or day? | "At random" = λ = 1 less than 2σ above P_u; "fine" = within 0.05 of the α̂ prediction. Table → sentence (below). |
@@ -65,16 +70,20 @@ Q7 table: L2 random + L1 fine → "a persistent layout defect the calibration
 does not show"; both fine → "a transient on 2026-10-28"; both random → "not a
 layout effect; open"; L1 random + L2 fine → "the defect moved; open".
 
+Also reported, not tested: the day-3 layer fidelity (EPLG and EPLG / median
+CZ) from the execution calibration's `raw_properties.general`, next to the
+day-1 and day-2 values in `alpha_robustness.md` §5.
+
 ### Order
 
 | Prompt | Step | What | Who runs the QPU |
 |---|---|---|---|
-| — | 0 | Commit step 5 (REPORT_BOUNDS = "clip" and the re-derived tables) | — |
-| E | 6a | Build everything offline: design file, per-record grids, pre-registration and scoring code, multi-grid aggregation, submit gate. Full rehearsal on a fake job | nobody |
+| E | 6a | Build everything offline: design file, per-record grids, pre-registration and scoring code, multi-grid aggregation, submit gate. Full rehearsal on a simulated job | nobody |
 | F | 6b | Submission day: plan → dry run → pre-register → push → checklist → **you** submit | you |
-| G | 7 | Collect, execution calibration, score against the frozen criteria, integrate job 3 into notes, tables, figures, claims | nobody (you run collect/fetch) |
+| G | 7 | Collect, execution calibration, score against the frozen criteria, integrate job 3 into notes, tables, figures, claims | nobody (you run collect / fetch) |
 
-Target: E done by about Nov 6, submit by about Nov 12–14, window ends ≈ Nov 21.
+Steps 2–5 are done and committed (HEAD `e4e22da`). Target: E done by about
+Nov 6, submit by about Nov 12–14, window ends ≈ Nov 21.
 
 ---
 
@@ -91,17 +100,33 @@ Mitiq 1.1.0). Windows + PowerShell, conda env `dgssp-paper`, run through
 `conda run -n dgssp-paper ...`.
 
 Current state:
-- WP0–WP7 and steps 2–5 done (step 2 notes corrected + check_claims.py;
-  step 3 zne_theory.json; step 4 alpha_robustness.json; step 5
-  REPORT_BOUNDS = "clip"). HEAD: «fill in».
+- WP0–WP7 and steps 2–5 done and committed. HEAD e4e22da (2026-10-29).
+  - Step 2: notes corrected against the data; check_claims.py (0 MISMATCH).
+  - Step 3: error propagation of the fixed-asymptote exponential in
+    mitigation/zne.py §11 (exp_fixed_se, predicted_se, optimal_step,
+    plan_scales_spacing); paper/data/zne_theory.json. Optimal second step
+    ≈ 1.109/c; the formula holds where predicted relative SE ≤ 0.2 and runs
+    low above 0.3.
+  - Step 4: paper/data/alpha_robustness.json. α̂_all = 3.176 [3.074, 3.348];
+    α̂_2q (CZ errors only) = 4.055 [3.511, 4.462], Δχ² = 9.1; readout alone
+    cannot fit. Per-circuit α_r scatters 2.2–3.8 (χ²/dof 8) with no
+    resolvable depth trend; residuals concentrate in the sweep variants.
+    Day-to-day α for the same instance on a new layout moved +0.04.
+    Execution calibrations carry IBM layer fidelity (EPLG / median CZ
+    2.2–2.4).
+  - Step 5: REPORT_BOUNDS = "clip" (value and interval clipped to [P_u, 1]),
+    "flag" and "bounded" selectable; report_bounds.json.
 - Hardware (ibm_fez, Heron r2):
-  - job 1 dbfeqr7gdj9s73bbgh6g (ran 2026-10-26 UTC, folder label 2026-10-25),
-    odd grid, 47 PUBs × 4096;
+  - job 1 dbfeqr7gdj9s73bbgh6g (ran 2026-10-26 UTC, folder label
+    2026-10-25), odd grid, 47 PUBs × 4096;
   - job 2 dbgkqq8te5oc738icnfg (ran 2026-10-28 UTC), gentle grid,
     14 PUBs × 12 288.
   - ≈ 465 s of QPU left until ≈ 2026-11-21.
-- α̂ = 3.176 [3.074, 3.348] (all errors); α_2q = 4.055 [3.511, 4.462] (CZ only).
-- origin/main is 21+ commits behind; nothing has been pushed yet.
+- origin/main is behind (last pushed 8ab7b73); nothing since has been pushed.
+- Untracked on purpose: paper/hardware/account_snapshot.json,
+  paper/data/hw_dryrun_*_collect/. Untracked, to decide:
+  paper/hardware/layer_fidelity_2026-10-29.json (today's value, not run-day;
+  commit it only if a note cites it).
 
 Read first: paper/notes/prompts_steps6-7.md (the design, criteria Q1–Q9 and
 why), zne_theory.md §7, alpha_robustness.md, hw_results.md.
@@ -127,57 +152,72 @@ TASK: Step 6a — build, offline, everything the third hardware job needs, so
 that on submission day nothing is written by hand and the analysis code is
 frozen before the data exist.
 
-1. Design file. paper/hardware/design_job3.json (schema
-   "dgssp/paper/hardware-design/1"): one entry per record with key, source
-   (pinned circuit `KEY:TAG=<date>` or instance), named grids
-   ({"odd": [1,3,5], "gentle": [1,1.25,1.5], "rule": "plan_scales_spacing"}),
-   shots, drift flag; plus the trim order and the criteria Q1–Q9 as data
-   (thresholds as numbers). Fill it with the design table in
-   prompts_steps6-7.md.
+0. Review first. Read the design and Q1–Q9 in prompts_steps6-7.md against
+   the step 3–5 results. Before writing code, list any criterion that is
+   untestable with this design, any record that cannot discriminate what it
+   claims to, and any threshold that contradicts zne_theory.json or
+   alpha_robustness.json, with your proposed fix. Wait for my answer.
+
+1. Design file paper/hardware/design_job3.json (schema
+   "dgssp/paper/hardware-design/1"):
+   - one entry per record: key, source (pinned circuit `KEY:TAG=<date>` or
+     instance), named grids ({"odd": [1,3,5], "gentle": [1,1.25,1.5],
+     "rule": "plan_scales_spacing"}), shots, drift flag;
+   - the trim order;
+   - the criteria Q1–Q9 as data (thresholds as numbers, which view of the
+     interval each uses: clip for reporting, unclipped for Q4);
+   - REPORT_BOUNDS and RESOLVED_RULE in force, recorded.
+   Fill it from the design table in prompts_steps6-7.md.
 
 2. hardware_batch.py --plan --design <file>:
-   - per-record scale sets = the union of that record's named grids, with
-     λ = 1 shared; λ = 1-only records allowed;
+   - per-record scale set = the union of that record's named grids, λ = 1
+     shared; λ = 1-only records allowed;
    - the "rule" grid is resolved at plan time with plan_scales_spacing, from
-     the full-model prediction at α̂ of the record's λ = 1 kept signal on
-     the plan calibration (not the S^α shortcut); record the inputs used;
-   - pinned circuits reuse the saved ISA circuit and are folded from it;
-   - the manifest stores each record's named grids, so analysis can fit each
+     the full noise model at α̂ (simulated λ = 1 kept signal of that circuit on
+     the plan calibration), not the S^α shortcut; record the inputs and the
+     chosen Δ next to optimal_step's Δ*;
+   - pinned circuits reuse the saved ISA circuit (layout and routing
+     unchanged) and are folded from it; assert their 2Q counts equal the
+     source job's;
+   - the manifest stores each record's named grids, so analysis fits each
      grid separately from the same counts;
-   - the estimate and cap check as now; if over the cap, apply the design's
-     trim order and say what was trimmed.
+   - estimate and cap check as now; if over the cap, apply the design's trim
+     order and say what was trimmed.
    Existing flags keep working unchanged.
 
 3. paper/scripts/preregister.py --date <d>:
-   - simulate every PUB of the manifest on the plan calibration at α̂ (all
-     errors) and at α_2q = 4.055 (--scale-only 2q), reusing
-     noise_model_check machinery;
-   - per record × named grid: predicted P(λ), predicted status (apply the
-     gate to the expected values at the planned shots), predicted ZNE value,
-     predicted SE via predicted_se / exp_fixed_se *only* where the predicted
-     relative SE ≤ 0.2 (else "formula not applicable"), the predicted
+   - simulate every PUB of the manifest on the plan calibration at α̂_all and
+     at α̂_2q (--scale-only 2q), reusing noise_model_check machinery;
+   - per record × named grid: predicted P(λ); predicted status (the gate
+     applied to the expected values at the planned shots); predicted reported
+     value under REPORT_BOUNDS = clip; predicted SE (unclipped) via
+     predicted_se / exp_fixed_se *only* where the predicted relative SE ≤ 0.2,
+     else "formula not applicable" with the value; the predicted
      SE_gentle / SE_rule ratio for P-n2;
    - the day-1 α_r with CI for every pinned job-1 circuit
      (alpha_robustness.json), as the Q6 reference;
    - write paper/hardware/preregistration_<d>.json (criteria copied from the
-     design, manifest sha256, calibration stamp, all predictions) and a
-     readable preregistration_<d>.md with the Q1–Q9 table and the
-     outcome → sentence map. Print the file's sha256.
+     design, manifest sha256, calibration stamp, code commit, all
+     predictions) and a readable preregistration_<d>.md with the Q1–Q9 table
+     and the outcome → sentence map. Print the JSON's sha256.
 
-4. paper/scripts/score_preregistration.py --date <d>: reads the
-   pre-registration and the collected records, evaluates Q1–Q9 *exactly* as
-   declared (thresholds read from the file, never from code constants), and
-   writes paper/data/scorecard_<d>.{json,md}: per question predicted,
-   observed, verdict, the selected sentence, and a "deviations" section that
-   is empty unless I later add one by hand with a reason. Q6 needs α_r on
-   day 3: build that on the per-record fit from step 4 (in-sample cache for
-   the job-3 date), callable here.
+4. paper/scripts/score_preregistration.py --date <d>:
+   - reads the pre-registration and the collected records, and evaluates
+     Q1–Q9 exactly as declared (thresholds read from the file, never from
+     code constants);
+   - writes paper/data/scorecard_<d>.{json,md}: per question predicted,
+     observed, verdict, the selected sentence, and a "deviations" section
+     that stays empty unless I add an entry by hand with a reason;
+   - Q6 needs α_r on day 3: build it on step 4's per-record fit (in-sample
+     cache for the job-3 date), callable from here;
+   - also reports, untested: day-3 EPLG and EPLG / median CZ from the
+     execution calibration, next to days 1–2.
 
-5. Multi-grid aggregation: hw_aggregate.py --date <d> fits each named grid
-   of each record separately (same counts, λ = 1 shared). Output a
-   same-job grid table (record × grid: status, value, CI, SE_boot, SE_pred)
-   as tex/hw_table_grids_job3.tex. Jobs 1 and 2 must aggregate
-   byte-identically to now.
+5. Multi-grid aggregation: hw_aggregate.py --date <d> fits each named grid of
+   each record separately (same counts, λ = 1 shared), and writes a same-job
+   grid table (record × grid: status, reported value and interval (clip),
+   SE_boot unclipped, SE_pred) as tex/hw_table_grids_job3.tex. Jobs 1 and 2
+   aggregate byte-identically to HEAD.
 
 6. Submit gate (hardware_batch.py --submit), new checks for any manifest made
    from a design file:
@@ -186,33 +226,31 @@ frozen before the data exist.
    - HEAD is on origin/main after `git fetch` (git merge-base --is-ancestor
      HEAD origin/main), so the pre-registration has a GitHub timestamp
      before the job;
-   - the checklist has a new line "Pre-registration pushed: commit <hash>,
-     sha256 <…>, pushed at <UTC>";
+   - the checklist line "Pre-registration pushed: commit <hash>, sha256 <…>,
+     pushed at <UTC>" is filled;
    - if the live calibration stamp differs from the plan's, refuse unless
      --accept-recalibration is given (predictions are re-run on the
      execution calibration afterwards either way).
-   Add the line to CHECKLIST_template.md.
+   Add the new line to CHECKLIST_template.md.
 
 7. End-to-end rehearsal, entirely offline:
    - --plan --design against the 2026-10-28 calibration snapshot (or
      --offline-backend fake_fez);
-   - --dry-run; preregister.py;
-   - treat the dry run as if it were the hardware: collect it into a scratch
-     date, run hw_aggregate.py and score_preregistration.py, and show the
-     scorecard;
-   - check that --submit refuses at each new gate (no pre-registration,
-     hash mismatch, not pushed, calibration changed) without contacting the
-     service: mock the service calls in tests.
+   - --dry-run, then preregister.py;
+   - treat the dry run as the hardware: collect it into a scratch date, run
+     hw_aggregate.py and score_preregistration.py, and show the scorecard;
+   - test that --submit refuses at each new gate (no pre-registration, hash
+     mismatch, not pushed, calibration changed) with the service mocked.
 
 8. Write paper/hardware/RUNBOOK_job3.md: the exact submission-day PowerShell
    commands in order (plan, dry run, preregister, commit, push, checklist,
    submit, and what to paste back), with the expected output of each.
 
 Acceptance:
-- Jobs 1 and 2: --plan rebuild and hw_aggregate outputs byte-identical to
-  HEAD.
-- The rehearsal produces a manifest of ≈ 23 PUBs, the estimate and cap
-  check, the pre-registration (.json + .md), a scorecard, and the multi-grid
+- Jobs 1 and 2: --plan rebuild and hw_aggregate outputs byte-identical to HEAD.
+- The rehearsal yields a manifest of ≈ 23 PUBs with pinned 2Q counts equal to
+  their sources (71, 212, 112, 233, 475, 194, 184), the estimate and cap
+  check, the pre-registration (.json + .md), a scorecard and the multi-grid
   table, with no hand-typed number.
 - Each submit gate is covered by a test that fails when the gate is removed.
 - pytest, ruff, mypy green.
@@ -226,58 +264,67 @@ Do this in one sitting, within one calibration window. You run every command
 that touches the service; Claude Code only reviews.
 
 ```
-PROJECT CONTEXT — Paper A (see prompts_steps6-7.md; same rules as Prompt E)
-HEAD: «fill in». Today: «YYYY-MM-DD».
+PROJECT CONTEXT — Paper A (Draper–Grover Subset Sum on heavy-hex hardware)
+
+Same project, rules and current state as Prompt E in
+paper/notes/prompts_steps6-7.md, plus: step 6a is done and committed.
+HEAD: «fill in». Today: «YYYY-MM-DD». Runbook: paper/hardware/RUNBOOK_job3.md.
+
+Rules that matter today:
+- You never run a service command, never read the token, never submit.
+- No criterion, threshold or design entry changes after preregister.py has
+  run. If one is wrong, we stop and re-plan from the start.
 
 ----------------------------------------------------------------
 
-TASK: Step 6b — review, do not run service commands. I will run
-paper/hardware/RUNBOOK_job3.md step by step and paste each output. After each
-paste:
-1. Check it against the runbook's expected output and the design
-   (prompts_steps6-7.md): record list, grids, shots, PUB count, physical
-   qubits of pinned circuits equal to their source jobs, pre-flight "ok",
-   estimate ≤ cap, calibration stamp.
-2. After preregister.py: read preregistration_<d>.md and tell me whether
-   every Q1–Q9 has a prediction or an explicit "not applicable" with its
-   reason. List any prediction that looks implausible against jobs 1–2
-   (e.g. a status that contradicts the job-1 data for a pinned circuit) and
-   why. Do not change criteria after this point; if one is wrong, we
-   re-plan from the start.
-3. Before I push: confirm the commit contains the design, manifest, dry run,
-   pre-registration and checklist, and nothing else is dirty.
-4. Before I submit: confirm the checklist is complete and the pushed commit
-   is HEAD.
-5. After submission: tell me exactly what to record (job id into
-   jobs_<d>.json is automatic; usage after DONE) and stop.
+TASK: Step 6b — review only. I will run RUNBOOK_job3.md step by step and
+paste each output. After each paste:
+1. Check it against the runbook's expected output and the design: record
+   list, named grids, shots, PUB count, pinned 2Q counts and physical qubits
+   equal to their source jobs, pre-flight "ok", estimate ≤ cap, calibration
+   stamp, REPORT_BOUNDS = clip and RESOLVED_RULE = v2 recorded.
+2. After preregister.py: read preregistration_<d>.md and say whether every
+   Q1–Q9 has a prediction or an explicit "not applicable" with its reason.
+   Flag any prediction that contradicts jobs 1–2 for a pinned circuit
+   (e.g. a predicted status the day-1 data rule out), and say why.
+3. Before I push: confirm the commit holds the design, manifest, circuits,
+   dry run, pre-registration and checklist, and the tree is otherwise clean.
+4. Before I submit: confirm the checklist is complete, the pushed commit is
+   HEAD, and the live calibration stamp equals the plan's (or tell me to
+   decide on --accept-recalibration).
+5. After submission: tell me what to record and stop.
 If anything fails (rejected options, ISA failure, device offline,
 recalibration), stop and tell me whether to re-plan today or another day. Do
 not suggest workarounds that skip a gate.
 ```
 
-Submission-day outline (the exact commands come from `RUNBOOK_job3.md`, written by Prompt E):
+Submission-day outline (exact commands come from `RUNBOOK_job3.md`, written by Prompt E):
 
 1. Fresh PowerShell, `$env:QISKIT_IBM_TOKEN` set in this window only.
 2. `--plan --design paper/hardware/design_job3.json --backend ibm_fez`.
 3. `--dry-run`.
 4. `preregister.py --date <d>`.
-5. Fill `CHECKLIST_<d>.md`, `git add` design, manifest, circuits, dry run,
+5. Fill `CHECKLIST_<d>.md`; `git add` design, manifest, circuits, dry run,
    pre-registration and checklist; commit; **push**.
-6. Add the "Pre-registration pushed" line with the commit hash; commit; push.
+6. Fill the "Pre-registration pushed" line with that commit's hash; commit;
+   push.
 7. `--submit` (it runs the gates).
-8. Wait for DONE; then step 7.
+8. Wait for DONE; then Prompt G.
 
-Note: if the GitHub repo is private, the push timestamp proves the order to
-you and to anyone you give access, not to the public. To make it public
-without opening the repo, post the pre-registration's sha256 somewhere public
-with a timestamp (a public gist works) at step 6.
+If the GitHub repo is private, the push timestamp proves the order to you and
+to anyone you give access, not to the public. To make it public without
+opening the repo, post the pre-registration's sha256 with a timestamp
+somewhere public (a public gist works) at step 6.
 
 ---
 
 ## Prompt G — Step 7: collect, score, and integrate job 3
 
 ```
-PROJECT CONTEXT — Paper A (see prompts_steps6-7.md; same rules as Prompt E)
+PROJECT CONTEXT — Paper A (Draper–Grover Subset Sum on heavy-hex hardware)
+
+Same project, rules and current state as Prompt E in
+paper/notes/prompts_steps6-7.md, plus: steps 6a–6b done; job 3 submitted.
 HEAD: «fill in». Job 3: «job id», ran «UTC», date label «d».
 
 ----------------------------------------------------------------
@@ -301,8 +348,9 @@ Then, offline:
 3. score_preregistration.py --date <d> → scorecard_<d>.{json,md}. Q1–Q9
    verdicts as declared; nothing re-thresholded.
 4. hw_aggregate.py --date <d>: per-record table, multi-grid table
-   (hw_table_grids_job3.tex), model-vs-hardware block, drift (shot-noise
-   null), survival block.
+   (hw_table_grids_job3.tex; reported values clipped, SE_boot unclipped),
+   model-vs-hardware block, drift (shot-noise null), survival block; day-3
+   EPLG next to days 1–2.
 5. Cross-job results (new script hw_crossjob.py → paper/data/hw_crossjob.json):
    - α̂ out of sample on two days (jobs 2 and 3): per-record λ = 1
      deviations, RMS with and without P-n3-M2-17, for all-errors and
