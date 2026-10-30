@@ -416,7 +416,7 @@ QPU: 87 s against an estimate of 182.9 s; 220 s over all jobs and the probe.
 
 ### 9.3 Post hoc: not verdicts
 
-Everything in this subsection was chosen after seeing the job. It is a hypothesis, and it changes no verdict above.
+Everything in this subsection was chosen after seeing the job. It is a hypothesis, and it changes no verdict above. Decision (2026-10-30): the paper reports it labelled as post hoc, and no further job tests it.
 
 - **Every circuit below its prediction uses the same qubits.** Exactly four of the ten records came out below prediction: P-n2-M1-11_L2 (−0.350), P-n3-M2-17_L2, P-n4-M1-10_r1_L1 and P-n4-M1-10_r2_L1. Those four are the only records on qubits 90, 91 and 92; they share couplers 90-91, 91-92 and 91-98. The six others were all above prediction.
 - **Qubit 91 is the common end of those couplers,** but qubits 90 and 92 are not ruled out. The calibration does not single them out: CZ 0.0022, 0.0019 and 0.0028 against a device median of 0.0024.

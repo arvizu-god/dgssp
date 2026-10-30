@@ -248,7 +248,8 @@ Drafted in `hw_review_wp7.md` §5. Order:
 1. Unmitigated performance and the sweep.
 2. Device vs calibration model; α̂ fitted on job 1; close on the second day; not held
    on the pre-registered third (scorecard first, `hw_results.md` §9); failures the
-   calibration doesn't show (P-n3-M2-17_L2 on two days, P-n2-M1-11_L2 on day 3);
+   calibration doesn't show (P-n3-M2-17_L2 on two days, P-n2-M1-11_L2 on day 3), with
+   the qubit 90–92 pattern as a labelled post hoc hypothesis (no further job);
    survival at α = 1 placed the limit ~2× too far.
 3. ZNE: odd vs gentle grid (promote Table S2 to Table 5).
 4. What the gate prevents (Mitiq 3.547; raw 376.6 / 2275).
