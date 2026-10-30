@@ -210,7 +210,8 @@ def diff_text(base: str, path: Path) -> dict[str, Any] | None:
 
 def figures(base: str) -> dict[str, list[str]]:
     """PDFs whose bytes changed."""
-    changed, same = [], []
+    changed: list[str] = []
+    same: list[str] = []
     for path in sorted(REPO_ROOT.glob(FIGURE_GLOB)):
         rel = path.relative_to(REPO_ROOT).as_posix()
         (changed if _git_bytes(base, rel) != path.read_bytes() else same).append(rel)

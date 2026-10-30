@@ -2597,6 +2597,62 @@ def _physical_one_q(circuit: QuantumCircuit, virtual: Sequence[str]) -> int:
     )
 
 
+def scalar_fit_block(
+    counts_per_scale: Mapping[float, Mapping[str, int]],
+    cfg: ZNESamplingConfig,
+    observable_fn: Callable[[Mapping[str, int]], float],
+    p_uniform: float,
+    p_ideal: float | None = None,
+) -> dict[str, Any]:
+    """
+    One method's scalar fit on some counts, with its bootstrap interval.
+
+    What a record's ``zne_fit`` block holds apart from the folding record, on
+    any subset of an item's scales: a record's counts restricted to one named
+    grid give that grid's fit, exactly as a job that ran only that grid would
+    have stored it (same estimator, same bootstrap seed).
+
+    Parameters
+    ----------
+    counts_per_scale:
+        Counts keyed by realised scale.
+    cfg:
+        Estimator settings; ``cfg.method`` is the method fitted,
+        ``cfg.n_bootstrap`` / ``cfg.bootstrap_seed`` the bootstrap.
+    observable_fn:
+        The proportion to extrapolate.
+    p_uniform:
+        Resolvability null and ``"p_uniform"`` asymptote.
+    p_ideal:
+        Noiseless value: which side of the null is signal.
+
+    Returns
+    -------
+    dict
+        :func:`fit_scalar_series` output plus ``applicable``, ``ci``,
+        ``bootstrap_se``, ``n_failed``, ``B`` and ``bootstrap_seed``.
+    """
+    boot = zne_bootstrap(
+        counts_per_scale,
+        _with_mode(cfg, "scalar"),
+        observable_fn=observable_fn,
+        p_uniform=p_uniform,
+        p_ideal=p_ideal,
+    )
+    block = dict(boot["fit"])
+    block.update(
+        {
+            "applicable": True,
+            "ci": [boot["lo"], boot["hi"]],
+            "bootstrap_se": boot["se"],
+            "n_failed": boot["n_failed"],
+            "B": boot["B"],
+            "bootstrap_seed": boot["seed"],
+        }
+    )
+    return block
+
+
 def _scalar_block(
     run: ZNEItemRun,
     cfg: ZNESamplingConfig,
@@ -2626,22 +2682,11 @@ def _scalar_block(
         :func:`fit_scalar_series` output plus ``ci``, ``bootstrap_se``,
         ``n_failed``, ``B``, ``bootstrap_seed`` and the item's folding record.
     """
-    boot = zne_bootstrap(
-        run.counts_per_scale,
-        _with_mode(cfg, "scalar"),
-        observable_fn=observable_fn,
-        p_uniform=p_uniform,
-        p_ideal=p_ideal,
+    block = scalar_fit_block(
+        run.counts_per_scale, cfg, observable_fn, p_uniform, p_ideal
     )
-    block = dict(boot["fit"])
     block.update(
         {
-            "applicable": True,
-            "ci": [boot["lo"], boot["hi"]],
-            "bootstrap_se": boot["se"],
-            "n_failed": boot["n_failed"],
-            "B": boot["B"],
-            "bootstrap_seed": boot["seed"],
             "nominal_scales": list(run.nominal_scales),
             "realised_scales_exact": [list(f) for f in run.realised_scales_exact],
             "realised_scales_1q": list(run.realised_scales_1q),

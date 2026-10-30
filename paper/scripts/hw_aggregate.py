@@ -49,6 +49,13 @@ and writes:
 ``paper/tex/hw_table_config.tex``
     Table "hardware run configuration".
 
+For a job planned from a design file it also fits each record's named grids
+separately on the same counts (``lambda = 1`` shared; :func:`grid_fit`, the
+design's bootstrap) and writes ``paper/data/hw_grids_<date>.json`` and
+``paper/tex/hw_table_grids_<design name>.tex`` (record x grid: status,
+reported value and interval under ``REPORT_BOUNDS``, SE_boot from the
+unclipped interval, and the pre-registered SE_pred).
+
 With ``--grids <date>`` it writes only ``paper/tex/hw_table_grids.tex``
 (:func:`grid_table`): a later job's records beside the same records of the job
 of record, and, with ``--grids-prediction``, the model prediction made for the
@@ -84,7 +91,9 @@ import json
 import math
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +109,7 @@ from dgssp.backends import ERROR_CLASSES  # noqa: E402
 from dgssp.metrics import (  # noqa: E402
     distribution_solution_probability,
     percentile_interval,
+    solution_probability,
     survival_estimate,
     total_variation,
 )
@@ -108,7 +118,10 @@ from dgssp.mitigation.zne import (  # noqa: E402
     REPORT_BOUNDS_OPTIONS,
     RESOLVABILITY_K,
     RESOLVED_RULE,
+    exp_fixed_se,
+    fit_block_config,
     plan_scales,
+    scalar_fit_block,
     signal_direction,
 )
 from hardware_batch import (  # noqa: E402
@@ -116,10 +129,12 @@ from hardware_batch import (  # noqa: E402
     drift_metrics,
     latest_manifest_date,
     rel,
+    resolve,
     sha256_file,
     write_json,
 )
 from noise_model_check import median_errors, signal_kept  # noqa: E402
+from zne_theory_check import CI_TO_SE  # noqa: E402
 
 SUMMARY_SCHEMA = "dgssp/paper/hardware-summary/1"
 
@@ -131,6 +146,10 @@ JOB_OF_RECORD = "2026-10-25"
 
 #: The supplement table that sets a later job beside the job of record.
 GRID_TABLE = "hw_table_grids.tex"
+
+#: A design job's table of its named grids, each fitted on the same counts
+#: (``<name>`` is the design's name, e.g. ``job3``).
+SAMEJOB_GRID_TABLE = "hw_table_grids_{name}.tex"
 
 #: The label ``noise_model_check.py`` gives the execution-time calibration.
 EXEC_LABEL = "exec"
@@ -527,6 +546,158 @@ def prediction_entries(
         for row in manifest["records"]
         if row["kind"] == "zne" and row["key"] in predicted
     }
+
+
+# ---------------------------------------------------------------------------
+# Named grids of one job (design jobs)
+# ---------------------------------------------------------------------------
+
+
+def grid_fit(
+    record: Mapping[str, Any],
+    grid: Sequence[float],
+    *,
+    report_bounds: str | None = None,
+    B: int | None = None,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """
+    One named grid of a record, fitted on its own: the same counts, lambda = 1 shared.
+
+    The record's counts at the grid's scales go through
+    :func:`dgssp.mitigation.zne.scalar_fit_block` -- the estimator and
+    bootstrap the record's own ``zne_fit`` came from -- so a grid equal to all
+    of the record's scales reproduces that block.  Flags and the reported value
+    follow :func:`aggregate.rederive_flags` (``report_bounds``).
+
+    Parameters
+    ----------
+    record:
+        A ``zne`` record (hardware, dry run or prediction).
+    grid:
+        Nominal scales, each one the record ran.
+    report_bounds:
+        ``None`` -> :data:`REPORT_BOUNDS`.
+    B, seed:
+        Bootstrap of this fit; ``None`` keeps the record's own.
+
+    Returns
+    -------
+    dict
+        ``status``, the reported value and interval, ``value`` and ``ci`` as
+        fitted (unclipped), ``se_boot`` (the unclipped interval / 3.92),
+        ``se_formula`` (:func:`exp_fixed_se` at the observed points),
+        ``relative_se_formula``, the observations and the block itself.
+    """
+    stored = record["zne_fit"]
+    cfg = fit_block_config(stored)
+    if B is not None:
+        cfg = replace(cfg, n_bootstrap=int(B),
+                      bootstrap_seed=int(seed if seed is not None else cfg.bootstrap_seed))
+    realised_of = dict(zip(sorted(float(s) for s in stored["nominal_scales"]),
+                           sorted(float(s) for s in stored["scales"]), strict=True))
+    counts = {}
+    for nominal in grid:
+        realised = realised_of[float(nominal)]
+        found = _counts_at(record, realised)
+        if found is None:
+            raise ValueError(f"no counts at lambda = {nominal:g} in the record.")
+        counts[realised] = found
+    sols = list(record["metrics"]["solution_bitstrings"])
+    p_uniform = float(stored["null_value"])
+    p_ideal = exact_p_ideal(dict(record))
+    block = scalar_fit_block(counts, cfg, partial(solution_probability, solution_states=sols),
+                             p_uniform, p_ideal)
+    subset = {**record, "counts": {f"{s!r}": c for s, c in counts.items()}}
+    flags = rederive_flags(block, p_ideal, report_bounds=report_bounds, record=subset)
+    lo, hi = (float(x) for x in block["ci"])
+    se_boot = (hi - lo) / CI_TO_SE if math.isfinite(hi - lo) else None
+    formula = exp_fixed_se(block["scales"], block["observed"], block["shots"], p_uniform)
+    excess = formula["value"] - p_uniform
+    se_formula = formula["se"] if math.isfinite(formula["se"]) else None
+    reported_ci = flags["reported_ci"]
+    return {
+        "grid": [float(s) for s in grid],
+        "realised": list(block["scales"]),
+        "observed": list(block["observed"]),
+        "shots": list(block["shots"]),
+        "p_uniform": p_uniform,
+        "p_ideal": p_ideal,
+        "status": status_of(flags),
+        "resolved": flags["resolved"],
+        "identifiable": flags["identifiable"],
+        "reported_value": flags["reported_value"],
+        "reported_lo": reported_ci[0] if reported_ci else None,
+        "reported_hi": reported_ci[1] if reported_ci else None,
+        "report_bounds": flags["report_bounds"],
+        "value": block["value"],
+        "ci": [lo, hi],
+        "rate": formula["rate"],
+        "se_boot": se_boot,
+        "se_formula": se_formula,
+        "relative_se_formula": (se_formula / abs(excess)
+                                if se_formula is not None and excess else None),
+        "B": block["B"],
+        "bootstrap_seed": block["bootstrap_seed"],
+    }
+
+
+def grid_rows(
+    manifest: Mapping[str, Any],
+    hw: Mapping[str, Mapping[str, Any]],
+    *,
+    report_bounds: str | None = None,
+    B: int | None = None,
+    seed: int | None = None,
+    predicted: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Every record x named grid of a design job, each grid fitted on its own.
+
+    ``predicted`` is the pre-registration's ``fits`` block (``{record: {grid:
+    prediction}}``): its ``se_pred`` stands beside each fit.
+    """
+    rows = []
+    for row in manifest["records"]:
+        for name, grid in (row.get("grids") or {}).items():
+            if row["key"] not in hw:
+                continue
+            fit = grid_fit(hw[row["key"]], grid, report_bounds=report_bounds, B=B, seed=seed)
+            pred = ((predicted or {}).get(row["key"]) or {}).get(name) or {}
+            rows.append({"key": row["key"], "grid_name": name, **fit,
+                         "se_pred": pred.get("se_pred"),
+                         "predicted_status": pred.get("status")})
+    return rows
+
+
+def samejob_grid_table(rows: Sequence[Mapping[str, Any]], date: str, report_bounds: str) -> str:
+    """Table "named grids on the same counts" (record x grid), as LaTeX."""
+    lines = [
+        "% Generated by paper/scripts/hw_aggregate.py --date " + date + " -- do not edit.",
+        f"% each named grid fitted separately on the same counts (lambda = 1 shared); "
+        f"rule {RESOLVED_RULE}; reported ZNE: REPORT_BOUNDS = {report_bounds}; "
+        "SE_boot from the unclipped interval",
+        "\\begin{tabular}{llllrrr}",
+        "\\hline",
+        "Record & Grid & $\\lambda$ & Status & ZNE reported [95\\% CI] & SE$_\\mathrm{boot}$ "
+        "& SE$_\\mathrm{pred}$ \\\\",
+        "\\hline",
+    ]
+    for r in rows:
+        scales = ", ".join(f"{s:g}" for s in r["grid"])
+        cell = (f"{_num(r['reported_value'])} [{_num(r['reported_lo'])}, {_num(r['reported_hi'])}]"
+                if r["status"] == "resolved" else STATUS_SHORT.get(str(r["status"]), "---"))
+        lines.append(" & ".join([
+            _tex(r["key"]), _tex(r["grid_name"]), f"$\\{{{scales}\\}}$", _tex(r["status"]),
+            cell, _num(r["se_boot"]), _num(r["se_pred"]),
+        ]) + " \\\\")
+    lines += [
+        "\\hline",
+        "\\end{tabular}",
+        "% SE_pred: the pre-registered prediction (preregistration_<date>.json), at alpha_all on",
+        "%   the plan calibration; --- where none was made.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def drift_entries(
@@ -1594,6 +1765,36 @@ def write_grid_table(args: argparse.Namespace, date: str) -> int:
     return 0
 
 
+def write_samejob_grids(
+    args: argparse.Namespace, inputs: HwInputs, manifest: Mapping[str, Any], report_bounds: str
+) -> list[Path]:
+    """
+    A design job's named grids, each fitted on the same counts: JSON and LaTeX.
+
+    The bootstrap of these fits is the design's (``grid_fit_bootstrap``); the
+    pre-registration, when there is one, adds its ``se_pred``.
+    """
+    design = json.loads(resolve(manifest["design"]["file"]).read_text(encoding="utf-8"))
+    boot = design.get("grid_fit_bootstrap") or {}
+    prereg = _load_json(inputs.paths.hardware_dir / f"preregistration_{inputs.date}.json")
+    rows = grid_rows(manifest, load_records(inputs.paths.hardware_out_dir),
+                     report_bounds=report_bounds, B=boot.get("B"), seed=boot.get("seed"),
+                     predicted=_get(prereg, "predictions", "fits"))
+    payload = {"date": inputs.date, "design": manifest["design"]["file"],
+               "report_bounds": report_bounds, "resolved_rule": RESOLVED_RULE,
+               "bootstrap": boot, "rows": rows, "provenance": record_provenance()}
+    path_json = write_json(args.data_dir / f"hw_grids{output_suffix(inputs.date)}.json", payload)
+    path_tex = args.tex_dir / SAMEJOB_GRID_TABLE.format(name=manifest["design"]["name"])
+    path_tex.write_text(samejob_grid_table(rows, inputs.date, report_bounds), encoding="utf-8")
+    print(f"named grids, same counts ({len(rows)} fits):")
+    for r in rows:
+        print(f"  {r['key']:<20} {r['grid_name']:<7} {r['status']:<26} reported "
+              f"{_num(r['reported_value'])} [{_num(r['reported_lo'])}, {_num(r['reported_hi'])}]"
+              f"  SE_boot {_num(r['se_boot'])}  SE_formula {_num(r['se_formula'])}  "
+              f"SE_pred {_num(r['se_pred'])}")
+    return [path_json, path_tex]
+
+
 def print_model_vs_hardware(summary: Mapping[str, Any]) -> None:
     """The deviation table of :func:`model_vs_hardware`, one line per group."""
     mvh = summary.get("model_vs_hardware") or {}
@@ -1703,6 +1904,9 @@ def main(argv: list[str] | None = None) -> int:
               f"{d['tv_null_mean']:.4f}, 95th pct {d['tv_null_q95']:.4f}, p = {d['tv_p_value']:.3f}")
     print_model_vs_hardware(summary)
     print_survival(summary.get("survival"))
+    manifest = json.loads(inputs.paths.manifest.read_text(encoding="utf-8"))
+    if manifest.get("design"):
+        written += write_samejob_grids(args, inputs, manifest, summary["report_bounds"])
     if missing:
         print("  ! not found (columns left empty): " + ", ".join(missing))
     for path in written:

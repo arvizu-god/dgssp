@@ -146,9 +146,19 @@ def read_cached_counts(cache: Path, alpha: float, which: str) -> list[dict[str, 
     return [dict(c) for c in stored["counts"]]
 
 
-def load_job(date: str, which: str = "all") -> dict[str, Any]:
+def load_job(
+    date: str,
+    which: str = "all",
+    *,
+    label: str | None = None,
+    hardware_dir: Path = HARDWARE_DIR,
+    data_dir: Path = DATA_DIR,
+) -> dict[str, Any]:
     """
     One job's PUBs with signal, hardware and cached-model P(solution).
+
+    ``label`` names the alpha cache (default :data:`CACHE_LABELS` of the
+    date); a later job's in-sample cache is ``exec_insample`` too.
 
     Returns
     -------
@@ -159,13 +169,14 @@ def load_job(date: str, which: str = "all") -> dict[str, Any]:
         ``physical_qubits``), ``hw`` ``(n_pub,)`` and ``sim``
         ``(n_alpha, n_pub)``.
     """
-    paths = Paths(date, HARDWARE_DIR, DATA_DIR)
+    paths = Paths(date, hardware_dir, data_dir)
     manifest, _, _ = load_manifest(paths.manifest)
-    cache = alpha_cache_dir(DATA_DIR, CACHE_LABELS[date], which, date)
+    label = label or CACHE_LABELS[date]
+    cache = alpha_cache_dir(data_dir, label, which, date)
     fit_path = cache / "fit.json"
     if not fit_path.exists():
         raise SystemExit(f"{rel(fit_path)} missing: run noise_model_check.py --fit-alpha "
-                         f"--date {date} --label {CACHE_LABELS[date]}"
+                         f"--date {date} --label {label}"
                          + ("" if which == "all" else f" --scale-only {which}"))
     fit = _load_json(fit_path)
     alphas = [float(a) for a in fit["alphas"]]
@@ -420,17 +431,77 @@ def variants_block() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def alpha_r_fit(job: Mapping[str, Any], base: str, *, keep_draws: bool = False) -> dict[str, Any]:
+    """
+    One record's alpha_r: its lambda = 1 PUB and drift copy pooled, with the exclusions.
+
+    Returns
+    -------
+    dict
+        ``idx`` (its PUBs in ``job``), ``main`` (the record's own PUB),
+        ``fit`` (:func:`noise_model_check.fit_alpha`, B = :data:`RECORD_B`),
+        ``monotone`` and ``reasons`` (over-rotated, grid edge, non-monotone).
+    """
+    pubs, hw, sim, shots, alphas = job["pubs"], job["hw"], job["sim"], job["shots"], job["alphas"]
+    idx = [j for j, p in enumerate(pubs) if p["base"] == base and p["scale"] == 1.0]
+    main = next(j for j in idx if pubs[j]["key"] == base)
+    fit = fit_alpha(alphas, sim[:, idx], shots, hw[idx], shots, B=RECORD_B, seed=RECORD_SEED,
+                    keep_draws=keep_draws)
+    curves_monotone = all(monotone(sim[:, j], shots) for j in idx)
+    reasons = []
+    if pubs[main]["iterations"] > pubs[main]["r_opt"]:
+        reasons.append("over-rotated (r > r_opt)")
+    if fit["at_grid_edge"]:
+        reasons.append("alpha_r at the grid edge")
+    if not curves_monotone:
+        reasons.append("model P(solution) not monotone in alpha")
+    return {"idx": idx, "main": main, "fit": fit, "monotone": curves_monotone,
+            "reasons": reasons}
+
+
+def alpha_r_rows(job: Mapping[str, Any], *, random_k: float = 2.0) -> list[dict[str, Any]]:
+    """
+    Per record of any job: alpha_r with the step-4 exclusions, plus "at random".
+
+    A record whose pooled lambda = 1 ``P(solution)`` is less than
+    ``random_k`` standard errors above ``P_uniform`` is excluded "at random"
+    (its alpha_r runs to the grid edge, as P-n3-M2-17's did on day 2).
+    Needs no survival block, so it serves a job :func:`record_rows` does not.
+    """
+    pubs, hw, shots = job["pubs"], job["hw"], job["shots"]
+    rows = []
+    for base in dict.fromkeys(p["base"] for p in pubs):
+        one = alpha_r_fit(job, base)
+        fit, idx, main = one["fit"], one["idx"], one["main"]
+        p = pubs[main]
+        pooled = float(np.mean(hw[idx]))
+        sigma = proportion_sigma(pooled, shots * len(idx))
+        reasons = list(one["reasons"])
+        if pooled < p["p_uniform"] + random_k * sigma:
+            reasons.append(f"at random (lambda = 1 less than {random_k:g} sigma above P_u)")
+        rows.append({
+            "id": f"{base}@{job['date']}", "key": base, "job": job["date"],
+            "pubs": [pubs[j]["pub"] for j in idx], "shots": shots,
+            "hardware": [float(hw[j]) for j in idx], "hardware_pooled": pooled,
+            "p_uniform": p["p_uniform"], "p_ideal": p["p_ideal"],
+            "alpha_r": fit["alpha"], "alpha_r_ci": fit["ci"],
+            "alpha_r_ci_scaled": fit["ci_scaled"], "alpha_r_se": fit["bootstrap_se"],
+            "alpha_r_chi2_red": fit["chi2_red"], "at_grid_edge": fit["at_grid_edge"],
+            "model_monotone": one["monotone"], "excluded_because": reasons,
+            "in_trend": not reasons,
+        })
+    return rows
+
+
 def record_rows(job: Mapping[str, Any], *, keep_draws_for: str | None = None) -> list[dict[str, Any]]:
     """Per record: alpha_r on its lambda = 1 PUBs (drift copy pooled), exponent, exclusions."""
-    pubs, hw, sim, shots, alphas = job["pubs"], job["hw"], job["sim"], job["shots"], job["alphas"]
+    pubs, hw, shots = job["pubs"], job["hw"], job["shots"]
     survival = survival_records(job["date"])
     rows = []
     for base in dict.fromkeys(p["base"] for p in pubs):
-        idx = [j for j, p in enumerate(pubs) if p["base"] == base and p["scale"] == 1.0]
-        main = next(j for j in idx if pubs[j]["key"] == base)
+        one = alpha_r_fit(job, base, keep_draws=base == keep_draws_for)
+        idx, main, fit, curves_monotone = one["idx"], one["main"], one["fit"], one["monotone"]
         p = pubs[main]
-        fit = fit_alpha(alphas, sim[:, idx], shots, hw[idx], shots, B=RECORD_B, seed=RECORD_SEED,
-                        keep_draws=base == keep_draws_for)
         surv = survival[base]
         s1, two_q = float(surv["survival_alpha_1"]), int(surv["two_q_physical"])
         p_ideal, p_u = p["p_ideal"], p["p_uniform"]
@@ -441,14 +512,7 @@ def record_rows(job: Mapping[str, Any], *, keep_draws_for: str | None = None) ->
             raise SystemExit(f"{base}: kept {kept} != stored {stored} in {rel(summary_path(job['date']))}")
         exponent = math.log(kept) / math.log(s1) if 0 < kept < 1 else None
         exponent_se = kept_se / (kept * abs(math.log(s1))) if exponent is not None else None
-        curves_monotone = all(monotone(sim[:, j], shots) for j in idx)
-        reasons = []
-        if p["iterations"] > p["r_opt"]:
-            reasons.append("over-rotated (r > r_opt)")
-        if fit["at_grid_edge"]:
-            reasons.append("alpha_r at the grid edge")
-        if not curves_monotone:
-            reasons.append("model P(solution) not monotone in alpha")
+        reasons = list(one["reasons"])
         if job["date"] == JOB2 and base == DAY2_FAILURE:
             reasons.append("day-2 out-of-sample failure (at random on every circuit)")
         row = {
@@ -632,10 +696,17 @@ def _cz_errors(payload: Mapping[str, Any]) -> dict[frozenset[int], float]:
             if r["error"] is not None and r["qubits"] is not None}
 
 
-def layered_day(date: str, alpha_all: float, alpha_2q: float | None) -> dict[str, Any]:
+def layered_day(
+    date: str,
+    alpha_all: float,
+    alpha_2q: float | None,
+    *,
+    hardware_dir: Path = HARDWARE_DIR,
+    data_dir: Path = DATA_DIR,
+) -> dict[str, Any]:
     """The layer fidelity frozen with one job's execution calibration, against alpha * eps_CZ."""
-    paths = Paths(date, HARDWARE_DIR, DATA_DIR)
-    calibration = HARDWARE_DIR / f"calibration_exec_{date}.json"
+    paths = Paths(date, hardware_dir, data_dir)
+    calibration = hardware_dir / f"calibration_exec_{date}.json"
     raw = _load_json(calibration).get("raw_properties")
     lf = layer_fidelity(raw)
     if not lf:

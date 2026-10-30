@@ -181,6 +181,7 @@ def _filled_checklist() -> str:
         if line.startswith("- [ ]"):
             line = line.replace("- [ ]", "- [x]")
             line = line.replace("<hash>", HEAD[:10]).replace("<date>", DATE)
+            line = line.replace("<sha256>", "0" * 64)
             line = line.replace("<instance 1>", "P-n2-M1-11").replace("<instance 2>", "P-n3-M2-17")
             if line.startswith("- [x] Estimated QPU time"):
                 line = "- [x] Estimated QPU time <= 50% of remaining allowance: estimate 250 s, remaining 600 s"

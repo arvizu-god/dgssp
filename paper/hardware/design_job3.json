@@ -1,0 +1,248 @@
+{
+  "schema": "dgssp/paper/hardware-design/1",
+  "name": "job3",
+  "written": "2026-10-29",
+  "source": "paper/notes/prompts_steps6-7.md (design table and Q1-Q9), with the 13 fixes of the step-6a review accepted 2026-10-29",
+  "purpose": "Third ibm_fez job, pre-registered: re-send job-1 and job-2 circuits unchanged to test whether alpha_hat holds on a third day (Q1), all-errors vs CZ-only (Q2), the grid alone on one circuit (Q3), the error formula (Q4), the predicted ZNE statuses (Q5), alpha_r as a circuit property (Q6), P-n3-M2-17 layout or day (Q7), gentle-grid ZNE at n = 4 (Q8) and the P-n4-M1-10_r2 residual (Q9).",
+  "device": "ibm_fez",
+  "shots": 12288,
+  "twirling": "on",
+  "dd": "off",
+  "report_bounds": "clip",
+  "resolved_rule": "v2",
+  "grid_fit_bootstrap": {"B": 2000, "seed": 0, "why": "Q4 compares bootstrap SEs to the formula; at B = 500 the percentile width carries ~7 % noise of its own"},
+  "alpha": {
+    "all": {"file": "paper/data/alpha_robustness.json", "path": ["variants", "all", "all", "alpha"], "scale_only": "all"},
+    "2q": {"file": "paper/data/alpha_robustness.json", "path": ["variants", "2q", "all", "alpha"], "scale_only": "2q"}
+  },
+  "alpha_r_band": {"file": "paper/data/alpha_robustness.json", "rows": ["depth", "rows"], "in_trend_only": true, "quantiles": [0.16, 0.84], "why": "Q4b: the prospective SE_pred band from the between-circuit spread of alpha_r"},
+  "alpha_r_grid": {"file": "paper/data/hw_alpha_exec_insample_2026-10-28/fit.json", "path": ["alphas"], "why": "Q6: the day-3 alpha_r cache uses the grid of step 4's in-sample cache"},
+  "grids": {
+    "odd": [1.0, 3.0, 5.0],
+    "gentle": [1.0, 1.25, 1.5],
+    "rule": {
+      "planner": "plan_scales_spacing",
+      "candidates": "sim_campaign.PLAN_CANDIDATES",
+      "k": "sim_campaign.PLAN_K",
+      "n_points": 3,
+      "alpha": "all",
+      "survival": "the record's lambda = 1 signal kept, simulated with the full noise model of the plan calibration at alpha 'all', on the ISA circuit the job sends"
+    }
+  },
+  "records": [
+    {"key": "P-n2-M1-11_L1", "source": "P-n2-M1-11:L1=2026-10-25", "grids": ["gentle", "rule"], "drift": true, "circuit_set": "fitted"},
+    {"key": "P-n3-M1-17_L1", "source": "P-n3-M1-17:L1=2026-10-25", "grids": ["odd", "gentle"], "drift": false, "circuit_set": "fitted"},
+    {"key": "P-n3-M1-17_r1_L1", "source": "P-n3-M1-17_r1:L1=2026-10-25", "grids": ["gentle"], "drift": false, "circuit_set": "fitted"},
+    {"key": "P-n4-M1-10_r1_L1", "source": "P-n4-M1-10_r1:L1=2026-10-25", "grids": ["gentle"], "drift": false, "circuit_set": "fitted"},
+    {"key": "P-n4-M1-10_r2_L1", "source": "P-n4-M1-10_r2:L1=2026-10-25", "grids": [], "drift": false, "circuit_set": "fitted"},
+    {"key": "P-n3-M2-17_L1", "source": "P-n3-M2-17:L1=2026-10-25", "grids": [], "drift": false, "circuit_set": "layout_test"},
+    {"key": "P-n3-M2-17_L2", "source": "P-n3-M2-17:L2=2026-10-28", "grids": [], "drift": true, "circuit_set": "layout_test"},
+    {"key": "P-n2-M1-11_L2", "source": "P-n2-M1-11:L2=2026-10-28", "grids": [], "drift": false, "circuit_set": "out_of_sample"},
+    {"key": "P-n3-M1-17_L2", "source": "P-n3-M1-17:L2=2026-10-28", "grids": [], "drift": false, "circuit_set": "out_of_sample"},
+    {"key": "P-n3-M1-17_r1_L2", "source": "P-n3-M1-17_r1:L2=2026-10-28", "grids": [], "drift": false, "circuit_set": "out_of_sample"}
+  ],
+  "circuit_sets": {
+    "fitted": "job-1 circuits: both alpha fits (all, 2q) were made on them",
+    "out_of_sample": "job-2 circuits: fitted by neither model; CZ-only predicted them better on day 2",
+    "layout_test": "P-n3-M2-17 on the day-1 and the day-2 layout (Q7); excluded from Q1 and Q2"
+  },
+  "estimate": {"model": "usage_over_floor", "jobs": ["2026-10-25", "2026-10-28"]},
+  "trim_order": [
+    {"drop": "folds", "record": "P-n3-M1-17_r1_L1", "removes": ["Q4a and Q5 rows of P-n3-M1-17_r1_L1"]},
+    {"drop": "folds", "record": "P-n4-M1-10_r1_L1", "removes": ["Q8", "Q5 row of P-n4-M1-10_r1_L1"]}
+  ],
+  "criteria": [
+    {
+      "id": "Q1",
+      "question": "Does alpha_hat hold on a third day?",
+      "test": "lambda1_deviation",
+      "tested": true,
+      "model": "all",
+      "prediction": "plan calibration, every error x alpha 'all' (preregister.py); the execution-calibration prediction is secondary",
+      "view": "P(solution) at lambda = 1; a record's drift copy pooled with it (one distinct circuit per record)",
+      "sets": ["fitted", "out_of_sample"],
+      "threshold_abs": 0.05,
+      "verdict_rule": "per set: 'held' iff every record's |P_hw - P_pred| <= threshold_abs; RMS and max reported",
+      "sentences": {
+        "fitted.held": "On a third day, alpha_hat predicted every circuit it was fitted to within {threshold_abs} at lambda = 1 (RMS {rms:.3f}, largest {max_abs:.3f}).",
+        "fitted.not held": "On a third day, alpha_hat missed {n_out} of the {n} circuits it was fitted to by more than {threshold_abs} at lambda = 1 (RMS {rms:.3f}, largest {max_abs:.3f}).",
+        "out_of_sample.held": "On circuits it was not fitted to, from another day's transpilation, alpha_hat held within {threshold_abs} (RMS {rms:.3f}, largest {max_abs:.3f}).",
+        "out_of_sample.not held": "On circuits it was not fitted to, alpha_hat missed {n_out} of {n} by more than {threshold_abs} (RMS {rms:.3f}, largest {max_abs:.3f})."
+      }
+    },
+    {
+      "id": "Q2",
+      "question": "All errors x alpha_all, or CZ errors x alpha_2q?",
+      "test": "model_comparison",
+      "tested": true,
+      "models": ["all", "2q"],
+      "prediction": "plan calibration, each model at its own alpha",
+      "view": "lambda = 1 RMS over the same records (drift copies pooled)",
+      "sets": ["out_of_sample", "fitted"],
+      "primary_set": "out_of_sample",
+      "margin": 0.005,
+      "decidable_min_predicted_rms_difference": 0.01,
+      "baselines": {
+        "fitted": {"what": "the same circuits on day 1 (in-sample): each model's lambda = 1 deviation from the job-1 alpha cache of its error class, at its alpha", "fit_file": "paper/data/hw_alpha_exec{suffix}_2026-10-25/fit.json", "day": "job 2026-10-25 (in-sample)"},
+        "out_of_sample": {"what": "the same circuits on day 2, predicted before that job", "file": "paper/data/alpha_robustness.json", "path": ["variants", "{which}", "out_of_sample_job2", "per_record_lambda1"], "day": "job 2026-10-28 (out of sample)"}
+      },
+      "verdict_rule": "per set: 'not decidable by design' if the predicted RMS of (P_all - P_2q) < decidable_min_predicted_rms_difference; else '<model> better' iff its RMS is lower by >= margin; else 'indistinguishable'",
+      "sentences": {
+        "all better": "Scaling every error fits the third day better than scaling the CZ errors alone (RMS {rms_all:.3f} vs {rms_2q:.3f}).",
+        "2q better": "Scaling the CZ errors alone fits the third day better than scaling every error (RMS {rms_2q:.3f} vs {rms_all:.3f}).",
+        "indistinguishable": "The third day does not separate the two models (RMS {rms_all:.3f} vs {rms_2q:.3f}, margin {margin}).",
+        "not decidable by design": "The two models predict these circuits too alike to be told apart (predicted RMS difference {predicted_rms_difference:.3f})."
+      }
+    },
+    {
+      "id": "Q3",
+      "question": "Does the grid alone decide?",
+      "test": "grid_alone",
+      "tested": true,
+      "record": "P-n3-M1-17_L1",
+      "odd_grid": "odd",
+      "gentle_grid": "gentle",
+      "odd_statuses": ["not identifiable", "identified, not resolved"],
+      "gentle_status": "resolved",
+      "view": "status of each named grid fitted separately on the same counts (lambda = 1 shared)",
+      "note": "The odd half is close to certain (lambda = 5 is expected at random); the question is decided by the gentle fit on the day-1 circuit.",
+      "verdict_rule": "'confirmed' iff odd status in odd_statuses and gentle status == gentle_status; else 'not confirmed'",
+      "sentences": {
+        "confirmed": "On the same circuit, layout, shots and job, the odd grid could not resolve the extrapolation ({odd_status}) and the gentle grid did: the grid alone decided.",
+        "not confirmed": "On the same circuit and job the odd grid gave '{odd_status}' and the gentle grid '{gentle_status}': the grid alone did not decide as predicted."
+      }
+    },
+    {
+      "id": "Q4",
+      "question": "Does the error formula predict hardware?",
+      "test": "error_formula",
+      "tested": true,
+      "view": "SE_boot = (hi - lo) / 3.92 of the UNCLIPPED bootstrap interval (clipping at 1 shrinks the interval)",
+      "parts": {
+        "Q4a": {
+          "tested": true,
+          "what": "the formula itself: exp_fixed_se at the observed P(lambda) vs the bootstrap",
+          "eligible_max_predicted_relative_se": 0.2,
+          "eligibility": "predicted relative SE (pre-registered) <= eligible_max_predicted_relative_se and observed status 'resolved'",
+          "ratio": "SE_boot / SE_formula(observed)",
+          "window": [0.75, 1.33],
+          "verdict_rule": "'held' iff every eligible fit's ratio is inside window; 'not tested' if no fit is eligible"
+        },
+        "Q4b": {
+          "tested": false,
+          "what": "the prospective prediction: SE_boot / SE_pred(alpha_all), with the SE_pred band at the alpha_r quantiles (alpha_r_band)",
+          "reason_not_tested": "SE_pred moves -25 %/+35 % for a 15 % error in c, the size of the between-circuit alpha_r scatter"
+        },
+        "Q4c": {
+          "tested": true,
+          "what": "the grid rule on P-n2-M1-11_L1: SE_boot(gentle) / SE_boot(rule) vs the predicted SE_pred(gentle) / SE_pred(rule)",
+          "record": "P-n2-M1-11_L1",
+          "numerator_grid": "gentle",
+          "denominator_grid": "rule",
+          "tolerance_rel": 0.30,
+          "verdict_rule": "'held' iff |observed / predicted - 1| <= tolerance_rel"
+        }
+      },
+      "sentences": {
+        "Q4a.held": "Where its predicted relative error was at most {eligible_max_predicted_relative_se}, the propagated error matched the bootstrap on every resolved hardware fit (ratios {ratios}).",
+        "Q4a.not held": "Where its predicted relative error was at most {eligible_max_predicted_relative_se}, the propagated error missed the bootstrap on {n_out} of {n} resolved hardware fits (ratios {ratios}).",
+        "Q4a.not tested": "No resolved fit had a predicted relative error of at most {eligible_max_predicted_relative_se}; the formula was not tested.",
+        "Q4c.held": "The grid rule's predicted gain held: the gentle grid's error was {observed:.2f} times the rule grid's, against {predicted:.2f} predicted.",
+        "Q4c.not held": "The grid rule's predicted gain did not hold: the gentle grid's error was {observed:.2f} times the rule grid's, against {predicted:.2f} predicted.",
+        "Q4c.not tested": "The P-n2 grid comparison was not tested: {reason}."
+      }
+    },
+    {
+      "id": "Q5",
+      "question": "Predicted ZNE status",
+      "test": "status_match",
+      "tested": false,
+      "view": "every record x named grid, fitted separately",
+      "prediction": "P(status) by a parametric bootstrap of binomial counts at the alpha_all prediction and the planned shots",
+      "bootstrap": {"B": 2000, "seed": 0},
+      "verdict_rule": "reported: how many fits got the pre-registered status (the gate at the expected values), against the number expected if the predictions are right (the sum of each pre-registered status's bootstrap probability)",
+      "sentences": {
+        "reported": "The pre-registered status matched on {matches} of {n} fits; the predictions expected {expected:.1f}."
+      }
+    },
+    {
+      "id": "Q6",
+      "question": "Is alpha_r a property of the circuit?",
+      "test": "alpha_r_reproducibility",
+      "tested": true,
+      "references": {"2026-10-25": "day 1 (job-1 circuits)", "2026-10-28": "day 2 (job-2 circuits)"},
+      "reference_rows": {"file": "paper/data/alpha_robustness.json", "rows": ["depth", "rows"], "id": "<source key>@<source date>"},
+      "data": "per record, alpha_r fitted to its lambda = 1 PUB with its drift copy pooled, on the alpha grid of the day's execution calibration (step 4's method); bootstrap SE (alpha_r_se)",
+      "exclusion": "step 4's rule on either day: over-rotated (r > r_opt), alpha_r at the grid edge, non-monotone model curve, at random (lambda = 1 less than 2 sigma above P_u)",
+      "random_k_sigma": 2.0,
+      "remove_shift_per_reference_day": true,
+      "max_chi2_red_differences": 2.0,
+      "min_chi2_red_between_day3": 2.0,
+      "caveat": "alpha_r intervals hold shot noise only; calibration-measurement noise is not in them, so the test leans toward 'not reproducible'",
+      "verdict_rule": "'reproducible per circuit' iff chi2/dof of the differences, after removing one weighted-mean shift per reference day (dof = n - number of reference days), <= max_chi2_red_differences AND the day-3 between-circuit chi2/dof about its weighted mean > min_chi2_red_between_day3; 'not reproducible' if the first fails; 'no scatter to reproduce' if only the second fails; Spearman reported, not tested",
+      "sentences": {
+        "reproducible per circuit": "A circuit's alpha is a property of the circuit: on a third day it reproduced circuit by circuit (chi2/dof {chi2_red_differences:.2f} after a common shift of {shifts}), while circuits still differed from one another (chi2/dof {chi2_red_between:.2f}).",
+        "not reproducible": "A circuit's alpha did not reproduce on a third day (chi2/dof {chi2_red_differences:.2f} after a common shift of {shifts}): the scatter between circuits is not a fixed property of each circuit.",
+        "no scatter to reproduce": "On the third day the circuits no longer differed beyond shot noise (chi2/dof {chi2_red_between:.2f}), so there was no per-circuit scatter to reproduce.",
+        "not tested": "Not tested: {n} circuits remained after the exclusions, too few for the differences and the scatter."
+      }
+    },
+    {
+      "id": "Q7",
+      "question": "P-n3-M2-17: layout or day?",
+      "test": "layout_or_day",
+      "tested": true,
+      "records": {"L1": "P-n3-M2-17_L1", "L2": "P-n3-M2-17_L2"},
+      "prediction": "plan calibration, alpha 'all'",
+      "view": "P(solution) at lambda = 1, drift copy pooled",
+      "random_k_sigma": 2.0,
+      "fine_threshold": 0.05,
+      "categories": {
+        "random": "P_hw < P_u + random_k_sigma * sigma(P_hw)",
+        "fine": "not random and P_hw >= P_pred - fine_threshold",
+        "degraded": "not random and P_hw < P_pred - fine_threshold"
+      },
+      "decidability": "per layout: P_pred - P_u >= fine_threshold + random_k_sigma * sigma(P_pred); else that layout's category is 'calibration predicts it'",
+      "map": {
+        "L2=random,L1=fine": "a persistent defect of the day-2 layout that the calibration does not show",
+        "L2=fine,L1=fine": "a transient on 2026-10-28",
+        "L2=random,L1=random": "not a layout effect: both layouts were at random on the third day; open",
+        "L2=fine,L1=random": "the defect moved to the day-1 layout; open",
+        "L2=degraded,L1=fine": "a persistent, partial defect of the day-2 layout: still below its calibration, no longer at random",
+        "L2=degraded,L1=degraded": "both layouts below the prediction: this instance degraded on the third day, on either layout; open",
+        "L2=degraded,L1=random": "the day-1 layout at random and the day-2 layout degraded; open",
+        "L2=random,L1=degraded": "the day-2 layout still at random and the day-1 layout degraded; mostly a layout defect, open",
+        "L2=fine,L1=degraded": "the day-2 layout recovered and the day-1 layout degraded: a transient that moved; open"
+      }
+    },
+    {
+      "id": "Q8",
+      "question": "Does gentle-grid ZNE reach n = 4?",
+      "test": "reaches_n4",
+      "tested": true,
+      "record": "P-n4-M1-10_r1_L1",
+      "grid": "gentle",
+      "verdict_rule": "'reaches' iff the gentle fit is resolved; 'does not reach' otherwise (the lambda = 1 value is reported); 'not tested' if the record's folds were trimmed. Whether the interval contains the ideal is reported, not tested",
+      "sentences": {
+        "reaches": "The gentle grid resolves the extrapolation at n = 4, r = 1: {value:.3f} [{lo:.3f}, {hi:.3f}] against an ideal of {p_ideal:.3f}.",
+        "does not reach": "At n = 4, r = 1 the gentle grid did not resolve the extrapolation ({status}); the unmitigated value is {p1:.3f}.",
+        "not tested": "Not tested: the folds of {record} were trimmed."
+      }
+    },
+    {
+      "id": "Q9",
+      "question": "Does the P-n4-M1-10_r2 residual reproduce?",
+      "test": "residual_reproduces",
+      "tested": false,
+      "record": "P-n4-M1-10_r2_L1",
+      "day1": {"file": "paper/data/alpha_robustness.json", "rows": ["residuals", "rows"], "key": "P-n4-M1-10_r2"},
+      "view": "lambda = 1 residual P_hw - P_pred(alpha 'all'), day 3 (plan calibration) beside day 1 (execution calibration, in-sample)",
+      "sentences": {
+        "reported": "The day-1 residual of P-n4-M1-10_r2 at lambda = 1 was {day1:+.3f} (z {day1_z:+.1f}); on the third day it was {day3:+.3f} (z {day3_z:+.1f})."
+      }
+    }
+  ],
+  "reported_untested": [
+    {"id": "EPLG", "what": "day-3 layer fidelity: EPLG and EPLG / median CZ from the execution calibration's raw_properties.general, beside days 1-2 (alpha_robustness.json layered.days)"}
+  ]
+}

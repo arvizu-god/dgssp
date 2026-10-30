@@ -14,6 +14,20 @@ to submit unless:
 - the budget line gives the estimate (not lower than the manifest's) and the
   remaining allowance, in seconds, with the estimate at most 50 % of it.
 
+For a manifest planned from a design file (`--plan --design`), also:
+
+- `paper/hardware/preregistration_<date>.json` exists, was made from this
+  manifest, is committed, and `HEAD` is on `origin/main` after `git fetch`;
+- the "Pre-registration pushed" line names the commit that holds it and its
+  sha256 (both printed by `preregister.py` and `git log`);
+- the pytest line may name the code commit instead of `HEAD`, as long as
+  every file changed since is one of this job's (`paper/hardware/`, or a
+  `paper/data/` folder named after the date);
+- the calibration entries of the job's qubits are unchanged since `--plan`
+  (else `--accept-recalibration`).
+
+For any other manifest, tick the pre-registration line with "not a design job".
+
 Keep each line's opening words as they are: the script finds the pytest and
 budget lines by how they start.
 
@@ -29,6 +43,7 @@ budget lines by how they start.
 - [ ] Token in env: `$env:QISKIT_IBM_TOKEN` set in this PowerShell window only, not saved in any file
 - [ ] Job log path writable: `runs/jobs.jsonl`
 - [ ] account_facts.md filled (Status: filled ____), and its primary device is the manifest's backend
+- [ ] Pre-registration pushed: commit <hash>, sha256 <sha256>, pushed at ____ UTC
 
 ## After `--submit` (not checked by the script)
 

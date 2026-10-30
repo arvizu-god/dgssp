@@ -29,9 +29,21 @@ Modes
     circuit that job sent, folded and submitted like the rest.  ``--drift KEY ...`` names the drift repeats instead of the
     automatic choice.
 
+    ``--design <file>`` (schema ``dgssp/paper/hardware-design/1``) plans a job
+    from a design file instead: every record a pinned past circuit with its
+    own named grids (odd / gentle / a ``plan_scales_spacing`` "rule" grid
+    resolved here from the simulated lambda = 1 signal at alpha_hat), run as
+    their union with lambda = 1 shared; lambda = 1-only records (kind
+    ``single``); the drift repeats; the estimate from past jobs' usage / floor;
+    the trim order applied, and reported, when the estimate is over the cap.
+    The manifest stores each record's named grids and a ``design`` block
+    (alphas, rule grids, trims, pinned 2Q counts vs their sources).
+
     Nothing is submitted.  ``--offline-backend fake_marrakesh`` does the same
-    against a bundled fake device without the service (rehearsal only:
-    ``--submit`` refuses such a manifest).
+    against a bundled fake device without the service, and
+    ``--offline-backend snapshot:<calibration file>`` against a saved
+    calibration rebuilt as its device (rehearsal only: ``--submit`` refuses
+    such a manifest).
 
 ``--dry-run``
     Sample the manifest's circuits on an ``AerSimulator`` carrying the saved
@@ -58,7 +70,12 @@ Modes
     ticked and names the current, clean ``HEAD``.  Submits the manifest as ONE
     job (one PUB per circuit), writes ``paper/hardware/jobs_<date>.json`` and
     the ``runs/jobs.jsonl`` ledger, prints the job id and exits.  It never
-    waits for results and refuses to submit twice for one date.
+    waits for results and refuses to submit twice for one date.  A design
+    manifest must also pass: ``preregistration_<date>.json`` exists, was made
+    from this manifest, is committed, and ``HEAD`` is on ``origin/main``
+    after ``git fetch``; the checklist's "Pre-registration pushed" line names
+    the commit holding it and its sha256; the calibration entries of the
+    job's qubits are unchanged since the plan (or ``--accept-recalibration``).
 
 ``--collect --jobs paper/hardware/jobs_<date>.json``
     Fetch each job's result (or decode a dry run's saved result), map PUBs to
@@ -156,6 +173,7 @@ from dgssp.mitigation import (  # noqa: E402
     mitiq_is_available,
     plan_zne_batch,
 )
+from dgssp.mitigation.zne import REPORT_BOUNDS, RESOLVED_RULE  # noqa: E402
 from dgssp.runtime import (  # noqa: E402
     backend_name,
     counts_from_result,
@@ -189,6 +207,12 @@ from sim_campaign import (  # noqa: E402
 MANIFEST_SCHEMA = "dgssp/paper/hardware-manifest/1"
 JOBS_SCHEMA = "dgssp/paper/hardware-jobs/1"
 PROBE_SCHEMA = "dgssp/paper/hardware-probe/1"
+DESIGN_SCHEMA = "dgssp/paper/hardware-design/1"
+PREREG_SCHEMA = "dgssp/paper/preregistration/1"
+
+#: ``--offline-backend snapshot:<calibration file>`` plans against a saved
+#: calibration instead of a bundled fake device (rehearsal only).
+SNAPSHOT_PREFIX = "snapshot:"
 
 #: Server-side QPU cap on the probe job.  Two PUBs at 4096 shots are expected
 #: to cost about 10 s; the cap bounds a surprise at 10 % of the allowance.
@@ -258,7 +282,7 @@ VERIFY_URLS: dict[str, str] = {
 DRIFT_MIN_SIGNAL = 0.25
 
 #: Check-boxes CHECKLIST_template.md carries; a filled checklist must keep all.
-CHECKLIST_MIN_BOXES = 10
+CHECKLIST_MIN_BOXES = 11
 
 SETUP_INSTRUCTIONS = f"""
 IBM Quantum setup -- do this once per PowerShell window, before --plan or --submit
@@ -539,13 +563,18 @@ def connect(name: str, *, offline: bool, instance: str | None) -> tuple[Any, Any
     -------
     tuple
         ``(service_or_None, backend, source)``, ``source`` = ``"live"`` /
-        ``"fake"``.
+        ``"fake"`` / ``"snapshot"`` (``--offline-backend snapshot:<file>``: a
+        saved calibration, e.g. a past plan's, rebuilt as the device it
+        describes -- same name, same target, so pins from that device resolve).
 
     Raises
     ------
     SystemExit
         If the token is not in the environment.
     """
+    if offline and name.startswith(SNAPSHOT_PREFIX):
+        return None, load_noise_model(resolve(name.removeprefix(SNAPSHOT_PREFIX))).backend, \
+            "snapshot"
     if offline:
         return None, resolve_fake_backend(name), "fake"
     token = os.environ.get(TOKEN_ENV)
@@ -629,6 +658,13 @@ def remaining_allowance(
             if isinstance(limit, (int, float)) and isinstance(used, (int, float)):
                 return float(limit - used), "service.usage() limit - consumed", raw
     return OPEN_PLAN_SECONDS, "ASSUMED full Open-plan allowance (unverified)", raw
+
+
+def snapshot_raw_properties(name: str) -> dict[str, Any] | None:
+    """The ``raw_properties`` a ``snapshot:<file>`` backend's file froze, or ``None``."""
+    stored = json.loads(resolve(name.removeprefix(SNAPSHOT_PREFIX)).read_text(encoding="utf-8"))
+    raw = stored.get("raw_properties")
+    return dict(raw) if isinstance(raw, Mapping) else None
 
 
 def account_facts_status(path: Path, name: str) -> dict[str, Any]:
@@ -924,6 +960,230 @@ def select_sweep_iterations(
     return out
 
 
+# ---------------------------------------------------------------------------
+# --design: a job described by a design file
+# ---------------------------------------------------------------------------
+
+#: How a trim step may shrink a record when the estimate is over the cap.
+TRIM_DROPS: tuple[str, ...] = ("folds", "record")
+
+
+def load_design(path: Path) -> dict[str, Any]:
+    """
+    A design file, checked: every record a pin of a saved circuit, every grid named.
+
+    Raises
+    ------
+    ValueError
+        On a wrong schema, a record whose key is not its pin's record key, a
+        source that is not a past job's circuit, an unknown grid, a duplicate
+        record, or a trim step naming an unknown record or action.
+    """
+    if not path.exists():
+        raise ValueError(f"{rel(path)} does not exist.")
+    design = json.loads(path.read_text(encoding="utf-8"))
+    if design.get("schema") != DESIGN_SCHEMA:
+        raise ValueError(f"{rel(path)} is not a {DESIGN_SCHEMA} file.")
+    grids = design["grids"]
+    keys: list[str] = []
+    for record in design["records"]:
+        pin = parse_pin(record["source"])
+        if pin["date"] is None:
+            raise ValueError(f"{record['key']}: a design record reuses a past job's circuit "
+                             "(KEY:TAG=<date>), not a typed layout.")
+        if pin["record_key"] != record["key"]:
+            raise ValueError(f"{record['key']}: its source {record['source']} makes record "
+                             f"{pin['record_key']}.")
+        unknown = [g for g in record["grids"] if g not in grids]
+        if unknown:
+            raise ValueError(f"{record['key']}: unknown grid(s) {unknown}.")
+        if record["key"] in keys:
+            raise ValueError(f"{record['key']} appears twice.")
+        keys.append(record["key"])
+    for name, spec in grids.items():
+        if not isinstance(spec, list) and spec.get("planner") != "plan_scales_spacing":
+            raise ValueError(f"grid {name}: a fixed list of scales or the "
+                             "plan_scales_spacing rule.")
+    for step in design.get("trim_order", []):
+        if step["record"] not in keys or step["drop"] not in TRIM_DROPS:
+            raise ValueError(f"trim step {step}: unknown record or action ({TRIM_DROPS}).")
+    return design
+
+
+def design_value(spec: Mapping[str, Any]) -> float:
+    """A number a design names by file and key path -- never typed into the design."""
+    node: Any = json.loads(resolve(spec["file"]).read_text(encoding="utf-8"))
+    for key in spec["path"]:
+        node = node[key]
+    return float(node)
+
+
+def design_alphas(design: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Each named alpha of a design, resolved: ``{name: {value, scale_only, file, path}}``."""
+    return {
+        name: {"value": design_value(spec), "scale_only": spec.get("scale_only", "all"),
+               "file": spec["file"], "path": list(spec["path"])}
+        for name, spec in design["alpha"].items()
+    }
+
+
+def union_scales(grids: Mapping[str, Sequence[float]]) -> list[float]:
+    """Every scale of a record's named grids, lambda = 1 included, increasing."""
+    return sorted({1.0, *(float(s) for grid in grids.values() for s in grid)})
+
+
+def plan_rule_grid(
+    pin: Mapping[str, Any],
+    device: Any,
+    *,
+    alpha: float,
+    shots: int,
+    spec: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    A record's "rule" grid: :func:`plan_scales_spacing` on its simulated signal.
+
+    The survival the planner takes is the record's own lambda = 1 signal kept,
+    simulated from the full noise model of the plan calibration with every
+    error times ``alpha`` (not the gate-count shortcut ``S**alpha``, which
+    fails with depth), on the very ISA circuit the job will send.
+
+    Returns
+    -------
+    dict
+        The planner's inputs, the grid, its first step beside
+        :func:`optimal_step`'s, and the predicted SE.
+
+    Raises
+    ------
+    ValueError
+        If the simulated signal is not strictly between random and ideal, or
+        fewer than two scales are admissible.
+    """
+    from qiskit_aer import AerSimulator
+
+    from dgssp.backends import scale_calibration_errors
+    from dgssp.mitigation.zne import optimal_step, plan_scales_spacing, predicted_se
+    from sim_campaign import PLAN_CANDIDATES, PLAN_K
+
+    row = pin["row"]
+    instance = SubsetSumInstance(items=list(row["items"]), target=row["target"], name=row["name"])
+    sols = list(row["solution_bitstrings"])
+    p_ideal = distribution_solution_probability(
+        exact_index_distribution(instance, int(pin["iterations"])), sols)
+    p_uniform = int(row["M"]) / 2 ** int(row["n_items"])
+    scaled, info = scale_calibration_errors(device, alpha)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        job = submit_sampler_job(AerSimulator.from_backend(scaled), [pin["isa"]], shots=shots,
+                                 seed_simulator=SEED_SIMULATOR, run_log=None,
+                                 meta={"stage": "design_rule_grid", "record": pin["record_key"]})
+        counts = counts_from_result(job.result())[0]
+    p_1 = solution_probability(counts, sols)
+    kept = (p_1 - p_uniform) / (p_ideal - p_uniform)
+    if not 0.0 < kept < 1.0:
+        raise ValueError(f"{pin['record_key']}: simulated signal kept {kept:.3f} at alpha "
+                         f"{alpha:g}; the rule grid needs 0 < kept < 1.")
+    signal = p_ideal - p_uniform
+    grid = plan_scales_spacing(kept, signal, shots, PLAN_CANDIDATES, PLAN_K,
+                               p_uniform=p_uniform, n_points=int(spec["n_points"]))
+    if len(grid) < 2:
+        raise ValueError(f"{pin['record_key']}: no second scale is admissible.")
+    rate = -math.log(kept)
+    best = optimal_step(rate)
+    return {
+        "record": pin["record_key"],
+        "planner": "dgssp.mitigation.zne.plan_scales_spacing",
+        "candidates": list(PLAN_CANDIDATES),
+        "k": PLAN_K,
+        "n_points": int(spec["n_points"]),
+        "alpha": alpha,
+        "scale_info": info,
+        "shots": shots,
+        "seed_simulator": SEED_SIMULATOR,
+        "p_lambda1_simulated": p_1,
+        "p_ideal": p_ideal,
+        "p_uniform": p_uniform,
+        "survival": kept,
+        "rate": rate,
+        "grid": [float(s) for s in grid],
+        "step": float(grid[1]) - 1.0,
+        "c_step": rate * (float(grid[1]) - 1.0),
+        "optimal_step": best["step"],
+        "c_optimal_step": best["c_step"],
+        "predicted_se": predicted_se(grid, kept, signal, p_uniform, shots),
+    }
+
+
+def usage_rate(dates: Sequence[str], hardware_dir: Path) -> dict[str, Any]:
+    """
+    What past jobs charged per second of their schedule model.
+
+    For each date: ``usage_seconds`` of its main job (``usage.json``) over
+    the ``floor_seconds`` of its manifest.  The largest ratio is the one the
+    estimate uses, so the job is costed at the worst rate measured.
+
+    Raises
+    ------
+    ValueError
+        If a job's usage or floor is not on file.
+    """
+    usage = json.loads((hardware_dir / "usage.json").read_text(encoding="utf-8"))
+    rows = []
+    for date in dates:
+        manifest = json.loads((hardware_dir / f"manifest_{date}.json").read_text(encoding="utf-8"))
+        jobs = json.loads((hardware_dir / f"jobs_{date}.json").read_text(encoding="utf-8"))
+        job_id = jobs["jobs"][0]["job_id"]
+        used = (usage.get(job_id) or {}).get("usage_seconds")
+        floor = manifest["estimate"].get("floor_seconds")
+        if not isinstance(used, (int, float)) or not floor:
+            raise ValueError(f"{date}: no usage ({used}) or floor ({floor}) on file.")
+        rows.append({"date": date, "job_id": job_id, "usage_seconds": float(used),
+                     "floor_seconds": float(floor), "ratio": float(used) / float(floor)})
+    return {"model": "usage_seconds / floor_seconds of past jobs; the largest is used",
+            "jobs": rows, "ratio": max(r["ratio"] for r in rows)}
+
+
+def apply_trim(
+    step: Mapping[str, Any],
+    pins: list[dict[str, Any]],
+    grids: dict[str, dict[str, list[float]]],
+    drift_keys: list[str],
+) -> None:
+    """One trim step, in place: drop a record's folds, or the record itself."""
+    key = step["record"]
+    if step["drop"] == "folds":
+        grids[key] = {}
+        return
+    pins[:] = [p for p in pins if p["record_key"] != key]
+    grids.pop(key, None)
+    if key in drift_keys:
+        drift_keys.remove(key)
+
+
+def pinned_two_q_check(record_rows: Sequence[Mapping[str, Any]],
+                       circuit_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Each pinned record's lambda = 1 two-qubit count beside its source job's."""
+    by_pub = {c["pub_index"]: c for c in circuit_rows}
+    out = []
+    for row in record_rows:
+        source = row.get("pinned_from")
+        if not isinstance(source, Mapping):
+            continue
+        source_manifest = json.loads(resolve(source["manifest"]).read_text(encoding="utf-8"))
+        source_row = next(c for c in source_manifest["circuits"]
+                          if c["pub_index"] == source["pub_index"])
+        pub = row["pub_indices"][row["nominal_scales"].index(1.0)]
+        out.append({"record": row["key"], "source": source["manifest"],
+                    "source_pub": source["pub_index"], "two_q": by_pub[pub]["two_q_count"],
+                    "source_two_q": source_row["two_q_count"],
+                    "physical_qubits": by_pub[pub]["physical_qubits"],
+                    "source_physical_qubits": source_row["physical_qubits"],
+                    "equal": by_pub[pub]["two_q_count"] == source_row["two_q_count"]
+                    and by_pub[pub]["physical_qubits"] == source_row["physical_qubits"]})
+    return out
+
+
 def build_job(
     backend: Any,
     subset_rows: Sequence[Mapping[str, Any]],
@@ -994,8 +1254,11 @@ def build_job(
     pinned_from: dict[str, Any] = {}
     for pin in pins:
         print(f"  pinned {pin['record_key']} on {pin['layout']} (seed {pin['seed']})")
+        # A design gives each pinned record its own scales (the union of its
+        # named grids); otherwise every record runs the job's scales.
         entries.append((pin["record_key"], "pinned",
-                        pinned_variant(pin, backend, cfg.scales), int(pin["row"]["r_opt"])))
+                        pinned_variant(pin, backend, pin.get("scales", cfg.scales)),
+                        int(pin["row"]["r_opt"])))
         pinned_from[pin["record_key"]] = pin["pinned_from"]
     for srow in sweep_rows:
         name = srow["name"]
@@ -1049,7 +1312,9 @@ def build_job(
         record_rows.append(
             {
                 "key": key,
-                "kind": "zne",
+                # A record run at lambda = 1 only has nothing to extrapolate:
+                # it is analysed unmitigated, as a drift repeat is.
+                "kind": "single" if [float(s) for s in plan["nominal"]] == [1.0] else "zne",
                 "instance": item.name,
                 "role": role,
                 "items": list(item.instance.items),
@@ -1154,6 +1419,7 @@ def estimate_qpu_time(
     overhead: float,
     remaining: float,
     remaining_source: str,
+    usage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     The QPU-time estimate and the schedule-based floor it is checked against.
@@ -1163,6 +1429,12 @@ def estimate_qpu_time(
     floor, ``sum shots x (scheduled duration + rep_delay)``, is the
     ``qpu_budget.py`` model: execution only, no overhead.  Each row gains
     ``duration_s``.
+
+    With ``usage`` (:func:`usage_rate`, a design's ``estimate``) the estimate
+    is ``ratio x floor x 2`` instead: this job's own schedule model at the
+    worst charge-to-floor ratio past jobs measured, overhead included in the
+    ratio (the result's ``per_shot_time_s`` is that over the shots, and
+    ``per_circuit_overhead_s`` is 0).
 
     Returns
     -------
@@ -1185,7 +1457,16 @@ def estimate_qpu_time(
     total_shots = shots * len(circuit_rows)
     floor = sum(shots * (d + rep_delay) for d in known) if known else None
     longest_per_shot = (max(known) + rep_delay) if known else None
-    if per_shot is None:
+    formula = "(total_shots * per_shot_time_s + n_circuits * per_circuit_overhead_s) * safety_factor"
+    if usage is not None:
+        if floor is None or len(known) < len(durations):
+            raise SystemExit("Some circuit has no calibrated duration; the usage-based "
+                             "estimate needs the whole schedule model.")
+        per_shot = float(usage["ratio"]) * floor / total_shots
+        overhead = 0.0
+        per_shot_source = "usage / floor of " + ", ".join(r["date"] for r in usage["jobs"])
+        formula = "usage_ratio * floor_seconds * safety_factor"
+    elif per_shot is None:
         if longest_per_shot is None or len(known) < len(durations):
             raise SystemExit("Some circuit has no calibrated duration; pass --per-shot-time.")
         per_shot, per_shot_source = longest_per_shot, "auto: longest circuit + rep_delay"
@@ -1193,8 +1474,9 @@ def estimate_qpu_time(
         per_shot_source = "--per-shot-time"
     estimate = (total_shots * per_shot + len(circuit_rows) * overhead) * SAFETY_FACTOR
     cap = BUDGET_FRACTION * remaining
+    extra = {"usage_rate": dict(usage)} if usage is not None else {}
     return {
-        "formula": "(total_shots * per_shot_time_s + n_circuits * per_circuit_overhead_s) * safety_factor",
+        "formula": formula,
         "per_shot_time_s": per_shot,
         "per_shot_time_source": per_shot_source,
         "per_circuit_overhead_s": overhead,
@@ -1209,7 +1491,7 @@ def estimate_qpu_time(
         "longest_circuit_s": max(known) if known else None,
         "longest_per_shot_s": longest_per_shot,
         "per_shot_below_longest_circuit": (
-            longest_per_shot is not None and per_shot < longest_per_shot
+            usage is None and longest_per_shot is not None and per_shot < longest_per_shot
         ),
         "remaining_allowance_seconds": remaining,
         "remaining_allowance_source": remaining_source,
@@ -1224,6 +1506,7 @@ def estimate_qpu_time(
             + " (quick rule there: 2 s + 0.00035 s per execution)."
         ),
         "device_limits": limits,
+        **extra,
     }
 
 
@@ -1249,8 +1532,26 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
     for orphan in orphans:
         print(f"note: replacing {rel(orphan)}, left over from an unfinished plan.")
 
+    design: dict[str, Any] | None = None
+    if args.design:
+        clashing = [flag for flag, value in (("--pin-layout", args.pin_layout),
+                                              ("--drift", args.drift), ("--only", args.only),
+                                              ("--sweep-iterations", args.sweep_iterations))
+                    if value]
+        if clashing:
+            print(f"REFUSED: --design names every record, grid and drift repeat; drop "
+                  f"{', '.join(clashing)}.")
+            return 1
+        try:
+            design = load_design(Path(args.design))
+        except ValueError as exc:
+            print(f"REFUSED: {exc}")
+            return 1
+        args.shots, args.twirling, args.dd = int(design["shots"]), design["twirling"], design["dd"]
+
     print(SETUP_INSTRUCTIONS if not args.offline_backend else
-          "OFFLINE REHEARSAL: fake device, no service; --submit will refuse this manifest.")
+          "OFFLINE REHEARSAL: fake device or saved calibration, no service; --submit will "
+          "refuse this manifest.")
 
     service, backend, source = connect(name, offline=bool(args.offline_backend),
                                        instance=args.instance)
@@ -1277,12 +1578,45 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
     subset_rows = list(subset["selected"])
     sweep_rows = list(sweep["instances"])
     instance_rows = {r["name"]: r for r in [*sweep_rows, *subset_rows]}
+    if design is not None and backend_name(backend) != design["device"]:
+        print(f"REFUSED: the design is for {design['device']}, not {backend_name(backend)}.")
+        return 1
+    pin_specs = ([r["source"] for r in design["records"]] if design is not None
+                 else args.pin_layout or [])
     try:
-        pins = resolve_pins(args.pin_layout or [], instance_rows, args.hardware_dir,
-                            backend_name(backend))
+        pins = resolve_pins(pin_specs, instance_rows, args.hardware_dir, backend_name(backend))
     except ValueError as exc:
         print(f"REFUSED: {exc}")
         return 1
+
+    grids: dict[str, dict[str, list[float]]] = {}
+    rule_grids: dict[str, Any] = {}
+    alphas: dict[str, Any] = {}
+    drift_keys = list(args.drift) if args.drift else None
+    if design is not None:
+        subset_rows, sweep_rows = [], []
+        alphas = design_alphas(design)
+        for record, pin in zip(design["records"], pins, strict=True):
+            grids[record["key"]] = {}
+            for grid_name in record["grids"]:
+                spec = design["grids"][grid_name]
+                if isinstance(spec, list):
+                    grids[record["key"]][grid_name] = [float(x) for x in spec]
+                    continue
+                print(f"  rule grid of {record['key']}: simulating lambda = 1 at alpha "
+                      f"{alphas[spec['alpha']]['value']:g} ({spec['alpha']})")
+                try:
+                    rule = plan_rule_grid(pin, backend, alpha=alphas[spec["alpha"]]["value"],
+                                          shots=args.shots, spec=spec)
+                except ValueError as exc:
+                    print(f"REFUSED: {exc}")
+                    return 1
+                rule_grids[record["key"]] = rule
+                grids[record["key"]][grid_name] = rule["grid"]
+        drift_keys = [r["key"] for r in design["records"] if r.get("drift")]
+        args.drift, args.pin_layout = drift_keys, pin_specs
+        args.scales = union_scales({f"{k}/{n}": g for k, gs in grids.items()
+                                    for n, g in gs.items()})
     if args.only:
         subset_rows = [r for r in subset_rows if r["name"] in args.only]
         sweep_rows = [r for r in sweep_rows if r["name"] in args.only]
@@ -1292,17 +1626,78 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
         sweep_rows = select_sweep_iterations(sweep_rows, args.sweep_iterations)
 
     cfg = analysis_config(args.shots, args.scales, args.seed_max)
-    try:
-        circuits, record_rows, circuit_rows = build_job(
-            backend, subset_rows, sweep_rows, cfg, pins=pins, drift_keys=args.drift
-        )
-    except ValueError as exc:
-        print(f"REFUSED: {exc}")
-        return 1
-    for row in circuit_rows:
-        row["shots"] = args.shots
-
     remaining, remaining_source, usage_raw = remaining_allowance(service, args.remaining_seconds)
+    rate = None
+    if design is not None and design.get("estimate"):
+        try:
+            rate = usage_rate(design["estimate"]["jobs"], args.hardware_dir)
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"REFUSED: the design's estimate needs past usage: {exc}")
+            return 1
+    trims = list(design.get("trim_order", [])) if design is not None else []
+    trimmed: list[dict[str, Any]] = []
+    while True:
+        for pin in pins:
+            if pin["record_key"] in grids:
+                pin["scales"] = union_scales(grids[pin["record_key"]])
+        try:
+            circuits, record_rows, circuit_rows = build_job(
+                backend, subset_rows, sweep_rows, cfg, pins=pins, drift_keys=drift_keys
+            )
+        except ValueError as exc:
+            print(f"REFUSED: {exc}")
+            return 1
+        for row in circuit_rows:
+            row["shots"] = args.shots
+        estimate = estimate_qpu_time(
+            circuit_rows, circuits, backend, shots=args.shots, per_shot=args.per_shot_time,
+            overhead=args.overhead, remaining=remaining, remaining_source=remaining_source,
+            usage=rate,
+        )
+        if estimate["within_budget"] or not trims:
+            break
+        step = trims.pop(0)
+        print(f"  over the cap ({estimate['estimated_seconds']:.1f} s > "
+              f"{estimate['budget_cap_seconds']:.1f} s): trimming the {step['drop']} of "
+              f"{step['record']} (removes {', '.join(step.get('removes', []))})")
+        apply_trim(step, pins, grids, drift_keys if drift_keys is not None else [])
+        trimmed.append({**step, "estimate_before_s": estimate["estimated_seconds"]})
+
+    design_block: dict[str, Any] | None = None
+    if design is not None:
+        by_key = {r["key"]: r for r in design["records"]}
+        for row in record_rows:
+            if row["kind"] in ("zne", "single"):
+                row["grids"] = grids[row["key"]]
+                row["circuit_set"] = by_key[row["key"]].get("circuit_set")
+        two_q = pinned_two_q_check(record_rows, circuit_rows)
+        design_path = Path(args.design)
+        design_block = {
+            "file": rel(design_path),
+            "sha256": sha256_file(design_path),
+            "name": design.get("name"),
+            "records": [{"key": r["key"], "source": r["source"],
+                         "grids": grids.get(r["key"]), "drift": bool(r.get("drift")),
+                         "circuit_set": r.get("circuit_set"),
+                         "in_job": r["key"] in grids} for r in design["records"]],
+            "alphas": alphas,
+            "rule_grids": rule_grids,
+            "trimmed": trimmed,
+            "two_q_check": two_q,
+            "two_q_equal": all(c["equal"] for c in two_q),
+            "report_bounds": REPORT_BOUNDS,
+            "resolved_rule": RESOLVED_RULE,
+        }
+        if not design_block["two_q_equal"]:
+            print("REFUSED: a pinned circuit differs from its source job's: "
+                  + "; ".join(f"{c['record']} {c['two_q']} vs {c['source_two_q']}"
+                              for c in two_q if not c["equal"]))
+            return 1
+        declared = (design.get("report_bounds"), design.get("resolved_rule"))
+        if declared != (REPORT_BOUNDS, RESOLVED_RULE):
+            print(f"REFUSED: the design declares REPORT_BOUNDS, RESOLVED_RULE = {declared}; "
+                  f"the code has {REPORT_BOUNDS}, {RESOLVED_RULE}.")
+            return 1
     options = sampler_options(args.shots, twirling=args.twirling == "on",
                               dd=args.dd == "on", date=paths.date,
                               max_execution_time=math.floor(BUDGET_FRACTION * remaining))
@@ -1322,7 +1717,8 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
             NoiseModel.from_backend(backend),
             backend,
             overwrite=True,
-            raw_properties=raw_properties(backend),
+            raw_properties=(snapshot_raw_properties(name) if source == "snapshot"
+                            else raw_properties(backend)),
         )
         snapshot = load_noise_model(paths.calibration)
     except BaseException:
@@ -1337,11 +1733,6 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
     )
     stamp_after = fresh_calibration_stamp(backend)
     calibration_stable = stamp_before == stamp_after
-
-    estimate = estimate_qpu_time(
-        circuit_rows, circuits, backend, shots=args.shots, per_shot=args.per_shot_time,
-        overhead=args.overhead, remaining=remaining, remaining_source=remaining_source,
-    )
 
     limits = estimate["device_limits"]
     limit_problems = []
@@ -1445,6 +1836,8 @@ def run_plan(args: argparse.Namespace, paths: Paths) -> int:
         "verify": VERIFY_URLS,
         "provenance": record_provenance(backend),
     }
+    if design_block is not None:
+        manifest["design"] = design_block
     write_json(paths.manifest, manifest)
     print_plan_summary(manifest)
 
@@ -1505,6 +1898,35 @@ def print_plan_summary(manifest: Mapping[str, Any]) -> None:
         print("levers: a measured --per-shot-time / --overhead (see below), --shots 2048, "
               "--no-sweep, or fewer --scales. Each changes the experiment; decide, then re-plan.")
     print(f"verify per-shot time and overhead: {est['verify']}")
+    if est.get("usage_rate"):
+        for row in est["usage_rate"]["jobs"]:
+            print(f"  usage / floor {row['date']}: {row['usage_seconds']:g} s / "
+                  f"{row['floor_seconds']:.1f} s = {row['ratio']:.3f}")
+        print(f"  estimate = {est['usage_rate']['ratio']:.3f} x floor {est['floor_seconds']:.1f} s "
+              f"x {est['safety_factor']:g} = {est['estimated_seconds']:.1f} s")
+    design = manifest.get("design")
+    if design:
+        print(f"\ndesign {design['file']} (sha256 {design['sha256'][:12]}), REPORT_BOUNDS = "
+              f"{design['report_bounds']}, RESOLVED_RULE = {design['resolved_rule']}")
+        for name, alpha in design["alphas"].items():
+            print(f"  alpha {name} = {alpha['value']:g} ({alpha['scale_only']} errors; "
+                  f"{alpha['file']}: {'.'.join(alpha['path'])})")
+        for row in design["records"]:
+            grids = row["grids"] or {}
+            text = "; ".join(f"{n} {g}" for n, g in grids.items()) or "lambda = 1 only"
+            print(f"  {row['key']:<20} {text}{'  (drift)' if row['drift'] else ''}"
+                  f"{'' if row['in_job'] else '  TRIMMED'}")
+        for key, rule in design["rule_grids"].items():
+            print(f"  rule grid {key}: kept {rule['survival']:.4f} (c = {rule['rate']:.3f}) -> "
+                  f"{rule['grid']}; step {rule['step']:g} (c step {rule['c_step']:.3f}) vs "
+                  f"optimal_step {rule['optimal_step']:.3f} (c step {rule['c_optimal_step']:.3f})")
+        for step in design["trimmed"]:
+            print(f"  TRIMMED: {step['drop']} of {step['record']} (removes "
+                  f"{', '.join(step.get('removes', []))})")
+        print("  pinned 2Q counts vs source jobs: "
+              + ", ".join(f"{c['record']} {c['two_q']}/{c['source_two_q']}"
+                          for c in design["two_q_check"])
+              + (" -> all equal" if design["two_q_equal"] else " -> MISMATCH"))
 
 
 # ---------------------------------------------------------------------------
@@ -1750,6 +2172,8 @@ def build_records(
             if result.mitiq is not None:
                 result.mitiq["fold_source"] = MITIQ_FOLD_SOURCE
             extra["hardware"]["mitiq"] = MITIQ_FOLD_SOURCE if with_mitiq else "mitiq not installed"
+        elif row["kind"] == "single":
+            result = drift_result(prepared, counts[pubs[0]], reference, device, manifest, job_id)
         else:
             first = counts[row["repeat_of_pub"]]
             repeat = counts[pubs[0]]
@@ -1787,7 +2211,7 @@ def drift_result(
     manifest: Mapping[str, Any],
     job_id: str | None,
 ) -> InstanceResult:
-    """The unmitigated result of a drift-repeat PUB."""
+    """The unmitigated result of one PUB: a drift repeat, or a ``single`` record."""
     sols = list(prepared.solution_bitstrings)
     p_sol, lo, hi = bootstrap_metric(
         counts, lambda c: solution_probability(c, sols), BOOTSTRAP_B, BOOTSTRAP_SEED
@@ -1980,13 +2404,119 @@ def run_dry_run(args: argparse.Namespace, paths: Paths) -> int:
 # ---------------------------------------------------------------------------
 
 _BOX = re.compile(r"^\s*[-*]\s*\[(?P<mark>[ xX])\]\s*(?P<text>.*)$")
+_PUSHED = re.compile(r"commit\s+(?P<commit>[0-9a-f]{7,40})\b.*?sha256\s+(?P<sha>[0-9a-f]{64})\b")
+
+#: Where the files a design job adds after its code commit may live: the
+#: hardware folder, and the data folders named after the job's date
+#: (:func:`is_job_file`).
+JOB_FILE_PREFIXES: tuple[str, ...] = ("paper/hardware/",)
+
+
+def git(*arguments: str) -> tuple[int, str]:
+    """``git <arguments>`` in the repository: ``(exit code, stdout + stderr)``."""
+    import subprocess
+
+    done = subprocess.run(["git", *arguments], cwd=REPO_ROOT, capture_output=True, text=True,
+                          check=False)
+    return done.returncode, (done.stdout + done.stderr).strip()
+
+
+def is_job_file(path: str, date: str) -> bool:
+    """A file a design job adds after its code commit (plan, dry run, pre-registration)."""
+    if path.startswith(JOB_FILE_PREFIXES):
+        return True
+    parts = path.split("/")
+    return len(parts) >= 3 and parts[:2] == ["paper", "data"] and f"_{date}" in parts[2]
+
+
+def preregistration_path(paths: Paths) -> Path:
+    """``paper/hardware/preregistration_<date>.json``."""
+    return paths.hardware_dir / f"preregistration_{paths.date}.json"
+
+
+def preregistration_gate(paths: Paths, manifest_sha: str) -> tuple[list[str], dict[str, Any]]:
+    """
+    Every reason a design job's pre-registration does not allow a submission.
+
+    The pre-registration exists, is the one made from this manifest, is
+    committed exactly as it is on disk, and ``HEAD`` is on ``origin/main``
+    after a ``git fetch`` -- so GitHub holds it before the job exists.
+
+    Returns
+    -------
+    tuple
+        ``(problems, facts)``: ``facts`` holds the file, its sha256, the
+        remote's ``main`` as fetched and when, for the jobs file.
+    """
+    path = preregistration_path(paths)
+    if not path.exists():
+        return [f"{rel(path)} does not exist; run preregister.py --date {paths.date}."], {}
+    problems: list[str] = []
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    facts: dict[str, Any] = {"file": rel(path), "sha256": sha256_file(path)}
+    if doc.get("schema") != PREREG_SCHEMA:
+        problems.append(f"{rel(path)} is not a {PREREG_SCHEMA} file.")
+    if doc.get("manifest_sha256") != manifest_sha:
+        problems.append(f"{rel(path)} was made from another manifest (its manifest sha256 "
+                        f"{str(doc.get('manifest_sha256'))[:12]} != {manifest_sha[:12]}).")
+    code, _ = git("ls-files", "--error-unmatch", rel(path))
+    if code:
+        problems.append(f"{rel(path)} is not committed.")
+    else:
+        code, out = git("status", "--porcelain", "--", rel(path))
+        if code or out:
+            problems.append(f"{rel(path)} differs from HEAD; commit it.")
+    code, out = git("fetch", "origin")
+    if code:
+        problems.append(f"git fetch origin failed: {out}")
+    code, _ = git("merge-base", "--is-ancestor", "HEAD", "origin/main")
+    if code:
+        problems.append("HEAD is not on origin/main: push the pre-registration first, so its "
+                        "GitHub time precedes the job.")
+    code, out = git("rev-parse", "origin/main")
+    facts["origin_main"] = out if not code else None
+    facts["checked_utc"] = utc_timestamp()
+    return problems, facts
+
+
+def check_pushed_line(text: str, prereg: Mapping[str, Any]) -> list[str]:
+    """
+    The checklist's "Pre-registration pushed" line names the commit that holds it.
+
+    The line gives a commit and a sha256: the sha256 must be the
+    pre-registration's, and the commit an ancestor of ``HEAD`` whose copy of
+    the file has that very content.
+    """
+    match = _PUSHED.search(text)
+    if match is None:
+        return [f"pre-registration line needs 'commit <hash>, sha256 <64 hex>': {text}"]
+    problems = []
+    if match["sha"] != prereg["sha256"]:
+        problems.append(f"pre-registration line sha256 {match['sha'][:12]} is not the file's "
+                        f"({prereg['sha256'][:12]}).")
+    code, _ = git("merge-base", "--is-ancestor", match["commit"], "HEAD")
+    if code:
+        problems.append(f"pre-registration commit {match['commit']} is not an ancestor of HEAD.")
+        return problems
+    code, out = git("rev-parse", f"{match['commit']}:{prereg['file']}")
+    code_now, out_now = git("rev-parse", f"HEAD:{prereg['file']}")
+    if code or code_now or out != out_now:
+        problems.append(f"commit {match['commit']} does not hold {prereg['file']} as committed "
+                        "now.")
+    return problems
 _PLACEHOLDER = re.compile(r"<[a-z][a-z0-9 _-]*>|_{3,}")
 _HASH = re.compile(r"\b[0-9a-f]{7,40}\b")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 
 def check_checklist(
-    path: Path, *, head: str | None, dirty: bool | None, estimate_seconds: float
+    path: Path,
+    *,
+    head: str | None,
+    dirty: bool | None,
+    estimate_seconds: float,
+    prereg: Mapping[str, Any] | None = None,
+    date: str | None = None,
 ) -> list[str]:
     """
     Every reason the checklist does not allow a submission (empty = allowed).
@@ -2007,6 +2537,15 @@ def check_checklist(
         Whether the working tree is dirty.
     estimate_seconds:
         The manifest's estimated QPU seconds.
+    prereg:
+        A design job's pre-registration (``file``, ``sha256``).  Then the
+        "Pre-registration pushed" line must name the commit that holds it
+        (:func:`check_pushed_line`), and the pytest line may name an ancestor
+        of ``HEAD`` -- the code commit -- provided every file changed since
+        is one of the job's own (:func:`is_job_file`): a committed checklist
+        cannot name the commit that contains it.
+    date:
+        The job's date (design jobs).
 
     Returns
     -------
@@ -2027,9 +2566,15 @@ def check_checklist(
         if _PLACEHOLDER.search(text):
             problems.append(f"placeholder left: {text}")
         lower = text.lower()
+        if lower.startswith("pre-registration pushed") and prereg is not None:
+            problems.extend(check_pushed_line(text, prereg))
         if lower.startswith("pytest"):
             hashes = _HASH.findall(text)
-            if not hashes or head is None or not any(head.startswith(h) for h in hashes):
+            names_head = bool(hashes) and head is not None and any(
+                head.startswith(h) for h in hashes)
+            if prereg is not None and hashes and not names_head:
+                problems.extend(code_commit_problems(hashes[0], date or ""))
+            elif not names_head:
                 problems.append(f"pytest line does not name HEAD ({(head or '?')[:12]}): {text}")
             if dirty:
                 problems.append("working tree is dirty; commit first so the job is traceable.")
@@ -2044,7 +2589,57 @@ def check_checklist(
                                     f"manifest's {estimate_seconds:.0f} s.")
                 if estimate > BUDGET_FRACTION * remaining:
                     problems.append(f"{estimate} s exceeds {BUDGET_FRACTION:.0%} of {remaining} s.")
+    if prereg is not None and not any(b["text"].lower().startswith("pre-registration pushed")
+                                      for b in boxes):
+        problems.append("no 'Pre-registration pushed' line (CHECKLIST_template.md has one).")
     return problems
+
+
+def code_commit_problems(commit: str, date: str) -> list[str]:
+    """Why ``commit`` is not the code commit a design job's ``HEAD`` adds only job files to."""
+    code, _ = git("merge-base", "--is-ancestor", commit, "HEAD")
+    if code:
+        return [f"pytest line names {commit}, which is not an ancestor of HEAD."]
+    code, out = git("diff", "--name-only", commit, "HEAD")
+    if code:
+        return [f"git diff {commit} HEAD failed: {out}"]
+    other = [f for f in out.splitlines() if f and not is_job_file(f, date)]
+    if other:
+        return [f"files other than this job's changed since the pytest commit {commit}: "
+                + ", ".join(other[:5])]
+    return []
+
+
+def calibration_changes(manifest: Mapping[str, Any], backend: Any) -> list[str]:
+    """
+    Calibration entries of the job's qubits that differ from the plan's snapshot.
+
+    Instructions on the qubits (and couplers) the circuits use, and those
+    qubits' properties.  The stamp alone is not the test: the device restamps
+    without changing anything (job 2: 18:12 -> 19:08, 0 entries changed).
+    """
+    snapshot = load_noise_model(resolve(manifest["backend"]["calibration_file"]))
+    used = {int(q) for c in manifest["circuits"] for q in c["physical_qubits"]}
+    old = json_plain(calibration_payload(snapshot.backend))
+    new = json_plain(calibration_payload(backend))
+
+    def rows(payload: Mapping[str, Any], name: str) -> dict[str, Any]:
+        return {json.dumps(r["qubits"]): r for r in payload["instructions"].get(name, [])
+                if r["qubits"] is not None and set(r["qubits"]) <= used}
+
+    changed: list[str] = []
+    for name in sorted(set(old["instructions"]) | set(new["instructions"])):
+        before, after = rows(old, name), rows(new, name)
+        changed += [f"{name}{q}" for q in sorted(set(before) | set(after))
+                    if before.get(q) != after.get(q)]
+    props_old = old.get("qubit_properties") or []
+    props_new = new.get("qubit_properties") or []
+    for q in sorted(used):
+        a = props_old[q] if q < len(props_old) else None
+        b = props_new[q] if q < len(props_new) else None
+        if a != b:
+            changed.append(f"qubit {q} properties")
+    return changed
 
 
 def run_submit(args: argparse.Namespace, paths: Paths) -> int:
@@ -2070,9 +2665,17 @@ def run_submit(args: argparse.Namespace, paths: Paths) -> int:
               f"{'is for an older plan' if dry_sha else 'missing'}); run --dry-run first.")
         return 1
 
-    git = git_state(refresh=True)
-    problems = check_checklist(paths.checklist, head=git["commit"], dirty=git["dirty"],
-                               estimate_seconds=manifest["estimate"]["estimated_seconds"])
+    design = manifest.get("design") is not None
+    prereg: dict[str, Any] | None = None
+    if design:
+        gate, prereg = preregistration_gate(paths, manifest_sha)
+        if gate:
+            print("REFUSED by the pre-registration gate:\n  " + "\n  ".join(gate))
+            return 1
+    state = git_state(refresh=True)
+    problems = check_checklist(paths.checklist, head=state["commit"], dirty=state["dirty"],
+                               estimate_seconds=manifest["estimate"]["estimated_seconds"],
+                               prereg=prereg, date=paths.date)
     if problems:
         print("REFUSED by the checklist:\n  " + "\n  ".join(problems))
         return 1
@@ -2088,6 +2691,17 @@ def run_submit(args: argparse.Namespace, paths: Paths) -> int:
         print(f"note: the device recalibrated since --plan ({manifest['backend']['calibration_timestamp']}"
               f" -> {stamp}). The circuits stay valid if the check below passes; the dry-run "
               "prediction used the older calibration.")
+    changes: list[str] = []
+    if design:
+        changes = calibration_changes(manifest, backend)
+        print(f"calibration entries of the job's qubits changed since --plan: {len(changes)}"
+              + (f" ({', '.join(changes[:8])}{', ...' if len(changes) > 8 else ''})"
+                 if changes else ""))
+        if changes and not args.accept_recalibration:
+            print("REFUSED: the calibration of the job's qubits changed since the plan the "
+                  "pre-registration predicted from. Re-plan, or pass --accept-recalibration "
+                  "(the predictions are re-run on the execution calibration afterwards).")
+            return 1
     circuits, shots, options = job_inputs(manifest, circuits)
     check = preflight_sampler_job(backend, circuits, shots=shots, options=options)
     if not check["passed"]:
@@ -2128,6 +2742,10 @@ def run_submit(args: argparse.Namespace, paths: Paths) -> int:
         "created_utc": utc_timestamp(),
         "provenance": record_provenance(),
     }
+    if design:
+        jobs_doc["preregistration"] = prereg
+        jobs_doc["calibration_changes_since_plan"] = changes
+        jobs_doc["accepted_recalibration"] = bool(args.accept_recalibration)
     write_json(paths.jobs, jobs_doc)
     print(f"SUBMITTED job {job_id} ({len(circuits)} PUBs x {shots} shots) to "
           f"{backend_name(backend)} in {args.mode} mode.")
@@ -2736,7 +3354,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--backend", default=None,
                         help="Live device name (the primary in account_facts.md).")
     parser.add_argument("--offline-backend", default=None,
-                        help="Rehearse --plan on a bundled fake device (no service).")
+                        help="Rehearse --plan on a bundled fake device, or on a saved "
+                             "calibration with snapshot:<file> (no service).")
     parser.add_argument("--instance", default=None,
                         help=f"Instance CRN; default ${INSTANCE_ENV}.")
     parser.add_argument("--date", default=None,
@@ -2761,6 +3380,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--drift", nargs="+", default=None, metavar="KEY",
                         help="Record keys to repeat at scale 1 for the drift check, instead "
                              "of the two smallest informative instances.")
+    parser.add_argument("--design", default=None, metavar="FILE",
+                        help="--plan from a design file (records, named grids, drift, "
+                             "trim order, criteria); replaces --pin-layout/--drift/--only.")
+    parser.add_argument("--accept-recalibration", action="store_true",
+                        help="--submit a design manifest although the calibration entries "
+                             "of its qubits changed since --plan.")
     parser.add_argument("--twirling", choices=("on", "off"), default="on")
     parser.add_argument("--dd", choices=("on", "off"), default="off",
                         help="Dynamical decoupling. Off by design (see DD_SEQUENCE).")
