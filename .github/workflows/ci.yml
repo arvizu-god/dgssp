@@ -23,9 +23,21 @@ jobs:
           cache: pip
 
       - name: Install package and dev extras
+        # Constrained to the paper's pinned versions (paper/requirements-lock.txt).
+        # Unpinned, pip takes the newest Qiskit, whose transpiler routes the
+        # recorded hardware circuits differently: qiskit 2.6.1 /
+        # qiskit-ibm-runtime 0.51.0 gave P-n4-M0-09 1231 CZs against the
+        # recorded 1206, and the reproduction test failed.  scipy 1.17 and
+        # matplotlib 3.11 have no Python 3.10 wheels, so 3.10 takes every
+        # other pin (the Qiskit stack and numpy) and pip's choice for those two.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,data,viz]"
+          if [ "${{ matrix.python-version }}" = "3.10" ]; then
+            grep -v -E '^(scipy|matplotlib)==' paper/requirements-lock.txt > "$RUNNER_TEMP/constraints.txt"
+          else
+            cp paper/requirements-lock.txt "$RUNNER_TEMP/constraints.txt"
+          fi
+          pip install -c "$RUNNER_TEMP/constraints.txt" -e ".[dev,data,viz]"
 
       - name: Lint
         run: ruff check src tests paper/scripts
@@ -53,9 +65,10 @@ jobs:
           cache: pip
 
       - name: Install package and dev extras
+        # The paper's pinned versions, as in the test job.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,data,viz]"
+          pip install -c paper/requirements-lock.txt -e ".[dev,data,viz]"
 
       - name: Type check
         # Not advisory: the paper's results files are only as trustworthy as
